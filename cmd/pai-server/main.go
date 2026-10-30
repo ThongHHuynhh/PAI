@@ -202,11 +202,12 @@ func finish(h handover, quick bool) {
 
 // network waits, behind the spinner, until workers can reach the harness,
 // after the lines are printed: they name no URL, and the wait is the first
-// start's.
+// start's. Workers reach it at its public address: the user's proxy's, the
+// tunnel's, or with neither its loopback one; h.URL is only the first.
 func network(h handover) {
 	fmt.Println()
 	stop := spin("initializing network")
-	if _, err := server.Reached(h.Harness, h.URL); err != nil {
+	if _, err := server.Reached(h.Harness, h.Public()); err != nil {
 		stop("")
 		fatal(err)
 	}

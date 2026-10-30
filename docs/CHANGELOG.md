@@ -2,6 +2,10 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
+## Unreleased
+
+- Install of a server with no URL or tunnel no longer stops at "initializing network": the check now tries the server's own address. Before, `install.ps1 server` (and `install.sh server` with no terminal) failed after 20 s although the server was fine.
+
 ## v0.2.0
 
 - Sessions are named with two words, such as `calm-otter`, instead of a hex code: easy to say, type and pass to another agent (`pai message calm-otter …`). Sessions from before keep their ids.
