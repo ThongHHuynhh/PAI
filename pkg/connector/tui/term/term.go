@@ -25,6 +25,11 @@ import (
 // for ssh, where a round trip can take a few hundred ms.
 const queryWait = 500 * time.Millisecond
 
+// readSize is how much one read of stdin takes. A console window types a
+// paste as win32 key records, some 40 bytes a character with the key ups, and
+// the paste is told by arriving in one read: 64 KiB holds about 1,600.
+const readSize = 64 << 10
+
 const (
 	enter = "\x1b[?1049h" + // alternate screen
 		"\x1b[22;0t" + // push the title, popped on exit
@@ -230,7 +235,7 @@ func (t *Terminal) Recover() {
 func (t *Terminal) read() {
 	defer t.Recover()
 	var d decoder
-	buf := make([]byte, 4096)
+	buf := make([]byte, readSize)
 	for {
 		select {
 		case <-t.stop:

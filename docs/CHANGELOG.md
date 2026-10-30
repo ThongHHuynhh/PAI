@@ -4,6 +4,8 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 
 ## Unreleased
 
+- TUI paste works in a classic console window: Ctrl+V, Shift+Insert and a right click paste from the clipboard, and a paste the console types in key by key arrives as one paste, so its line breaks no longer send the message.
+- TUI message history: Up on the input's first row brings back earlier messages, Down goes forward and back to what you were typing. Kept in `~/.pai/history.jsonl`, the newest 500.
 - Install of a server with no URL or tunnel no longer stops at "initializing network": the check now tries the server's own address. Before, `install.ps1 server` (and `install.sh server` with no terminal) failed after 20 s although the server was fine.
 
 ## v0.2.0

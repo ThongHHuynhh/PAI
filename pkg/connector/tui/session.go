@@ -105,6 +105,7 @@ func newSession(a *App, l *sessionList, id string) *session {
 	s.input.Placeholder, s.input.OnSubmit = "Ask anything", s.send
 	s.slash = &slash{s: s, in: s.input, all: commands()}
 	s.input.Before = s.slash.Key
+	s.input.History = a.History
 	s.box = inputBox(a, s.input)
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})
 	s.slashBox = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{InkMuted}}, &Node{Grow: 1, Paint: PaintPanel, View: s.slash})
@@ -452,6 +453,7 @@ func (s *session) show(r statefile.Record) {
 // send posts the text. From home the screen turns to the session at once;
 // the session is made in the background and the text posted when it is.
 func (s *session) send(a *App, text string) {
+	a.Remember(text)
 	if s.id == "" && !s.started {
 		delete(s.list.drafts, "") // home's draft is sent: the next home starts empty
 	}

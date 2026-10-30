@@ -159,8 +159,50 @@ func (d *decoder) feed(b []byte, emit func(Event)) {
 	d.buf = synthetic.ReplaceAllFunc(append(d.buf, b...), d.text)
 	tail := bytes.Clone(cut.Find(d.buf)) // a CSI the read cut, maybe a record: out of the parse until it ends
 	d.buf = d.buf[:len(d.buf)-len(tail)]
-	d.parse(emit, false)
+	var evs []Event
+	d.parse(func(e Event) { evs = append(evs, e) }, false)
+	if t, ok := burst(evs); ok {
+		emit(Paste{Text: t})
+	} else {
+		for _, e := range evs {
+			emit(e)
+		}
+	}
 	d.buf = append(d.buf, tail...)
+}
+
+// burstMin is how many characters one read must carry before an Enter for
+// the read to be a paste: a person's keys come a read each, and no one types
+// that many between two reads.
+const burstMin = 8
+
+// burst is the text of a paste that came as keys, as a console window
+// pastes without paste markers: one read of text keys holding an Enter that
+// more text follows, or that burstMin characters came before. Each Enter in
+// it is a line break, not a send.
+func burst(evs []Event) (string, bool) {
+	var b strings.Builder
+	chars, enter, after := 0, false, false
+	for _, e := range evs {
+		k, ok := e.(Key)
+		if !ok || k.Mod&(Ctrl|Alt|Super) != 0 {
+			return "", false
+		}
+		switch {
+		case k.Code == KeyEnter:
+			b.WriteByte('\n')
+			enter = true
+		case k.Code == KeyTab:
+			b.WriteByte('\t')
+		case k.Text() != "":
+			b.WriteString(k.Text())
+			chars++
+			after = after || enter
+		default:
+			return "", false
+		}
+	}
+	return b.String(), enter && (after || chars >= burstMin)
 }
 
 var cut = regexp.MustCompile(`\x1b(\[[\d;]*)?$`)

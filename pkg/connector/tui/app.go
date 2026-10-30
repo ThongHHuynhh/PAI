@@ -84,6 +84,7 @@ type App struct {
 	W, H    int
 	// themeGen counts theme switches, so laid out rows know theirs are old.
 	themeGen int
+	history  []string // sent messages, oldest first; nil until read
 
 	screen  Screen
 	layers  []*Layer // over the screen, bottom first

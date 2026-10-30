@@ -34,6 +34,9 @@ type Input struct {
 	OnSubmit    func(a *App, text string)
 	OnKey       func(a *App) // after each key the input takes
 	Before      func(a *App, k term.Key) bool
+	// History, when set, is what Up on the first row steps back through,
+	// oldest first, as a shell's history.
+	History func() []string
 
 	els    []elem
 	cur    int
@@ -43,6 +46,8 @@ type Input struct {
 	anchor int    // the other end of the selection; -1 is none
 	top    int
 	view   Rect
+	hist   int    // the History entry shown; -1 is the person's own text
+	draft  []elem // their text, kept while they step through History
 }
 
 // snap is the input at one moment, for Ctrl+Z.
@@ -51,7 +56,7 @@ type snap struct {
 	cur int
 }
 
-func NewInput() *Input { return &Input{anchor: -1, MaxRows: 1} }
+func NewInput() *Input { return &Input{anchor: -1, hist: -1, MaxRows: 1} }
 
 // rows wraps at w less one column, where the cursor sits after a full row.
 func (s *Input) rows(w int) [][2]int {
@@ -106,6 +111,57 @@ func (s *Input) Text() string {
 
 func (s *Input) Clear() {
 	s.els, s.cur, s.anchor, s.top, s.undo, s.redo, s.typing = nil, 0, -1, 0, nil, nil, false
+	s.hist, s.draft = -1, nil
+}
+
+// recall shows the History entry dir steps back (-1) or forward (+1), as a
+// shell does: the first step back keeps the person's text, and a step forward
+// past the newest entry brings it back. It says whether it moved.
+func (s *Input) recall(dir int) bool {
+	if s.History == nil {
+		return false
+	}
+	h := s.History()
+	i := s.hist
+	if i < 0 {
+		if dir > 0 {
+			return false
+		}
+		i = len(h)
+	}
+	switch i += dir; {
+	case i < 0:
+		return false // the oldest shows: stay
+	case i >= len(h):
+		s.els, s.hist, s.draft = s.draft, -1, nil
+	default:
+		if s.hist < 0 {
+			s.draft = slices.Clone(s.els)
+		}
+		s.els, s.hist = textElems(h[i]), i
+	}
+	s.cur, s.anchor, s.top = len(s.els), -1, 0
+	return true
+}
+
+// pasteClipboard pastes what the system clipboard holds. A console window
+// passes Ctrl+V on rather than pasting, and a right click is the mouse's,
+// which the TUI takes.
+func (s *Input) pasteClipboard(a *App) {
+	a.Go(func() {
+		t, err := term.Clipboard()
+		a.Post(func() {
+			switch {
+			case err != nil:
+				a.SayError(err)
+			case t != "":
+				s.Paste(a, t)
+				if s.OnKey != nil {
+					s.OnKey(a)
+				}
+			}
+		})
+	})
 }
 
 // undoMax is how many changes Ctrl+Z goes back: each keeps a copy of the
@@ -264,6 +320,9 @@ func (s *Input) Key(a *App, k term.Key) bool {
 	}
 	before, selected := snap{slices.Clone(s.els), s.cur}, s.anchor >= 0
 	took := s.edit(a, k)
+	if n := k.String(); n != "up" && n != "down" && !slices.Equal(before.els, s.els) {
+		s.hist, s.draft = -1, nil // an edit makes the shown entry the person's own text
+	}
 	switch {
 	case slices.Equal(before.els, s.els):
 		s.typing = false // a move: what is typed next is a change of its own
@@ -342,9 +401,21 @@ func (s *Input) edit(a *App, k term.Key) bool {
 	case "ctrl+right", "alt+right", "alt+f":
 		s.move(a, s.word(1), sel)
 	case "up":
+		if !sel && r == 0 && s.recall(-1) {
+			break
+		}
 		s.move(a, s.index(rows, r-1, col), sel)
 	case "down":
+		if !sel && r >= len(rows)-1 && s.recall(1) {
+			break
+		}
 		s.move(a, s.index(rows, r+1, col), sel)
+	case "ctrl+v":
+		s.pasteClipboard(a)
+	case "insert":
+		if sel { // Shift+Insert
+			s.pasteClipboard(a)
+		}
 	case "ctrl+a":
 		if runtime.GOOS != "windows" {
 			s.move(a, s.index(rows, r, 0), sel)
@@ -379,6 +450,8 @@ func (s *Input) Mouse(a *App, m term.Mouse, r Rect) bool {
 		s.top = max(0, s.top-1)
 	case m.Button == term.WheelDown:
 		s.top = min(s.top+1, max(0, len(rows)-r.H))
+	case m.Action == term.Press && m.Button == term.Right:
+		s.pasteClipboard(a) // a console window's habit, which the TUI's mouse takes from it
 	case m.Action == term.Press && m.Button == term.Left:
 		a.Select(s)
 		s.typing = false
