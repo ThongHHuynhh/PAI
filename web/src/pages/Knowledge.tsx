@@ -1,93 +1,123 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { ago, call, type Arm, type Hit, type Item, type Retrieval, type Stats } from "../api";
 import { useLive } from "../live";
 import { go } from "../App";
 
-const KINDS = ["fact", "preference", "decision", "todo", "procedure", "summary"];
+// Memory reads like a notebook: what PAI knows as plain lines under their
+// topics, the kind a colored dot. Where an item came from, how often it helped
+// and the scores behind a recall open on a click or sit in a tooltip.
+
+const KINDS: [string, string][] = [
+  ["fact", "fact"],
+  ["preference", "preference"],
+  ["decision", "decision"],
+  ["todo", "todo"],
+  ["procedure", "how-to"],
+  ["summary", "summary"],
+];
+const KIND = Object.fromEntries(KINDS);
 const SOURCES: Record<string, string> = {
-  extract: "learnt from a session",
-  model: "saved by the model",
-  compaction: "a compaction summary",
-  consolidation: "merged by consolidation",
-  person: "added by you",
+  extract: "Learnt from",
+  model: "Saved by the model in",
+  compaction: "Summary of",
+  consolidation: "Merged",
+  person: "Added by you",
 };
-type Tab = "knows" | "recalls" | "history";
+const HOW =
+  "PAI keeps what lasts from your sessions: facts, preferences, decisions, todos and how-tos. " +
+  "It refuses secrets, merges what repeats and never deletes: forgotten items stay under Forgotten. " +
+  "For each message it recalls what fits, and learns from what the model uses.";
+type Tab = "knows" | "activity" | "forgotten";
 
 export default function Knowledge({ focus }: { focus?: string }) {
   const { memoryTick } = useLive();
   const [tab, setTab] = useState<Tab>("knows");
   const [stats, setStats] = useState<Stats | null>(null);
   const [arms, setArms] = useState<Arm[]>([]);
+  const [q, setQ] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [note, setNote] = useState("");
+  const [merging, setMerging] = useState(false);
   useEffect(() => {
     call<{ stats: Stats; bandit: Arm[] }>("GET", "/memory/stats").then((r) => {
       setStats(r.stats);
       setArms(r.bandit);
     }, () => {});
   }, [memoryTick]);
+  const merge = async () => {
+    setMerging(true);
+    try {
+      const r = await call<{ clusters: number }>("POST", "/memory/consolidate");
+      setNote(r.clusters ? `Merged ${r.clusters} group${r.clusters > 1 ? "s" : ""}` : "Nothing to merge");
+    } catch (e: any) {
+      setNote(String(e.message ?? e));
+    } finally {
+      setMerging(false);
+    }
+  };
+  const tabs: [Tab, string, number | undefined][] = [
+    ["knows", "Knows", stats?.items],
+    ["activity", "Activity", stats?.recalls],
+    ["forgotten", "Forgotten", stats?.invalid],
+  ];
   return (
     <div className="knowledge-page">
-      <header className="page-head">
-        <div>
-          <h1>Memory</h1>
-          <p className="muted">What PAI has learnt from your sessions, on every model and machine. It keeps what lasts, merges what repeats, and never deletes.</p>
-        </div>
+      <header className="nb-head">
+        <h1>Memory</h1>
+        <span className="nb-info" title={HOW}>
+          ⓘ
+        </span>
+        <div className="grow" />
+        <input
+          className="search nb-search"
+          placeholder="Search"
+          title="Finds by words and by meaning, the way PAI recalls"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setTab("knows");
+          }}
+        />
+        <button className="ghost small nb-btn" disabled={merging} onClick={merge} title="Merge items that say the same thing">
+          {merging ? "Merging…" : "Merge"}
+        </button>
+        <button
+          className="primary small nb-btn"
+          onClick={() => {
+            setTab("knows");
+            setAdding(true);
+          }}
+          title="Teach PAI something"
+        >
+          Add
+        </button>
       </header>
-      <div className="stat-row">
-        <StatCard label="Things PAI knows" value={stats?.items ?? "—"} sub={stats?.pinned ? `${stats.pinned} pinned` : "across every session"} />
-        <StatCard label="Helpful when recalled" value={stats ? `${Math.round(stats.used_rate * 100)}%` : "—"} sub={stats ? `${stats.recalls} recalls so far` : ""} />
-        <StatCard label="Merged or retired" value={stats?.invalid ?? "—"} sub="kept in History" />
-      </div>
-      <div className="tabs">
-        {(
-          [
-            ["knows", "What PAI knows"],
-            ["recalls", "Recalls"],
-            ["history", "History"],
-          ] as [Tab, string][]
-        ).map(([t, l]) => (
+      <div className="tabs nb-tabs">
+        {tabs.map(([t, l, n]) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-            {l}
+            {l} <span className="muted">{n ?? ""}</span>
           </button>
         ))}
+        <div className="grow" />
+        <span className="nb-note muted small" title={note}>
+          {note}
+        </span>
       </div>
-      {tab === "knows" && <Knows focus={focus} tick={memoryTick} />}
-      {tab === "recalls" && (
-        <>
-          <Recalls tick={memoryTick} />
-          <details className="more">
-            <summary>How PAI decides what to keep and recall</summary>
-            <Learning arms={arms} stats={stats} />
-          </details>
-        </>
-      )}
-      {tab === "history" && <History tick={memoryTick} />}
+      {tab === "knows" && <Knows q={q} focus={focus} tick={memoryTick} adding={adding} onAdded={() => setAdding(false)} />}
+      {tab === "activity" && <Activity tick={memoryTick} stats={stats} arms={arms} />}
+      {tab === "forgotten" && <Forgotten tick={memoryTick} />}
     </div>
   );
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="stat">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
-    </div>
-  );
-}
-
-function Knows({ focus, tick }: { focus?: string; tick: number }) {
-  const [q, setQ] = useState("");
+function Knows({ q, focus, tick, adding, onAdded }: { q: string; focus?: string; tick: number; adding: boolean; onAdded: () => void }) {
   const [kind, setKind] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
-  const [adding, setAdding] = useState(false);
-  const [busy, setBusy] = useState("");
-  const [note, setNote] = useState("");
   const load = useCallback(() => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
-    if (kind) p.set("kind", kind);
     call<Hit[]>("GET", `/memory?${p}`).then(setHits, () => {});
-  }, [q, kind]);
+  }, [q]);
   useEffect(() => {
     const t = window.setTimeout(load, q ? 250 : 0);
     return () => window.clearTimeout(t);
@@ -97,77 +127,73 @@ function Knows({ focus, tick }: { focus?: string; tick: number }) {
   }, [focus, hits.length]);
 
   const shown = hits.filter((h) => !kind || h.item.kind === kind);
+  const counts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const h of hits) m[h.item.kind] = (m[h.item.kind] ?? 0) + 1;
+    return m;
+  }, [hits]);
   const groups = useMemo(() => {
-    if (q.trim()) return [["Best matches", shown]] as [string, Hit[]][];
+    if (q.trim()) return [["Matches", shown]] as [string, Hit[]][];
     const m = new Map<string, Hit[]>();
-    for (const h of shown) {
-      const t = h.item.kind === "summary" ? "session summaries" : h.item.topic || "other";
-      m.set(t, [...(m.get(t) ?? []), h]);
-    }
-    return [...m.entries()].sort((a, b) => (a[0] === "session summaries" ? 1 : b[0] === "session summaries" ? -1 : b[1].length - a[1].length || a[0].localeCompare(b[0])));
+    for (const h of shown) if (h.item.kind !== "summary") m.set(h.item.topic || "other", [...(m.get(h.item.topic || "other") ?? []), h]);
+    return [...m.entries()].sort((a, b) => (a[0] === "other" ? 1 : b[0] === "other" ? -1 : a[0].localeCompare(b[0])));
   }, [shown, q]);
-
-  const consolidate = async () => {
-    setBusy("consolidate");
-    setNote("");
-    try {
-      const r = await call<{ clusters: number }>("POST", "/memory/consolidate");
-      setNote(r.clusters ? `Merged ${r.clusters} group${r.clusters > 1 ? "s" : ""} of related items.` : "Nothing to merge: every subject is said once.");
-      load();
-    } catch (e: any) {
-      setNote(String(e.message ?? e));
-    } finally {
-      setBusy("");
-    }
-  };
+  const summaries = q.trim() ? [] : shown.filter((h) => h.item.kind === "summary");
 
   return (
     <div>
-      <div className="toolbar">
-        <input className="search" placeholder="Search memory the way PAI recalls it: words and meaning" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="chips">
-          <button className={`chip ${kind === "" ? "on" : ""}`} onClick={() => setKind("")}>
-            all
+      <div className="nb-kinds">
+        {KINDS.map(([k, label]) => (
+          <button
+            key={k}
+            className={`nb-kind ${kind === k ? "on" : ""} ${counts[k] ? "" : "none"}`}
+            onClick={() => setKind(kind === k ? "" : k)}
+            title={kind === k ? "Show every kind" : `Show only ${label}s`}
+          >
+            <i className={`dot k-${k}`} />
+            {label} <span className="muted">{counts[k] ?? 0}</span>
           </button>
-          {KINDS.map((k) => (
-            <button key={k} className={`chip k-${k} ${kind === k ? "on" : ""}`} onClick={() => setKind(kind === k ? "" : k)}>
-              {k}
-            </button>
-          ))}
-        </div>
-        <div className="grow" />
-        <button className="ghost small" disabled={busy !== ""} onClick={consolidate} title="Merge items that say the same or are about one subject">
-          {busy ? "Merging…" : "Consolidate"}
-        </button>
-        <button className="primary small" onClick={() => setAdding(true)}>
-          Add memory
-        </button>
+        ))}
       </div>
-      {note && <div className="banner">{note}</div>}
-      {adding && <AddItem onDone={() => { setAdding(false); load(); }} />}
-      {shown.length === 0 && (
-        <div className="empty small">
-          {q ? "Nothing matches." : "PAI has not learnt anything yet. It learns as you work: from what sessions decide and discover, and from what you tell it to remember."}
-        </div>
-      )}
+      {adding && <AddItem onDone={() => { onAdded(); load(); }} />}
+      {shown.length === 0 && <div className="empty small">{q ? "No match." : "Nothing yet. PAI learns as you work."}</div>}
       {groups.map(([topic, hs]) => (
-        <section key={topic} className="topic">
-          <h3>
-            {topic} <span className="muted small">{hs.length}</span>
-          </h3>
-          <div className="items">
+        <section key={topic} className="nb-topic">
+          <h3>{topic}</h3>
+          <ul className="nb-list">
             {hs.map((h) => (
-              <ItemCard key={h.item.id} hit={h} focus={focus === h.item.id} onChange={load} searched={!!q.trim()} />
+              <Line key={h.item.id} hit={h} focus={focus === h.item.id} onChange={load} searched={!!q.trim()} />
             ))}
-          </div>
+          </ul>
         </section>
       ))}
+      {summaries.length > 0 && (
+        <details className="nb-topic nb-summaries">
+          <summary>
+            <h3>
+              Session summaries <span className="muted">{summaries.length}</span>
+            </h3>
+          </summary>
+          <ul className="nb-list">
+            {summaries.map((h) => (
+              <Line key={h.item.id} hit={h} focus={focus === h.item.id} onChange={load} searched={false} />
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
 
-function ItemCard({ hit, focus, onChange, searched }: { hit: Hit; focus: boolean; onChange: () => void; searched: boolean }) {
+// Line is one memory: its text, and on a click where it came from, how much
+// it helped, and its versions. Pin, edit and forget show on hover, in a slot
+// that is always there, so nothing moves.
+function Line({ hit, focus, onChange, searched }: { hit: Hit; focus: boolean; onChange: () => void; searched: boolean }) {
   const it = hit.item;
+  const [open, setOpen] = useState(focus);
+  useEffect(() => {
+    if (focus) setOpen(true);
+  }, [focus]);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(it.text);
   const [lineage, setLineage] = useState<Item[] | null>(null);
@@ -179,104 +205,101 @@ function ItemCard({ hit, focus, onChange, searched }: { hit: Hit; focus: boolean
       alert(String(e.message ?? e));
     }
   };
-  const showLineage = async () => {
-    if (lineage) return setLineage(null);
-    const all = await call<Hit[]>("GET", "/memory?invalid=1&limit=1000");
-    setLineage(all.map((h) => h.item).filter((x) => it.merged?.includes(x.id)));
+  useEffect(() => {
+    if (!open || !it.merged?.length || lineage) return;
+    call<Hit[]>("GET", "/memory?invalid=1&limit=1000").then((all) => setLineage(all.map((h) => h.item).filter((x) => it.merged?.includes(x.id))), () => {});
+  }, [open, it.merged, lineage]);
+  const project = it.scope.startsWith("project:") ? it.scope.slice(8) : "";
+  const why = searched
+    ? `Match ${hit.score.toFixed(2)}${hit.lexical ? ` · words #${hit.lexical}` : ""}${hit.vector ? ` · meaning #${hit.vector}` : ""}`
+    : undefined;
+  const stop = (fn: () => void) => (e: MouseEvent) => {
+    e.stopPropagation();
+    fn();
   };
+  const acts = (
+    <>
+      <button className="icon-btn" title={it.pinned ? "Unpin" : "Pin: recall in every turn"} onClick={stop(() => act(() => call("PATCH", `/memory/${it.id}`, { pinned: !it.pinned })))}>
+        {it.pinned ? "★" : "☆"}
+      </button>
+      <button className="icon-btn" title="Edit" onClick={stop(() => setEditing(true))}>
+        ✎
+      </button>
+      <button
+        className="icon-btn danger"
+        title="Forget: no longer true. It stays under Forgotten."
+        onClick={stop(() => {
+          const reason = prompt("Why is this no longer true?", "no longer true");
+          if (reason !== null) void act(() => call("POST", `/memory/${it.id}/invalidate`, { reason }));
+        })}
+      >
+        ✕
+      </button>
+    </>
+  );
   return (
-    <article id={`item-${it.id}`} className={`item ${focus ? "focus" : ""} ${it.pinned ? "pinned" : ""}`}>
-      <div className="item-top">
-        <span className={`kind k-${it.kind}`}>{it.kind}</span>
-        {it.scope !== "global" && <span className="scope">{it.scope}</span>}
-        {it.pinned && <span className="scope accent">pinned</span>}
-        <div className="grow" />
-        <span className="muted small">{ago(it.updated)}</span>
-      </div>
-      {editing ? (
-        <div>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} />
-          <div className="row end">
-            <button className="ghost small" onClick={() => setEditing(false)}>
-              Cancel
-            </button>
-            <button className="primary small" onClick={() => act(() => call("PATCH", `/memory/${it.id}`, { text })).then(() => setEditing(false))}>
-              Save as new version
-            </button>
+    <li id={`item-${it.id}`} className={`nb-line ${open ? "open" : ""} ${focus ? "focus" : ""}`}>
+      <div className="nb-row" onClick={() => !editing && setOpen(!open)} title={why}>
+        <i className={`dot k-${it.kind}`} title={KIND[it.kind] ?? it.kind} />
+        {editing ? (
+          <div className="nb-edit" onClick={(e) => e.stopPropagation()}>
+            <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} />
+            <div className="row end">
+              <button className="ghost small" onClick={() => setEditing(false)}>
+                Cancel
+              </button>
+              <button className="primary small" onClick={() => act(() => call("PATCH", `/memory/${it.id}`, { text })).then(() => setEditing(false))}>
+                Save
+              </button>
+            </div>
           </div>
-        </div>
-      ) : (
-        <p className={`item-text ${it.kind === "summary" ? "summary" : ""}`}>{it.text}</p>
-      )}
-      <div className="item-meta muted small">
-        {SOURCES[it.source] ?? it.source}
-        {it.session && (
-          <>
-            {" in "}
-            <a href={`#/sessions/${it.session}`}>session {it.session}</a>
-            {it.from ? ` (records ${it.from}${it.to && it.to !== it.from ? `–${it.to}` : ""})` : ""}
-          </>
+        ) : (
+          <span className={`nb-text ${it.kind === "summary" ? "summary" : ""}`}>{it.text}</span>
         )}
-        {it.merged?.length ? (
-          <>
-            {" · "}
-            <button className="link" onClick={showLineage}>
-              merged from {it.merged.length} item{it.merged.length > 1 ? "s" : ""}
-            </button>
-          </>
-        ) : null}
-      </div>
-      {lineage && (
-        <ul className="lineage">
-          {lineage.map((o) => (
-            <li key={o.id}>
-              <s>{o.text}</s> <span className="muted small">{SOURCES[o.source] ?? o.source}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="item-bottom">
-        <div className="utility" title="How often this item helped when it was recalled. It rises when the model uses it, falls when it does not.">
-          <div className="meter thin">
-            <i style={{ width: `${it.utility * 100}%` }} />
-          </div>
-          <span className="small muted">
-            worth {Math.round(it.utility * 100)}% · used {it.used} of {it.shown} recalls
-          </span>
-        </div>
-        {searched && (
-          <span className="small muted why" title="Place in each list, then the fused score">
-            score {hit.score.toFixed(2)}
-            {hit.lexical ? ` · words #${hit.lexical}` : ""}
-            {hit.vector ? ` · meaning #${hit.vector} (${hit.cosine.toFixed(2)})` : ""}
+        {project && <span className="scope">{project}</span>}
+        {it.pinned && (
+          <span className="nb-pin" title="Pinned: recalled in every turn">
+            ★
           </span>
         )}
-        <div className="actions">
-          <button className="icon-btn" title="Useful: recall it more" onClick={() => act(() => call("POST", `/memory/${it.id}/feedback`, { up: true }))}>
-            ▲
-          </button>
-          <button className="icon-btn" title="Not useful: recall it less" onClick={() => act(() => call("POST", `/memory/${it.id}/feedback`, { up: false }))}>
-            ▼
-          </button>
-          <button className="icon-btn" title={it.pinned ? "Unpin" : "Pin: recall in every turn"} onClick={() => act(() => call("PATCH", `/memory/${it.id}`, { pinned: !it.pinned }))}>
-            {it.pinned ? "★" : "☆"}
-          </button>
-          <button className="icon-btn" title="Edit" onClick={() => setEditing(true)}>
-            ✎
-          </button>
-          <button
-            className="icon-btn danger"
-            title="Retire: no longer true. It stays in History."
-            onClick={() => {
-              const reason = prompt("Why is this no longer true?", "no longer true");
-              if (reason !== null) void act(() => call("POST", `/memory/${it.id}/invalidate`, { reason }));
-            }}
-          >
-            ✕
-          </button>
-        </div>
+        <span className="nb-acts">{acts}</span>
+        <span className="nb-age muted small">{ago(it.updated)}</span>
       </div>
-    </article>
+      {open && !editing && (
+        <div className="nb-detail muted small">
+          <span>
+            {SOURCES[it.source] ?? it.source}
+            {it.session && it.source !== "person" && (
+              <>
+                {" "}
+                <a href={`#/sessions/${it.session}`}>{it.session}</a>
+              </>
+            )}
+          </span>
+          <span title="Times it was recalled, and how many of those the model used">
+            used {it.used} of {it.shown}
+          </span>
+          <span className="nb-vote">
+            <button className="link" title="Recall it more" onClick={() => act(() => call("POST", `/memory/${it.id}/feedback`, { up: true }))}>
+              ▲ useful
+            </button>
+            <button className="link" title="Recall it less" onClick={() => act(() => call("POST", `/memory/${it.id}/feedback`, { up: false }))}>
+              ▼ not useful
+            </button>
+          </span>
+          <span className="nb-acts-narrow">{acts}</span>
+          {lineage && lineage.length > 0 && (
+            <ul className="nb-lineage">
+              {lineage.map((o) => (
+                <li key={o.id}>
+                  <s>{o.text}</s>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -287,17 +310,18 @@ function AddItem({ onDone }: { onDone: () => void }) {
   const [scope, setScope] = useState("global");
   const [err, setErr] = useState("");
   return (
-    <div className="card add">
-      <h3>Teach PAI something</h3>
-      <textarea autoFocus placeholder="One self-contained sentence, such as: Production deploys go to the VPS named atlas through GitHub Actions." value={text} onChange={(e) => setText(e.target.value)} />
+    <div className="card nb-add">
+      <textarea autoFocus placeholder="One sentence, e.g. Production deploys go to the VPS named atlas." value={text} onChange={(e) => setText(e.target.value)} />
       <div className="row">
         <select value={kind} onChange={(e) => setKind(e.target.value)}>
-          {KINDS.filter((k) => k !== "summary").map((k) => (
-            <option key={k}>{k}</option>
+          {KINDS.filter(([k]) => k !== "summary").map(([k, label]) => (
+            <option key={k} value={k}>
+              {label}
+            </option>
           ))}
         </select>
-        <input placeholder="topic, such as deploy" value={topic} onChange={(e) => setTopic(e.target.value)} />
-        <input placeholder="scope: global or project:name" value={scope} onChange={(e) => setScope(e.target.value)} />
+        <input placeholder="topic" value={topic} onChange={(e) => setTopic(e.target.value)} />
+        <input placeholder="scope" title="global, or project:name" value={scope} onChange={(e) => setScope(e.target.value)} />
         <div className="grow" />
         <button className="ghost small" onClick={onDone}>
           Cancel
@@ -315,145 +339,125 @@ function AddItem({ onDone }: { onDone: () => void }) {
   );
 }
 
-function Recalls({ tick }: { tick: number }) {
+// Activity is what PAI recalled for each message, in plain words; the scores
+// sit in tooltips.
+function Activity({ tick, stats, arms }: { tick: number; stats: Stats | null; arms: Arm[] }) {
   const [rs, setRs] = useState<Retrieval[]>([]);
+  const [open, setOpen] = useState("");
   useEffect(() => {
     call<Retrieval[]>("GET", "/memory/retrievals").then(setRs, () => {});
   }, [tick]);
-  if (rs.length === 0) return <div className="empty small">No recalls yet. PAI recalls when you send a message and memory holds something.</div>;
-  return (
-    <div className="recalls">
-      <p className="muted small">Every time you send a message, PAI decides whether to recall and how much, then checks whether the model used what it got. That check is the reward the policy learns from.</p>
-      {rs.map((r) => (
-        <article key={r.id} className="recall">
-          <div className="item-top">
-            <span className={`pill ${r.k ? "open" : "closed"}`}>{r.k ? `recall ${r.k}` : "skipped"}</span>
-            <b className="ellipsis">“{r.query.slice(0, 140)}”</b>
-            <div className="grow" />
-            {r.reward !== undefined && r.reward !== null ? (
-              <span className={`reward ${r.reward > 0.3 ? "good" : r.reward < 0 ? "bad" : ""}`}>reward {r.reward.toFixed(2)}</span>
-            ) : (
-              <span className="muted small">waiting for the reply</span>
-            )}
-            <a className="small" href={`#/sessions/${r.session}`}>
-              {r.session}
-            </a>
-            <span className="muted small">{ago(r.at)}</span>
-          </div>
-          {r.hits && r.hits.length > 0 && (
-            <ol className="hits">
-              {r.hits.map((h) => (
-                <li key={h.item.id}>
-                  <span className={`kind k-${h.item.kind}`}>{h.item.kind}</span> {h.item.text}{" "}
-                  <span className="muted small">
-                    {h.pinned ? "pinned" : `score ${h.score.toFixed(2)}${h.lexical ? ` · words #${h.lexical}` : ""}${h.vector ? ` · meaning #${h.vector}` : ""}`}
-                  </span>{" "}
-                  <a className="small" href={`#/knowledge/${h.item.id}`} onClick={(e) => { e.preventDefault(); go({ page: "knowledge", arg: h.item.id }); }}>
-                    {h.item.id}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          )}
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function Learning({ arms, stats }: { arms: Arm[]; stats: Stats | null }) {
+  if (rs.length === 0) return <div className="empty small">No recalls yet.</div>;
   const best = Math.max(0.0001, ...arms.map((a) => Math.abs(a.reward)));
   return (
-    <div className="learning">
-      <div className="card">
-        <h3>Recall policy</h3>
-        <p className="muted small">
-          A contextual bandit (LinUCB) picks, for each message, how many memories to recall: none, 3, 6 or 10. It looks at whether the message asks
-          something, how long it is, how full the context is and how much memory holds. After the model replies, recalled items whose distinctive
-          words show up in the reply count as used: the share used, less a small cost per item, is the reward. A turn where the model had to call
-          recall itself is penalized. Over time PAI learns to skip memory on small talk and to recall more for real questions.
-        </p>
-        <div className="arms">
-          {arms.map((a) => (
-            <div key={a.k} className="arm">
-              <div className="arm-label">{a.k === 0 ? "skip" : `recall ${a.k}`}</div>
-              <div className="arm-bar">
-                <i className={a.reward < 0 ? "neg" : ""} style={{ width: `${(Math.abs(a.reward) / best) * 100}%` }} />
-              </div>
-              <div className="arm-num small">
-                {a.reward.toFixed(2)} <span className="muted">· chosen {a.pulls}×</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="card">
-        <h3>What gets kept</h3>
-        <ul className="muted small bullets">
-          <li>Only lasting items: facts about you, your machines and projects, preferences, decisions and why, todos, and procedures that worked.</li>
-          <li>Never chatter, passing steps, guesses or secrets: anything that looks like a key or password is refused before it is stored.</li>
-          <li>Each new item is checked against related ones, by topic and meaning. The model then adds it, merges it into one complete statement, updates an older item, retires a contradicted one, or skips it.</li>
-          <li>A background pass merges what memory says more than once. Merged and edited items are new versions that name what they replaced.</li>
-          <li>Sessions compact at 70% of their context: a summary replaces the oldest records in the model's context, and the full history stays in the session file.</li>
-        </ul>
-      </div>
+    <div>
       {stats && (
-        <div className="card">
-          <h3>By scope</h3>
-          <ul className="muted small bullets">
-            {Object.entries(stats.by_scope).map(([s, n]) => (
-              <li key={s}>
-                {s}: {n}
-              </li>
+        <p className="muted small nb-sum" title="A recalled memory counts as used when its distinctive words show up in the reply">
+          The model used {Math.round(stats.used_rate * 100)}% of what PAI recalled.
+        </p>
+      )}
+      <ul className="nb-list">
+        {rs.map((r) => {
+          const verdict =
+            r.reward === undefined || r.reward === null ? ["…", "Waiting for the reply"] : r.reward > 0.3 ? ["helped", ""] : r.reward < 0 ? ["not used", ""] : ["", ""];
+          return (
+            <li key={r.id} className={`nb-line ${open === r.id ? "open" : ""}`}>
+              <div className="nb-row" onClick={() => setOpen(open === r.id ? "" : r.id)} title={r.reward != null ? `Reward ${r.reward.toFixed(2)}` : undefined}>
+                <i className={`dot ${r.k ? "k-procedure" : "off"}`} />
+                <span className="nb-text">“{r.query.slice(0, 160)}”</span>
+                <span className="nb-what small">{r.k ? `recalled ${r.k}` : "skipped"}</span>
+                <span className={`nb-verdict small ${verdict[0] === "helped" ? "good" : verdict[0] === "not used" ? "bad" : "muted"}`} title={verdict[1]}>
+                  {verdict[0]}
+                </span>
+                <a className="small nb-sess" href={`#/sessions/${r.session}`} onClick={(e) => e.stopPropagation()}>
+                  {r.session}
+                </a>
+                <span className="nb-age muted small">{ago(r.at)}</span>
+              </div>
+              {open === r.id && r.hits && r.hits.length > 0 && (
+                <ol className="nb-hits small">
+                  {r.hits.map((h) => (
+                    <li
+                      key={h.item.id}
+                      title={h.pinned ? "Pinned" : `Match ${h.score.toFixed(2)}${h.lexical ? ` · words #${h.lexical}` : ""}${h.vector ? ` · meaning #${h.vector}` : ""}`}
+                    >
+                      <i className={`dot k-${h.item.kind}`} />
+                      <a
+                        href={`#/knowledge/${h.item.id}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          go({ page: "knowledge", arg: h.item.id });
+                        }}
+                      >
+                        {h.item.text}
+                      </a>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {arms.length > 0 && (
+        <details className="nb-topic">
+          <summary>
+            <h3>How recall learns</h3>
+          </summary>
+          <p className="muted small">For each message PAI picks how much to recall, then scores the choice by what the model used.</p>
+          <div className="arms">
+            {arms.map((a) => (
+              <div key={a.k} className="arm" title={`Average reward ${a.reward.toFixed(2)}, chosen ${a.pulls} times`}>
+                <div className="arm-label small">{a.k === 0 ? "skip" : `recall ${a.k}`}</div>
+                <div className="arm-bar">
+                  <i className={a.reward < 0 ? "neg" : ""} style={{ width: `${(Math.abs(a.reward) / best) * 100}%` }} />
+                </div>
+                <div className="arm-num small muted">{a.pulls}×</div>
+              </div>
             ))}
-          </ul>
-        </div>
+          </div>
+        </details>
       )}
     </div>
   );
 }
 
-function History({ tick }: { tick: number }) {
+function Forgotten({ tick }: { tick: number }) {
   const [items, setItems] = useState<Item[]>([]);
   const load = useCallback(() => {
     call<Hit[]>("GET", "/memory?invalid=1&limit=1000").then((hs) => setItems(hs.map((h) => h.item).filter((i) => i.invalid)), () => {});
   }, []);
   useEffect(load, [load, tick]);
-  if (items.length === 0) return <div className="empty small">Nothing retired yet.</div>;
+  if (items.length === 0) return <div className="empty small">Nothing forgotten.</div>;
   return (
-    <div className="items">
-      <p className="muted small">Items that were merged, updated, superseded or retired. Nothing is deleted; restore one to make it recallable again.</p>
+    <ul className="nb-list">
       {items.map((it) => {
         const into = it.reason?.match(/(?:merged into|superseded by summary) (m[0-9a-f]+)/)?.[1];
+        const reason = into ? it.reason?.split(" m")[0] : it.reason;
         return (
-          <article key={it.id} className="item retired">
-            <div className="item-top">
-              <span className={`kind k-${it.kind}`}>{it.kind}</span>
-              {it.topic && <span className="scope">{it.topic}</span>}
-              <div className="grow" />
-              <span className="muted small">{ago(it.invalid)}</span>
-            </div>
-            <p className="item-text">
-              <s>{it.text}</s>
-            </p>
-            <div className="item-bottom">
-              <span className="muted small">
+          <li key={it.id} className="nb-line">
+            <div className="nb-row">
+              <i className={`dot k-${it.kind}`} title={KIND[it.kind] ?? it.kind} />
+              <span className="nb-text">
+                <s>{it.text}</s>
+              </span>
+              <span className="nb-what small muted">
                 {into ? (
-                  <>
-                    {it.reason?.split(" m")[0]} <a href={`#/knowledge/${into}`}>{into}</a>
-                  </>
+                  <a href={`#/knowledge/${into}`} title="See what replaced it">
+                    {reason}
+                  </a>
                 ) : (
-                  it.reason
+                  reason
                 )}
               </span>
-              <div className="grow" />
-              <button className="ghost small" onClick={() => call("POST", `/memory/${it.id}/restore`).then(load)}>
+              <span className="nb-age muted small">{ago(it.invalid)}</span>
+              <button className="ghost small nb-restore" onClick={() => call("POST", `/memory/${it.id}/restore`).then(load)} title="Make it recallable again">
                 Restore
               </button>
             </div>
-          </article>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }

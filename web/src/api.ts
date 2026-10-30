@@ -346,6 +346,8 @@ export function tokens(n: number): string {
   return String(n);
 }
 
+// sessionTitle is the session's name, else its id: calm-otter reads as it is,
+// while an id from before sessions had names is a hex code that needs a word.
 export function sessionTitle(s: Session): string {
-  return s.name || `Session ${s.id}`;
+  return s.name || (/^[0-9a-f]{8}$/.test(s.id) ? `Session ${s.id}` : s.id);
 }
