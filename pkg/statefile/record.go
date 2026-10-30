@@ -117,9 +117,13 @@ func NewID() string {
 	return hex.EncodeToString(b)
 }
 
-// ValidID is true for what NewID makes. Ids from outside become paths, so
-// anything else is refused before it reaches the filesystem.
+// ValidID is true for a session id: what NewName makes, or what NewID made
+// before sessions had names. Ids from outside become paths, so anything else
+// is refused before it reaches the filesystem.
 func ValidID(id string) bool {
+	if nameID.MatchString(id) {
+		return true
+	}
 	if len(id) != 8 {
 		return false
 	}

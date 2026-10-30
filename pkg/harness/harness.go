@@ -123,7 +123,7 @@ func system(source, body string) statefile.Record {
 // the provider as system text ahead of the first message. A copy is byte for byte and gets
 // nothing appended: it already holds both.
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
-	id := statefile.NewID()
+	id := statefile.NewName(h.Sessions.Exists)
 	if c.From != "" {
 		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")

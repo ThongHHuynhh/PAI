@@ -17,6 +17,12 @@ func (s Sessions) Path(id string) string {
 	return filepath.Join(s.Dir, id+".state")
 }
 
+// Exists is whether session id has a file.
+func (s Sessions) Exists(id string) bool {
+	_, err := os.Stat(s.Path(id))
+	return err == nil
+}
+
 // List returns every session id: the file names.
 func (s Sessions) List() ([]string, error) {
 	entries, err := os.ReadDir(s.Dir)
