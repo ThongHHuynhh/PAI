@@ -60,10 +60,10 @@ export function Orbit({ size, nodes = 6, still = false }: { size: number; nodes?
         </radialGradient>
       </defs>
       {ringPaths.map((d, i) => (
-        <path key={i} d={d} fill="none" stroke="var(--ring)" strokeWidth={0.5} strokeDasharray="0.6 1.6" />
+        <path key={i} d={d} fill="none" stroke="var(--ring)" strokeWidth={0.9} strokeDasharray="1 1.6" />
       ))}
       {!still && (
-        <circle cx={50} cy={50} r={core * (1 + 2.2 * ((t * 0.45) % 1))} fill="none" stroke="var(--accent)" strokeOpacity={1 - ((t * 0.45) % 1)} strokeWidth={0.4} />
+        <circle cx={50} cy={50} r={core * (1 + 2.2 * ((t * 0.45) % 1))} fill="none" stroke="var(--accent)" strokeOpacity={1 - ((t * 0.45) % 1)} strokeWidth={0.7} />
       )}
       {ns
         .filter((n) => n.z < 0)
@@ -75,8 +75,8 @@ export function Orbit({ size, nodes = 6, still = false }: { size: number; nodes?
         .filter((n) => n.z >= 0)
         .map((n) => (
           <g key={n.j}>
-            <line x1={50} y1={50} x2={n.x} y2={n.y} stroke="var(--ring)" strokeWidth={0.35} strokeDasharray="0.8 1.2" />
-            {!still && <circle cx={50 + (n.x - 50) * n.p} cy={50 + (n.y - 50) * n.p} r={0.9} fill="var(--accent)" />}
+            <line x1={50} y1={50} x2={n.x} y2={n.y} stroke="var(--ring)" strokeWidth={0.6} strokeDasharray="1.2 1.3" />
+            {!still && <circle cx={50 + (n.x - 50) * n.p} cy={50 + (n.y - 50) * n.p} r={1.3} fill="var(--accent)" />}
             <circle cx={n.x} cy={n.y} r={2.2 + n.z} fill="var(--node)" />
           </g>
         ))}

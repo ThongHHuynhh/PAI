@@ -168,8 +168,11 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .gtitle { font-weight: 600; }
 .gsub { font-size: 12px; margin-top: 2px; }
 .gnode .meter { margin: 6px 0 2px; }
-.feed ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
-.feed li { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; cursor: default; }
+/* activity: a fixed box that scrolls inside, so new events never grow the page */
+.feed { height: 300px; flex: none; display: flex; flex-direction: column; }
+.feed h3 { flex: none; }
+.feed ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; }
+.feed li { flex: none; display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; cursor: default; }
 .feed li:hover { background: var(--panel-2); }
 .feed li.accent .ftext { color: var(--accent); }
 .feed li.muted { color: var(--muted); }

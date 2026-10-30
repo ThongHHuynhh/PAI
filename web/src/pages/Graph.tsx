@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Background, ControlButton, Controls, Handle, Position, ReactFlow, applyNodeChanges, type Edge, type Node, type NodeChange, type NodeProps, type XYPosition } from "@xyflow/react";
 import { ago, sessionTitle, tokens, type Machine, type Session, type Stats } from "../api";
 import { describe, useLive } from "../live";
 import { go } from "../App";
@@ -9,6 +9,24 @@ import { Orbit } from "../components/Orbit";
 // graph draws: the newest; the rest are a click away in Sessions.
 const GLOW_MS = 3500;
 const MAX_SESSIONS = 14;
+
+// MOVED keeps where the person dragged each node, in this browser, so the
+// layout they made survives the graph rebuilding twice a second and a reload.
+const MOVED = "pai.graph.moved";
+function loadMoved(): Record<string, XYPosition> {
+  try {
+    return JSON.parse(localStorage.getItem(MOVED) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function saveMoved(m: Record<string, XYPosition>) {
+  try {
+    localStorage.setItem(MOVED, JSON.stringify(m));
+  } catch {
+    /* no storage: the layout lasts this tab */
+  }
+}
 
 type CoreData = { version: string; url: string; machines: number; working: number; glow: boolean };
 type MachineData = { m: Machine; sessions: number; glow: boolean };
@@ -104,6 +122,7 @@ export default function GraphPage() {
   const { graph, pulse, feed } = useLive();
   const [now, setNow] = useState(Date.now());
   const [sel, setSel] = useState<string | null>(null);
+  const [moved, setMoved] = useState(loadMoved);
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(t);
@@ -120,7 +139,7 @@ export default function GraphPage() {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
     const working = sessions.filter((s) => s.status === "stepping").length;
-    nodes.push({ id: "core", type: "core", position: { x: -70, y: -80 }, data: { version: graph?.server.version, url: graph?.server.url, machines: machines.length, working, glow: glow("core") }, draggable: true });
+    nodes.push({ id: "core", type: "core", position: { x: -70, y: -80 }, data: { version: graph?.server.version, url: graph?.server.url, machines: machines.length, working, glow: glow("core") } });
     nodes.push({ id: "memory", type: "memory", position: { x: -330, y: -40 }, data: { st: graph?.memory, glow: glow("memory") } });
     edges.push({ id: "e:memory", source: "memory", target: "core", targetHandle: "in", animated: glow("memory"), className: glow("memory") ? "hot" : "" });
 
@@ -150,9 +169,37 @@ export default function GraphPage() {
       if (ws.length === 0) edges.push({ id: `e:core-s-${s.id}`, source: "core", sourceHandle: "b", target: `s:${s.id}`, targetHandle: "top", animated: s.status === "stepping" || g, className: g ? "hot" : "" });
       ws.forEach((w) => edges.push({ id: `e:${w.name}-${s.id}`, source: `m:${w.name}`, target: `s:${s.id}`, targetHandle: "left", animated: s.status === "stepping" || g, className: g ? "hot" : "" }));
     });
+    for (const n of nodes) if (moved[n.id]) n.position = moved[n.id];
     return { nodes, edges };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, sessions, machines, now, pulse]);
+  }, [graph, sessions, machines, now, pulse, moved]);
+
+  // The flow keeps its own nodes, so a drag runs on them undisturbed; each
+  // rebuild brings new data and keeps a node's place while it is dragged.
+  const [flow, setFlow] = useState<Node[]>(nodes);
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+  useEffect(() => {
+    setFlow((prev) => {
+      const old = new Map(prev.map((n) => [n.id, n]));
+      return nodes.map((n) => {
+        const o = old.get(n.id);
+        return o ? { ...o, type: n.type, data: n.data, position: o.dragging ? o.position : n.position } : n;
+      });
+    });
+  }, [nodes]);
+  const onNodesChange = (changes: NodeChange[]) => {
+    const next = applyNodeChanges(changes, flowRef.current);
+    flowRef.current = next;
+    setFlow(next);
+    const ended = changes.filter((c) => c.type === "position" && c.dragging === false).map((c) => (c as { id: string }).id);
+    if (ended.length) {
+      const m = { ...moved };
+      for (const n of next) if (ended.includes(n.id)) m[n.id] = n.position;
+      setMoved(m);
+      saveMoved(m);
+    }
+  };
 
   const selected = sel?.startsWith("s:") ? sessions.find((s) => `s:${s.id}` === sel) : undefined;
   const selMachine = sel?.startsWith("m:") ? machines.find((m) => `m:${m.name}` === sel) : undefined;
@@ -162,19 +209,31 @@ export default function GraphPage() {
       <div className="graph-canvas">
         <ReactFlow
           key={nodes.map((n) => n.id).join(",")}
-          nodes={nodes}
+          nodes={flow}
           edges={edges}
           nodeTypes={nodeTypes}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
           proOptions={{ hideAttribution: true }}
+          onNodesChange={onNodesChange}
           onNodeClick={(_, n) => setSel(n.id)}
           onPaneClick={() => setSel(null)}
           nodesConnectable={false}
         >
           <Background gap={28} size={1} color="var(--grid)" />
-          <Controls showInteractive={false} />
+          <Controls showInteractive={false}>
+            <ControlButton
+              title="Reset layout"
+              aria-label="Reset layout"
+              onClick={() => {
+                setMoved({});
+                saveMoved({});
+              }}
+            >
+              ⟲
+            </ControlButton>
+          </Controls>
         </ReactFlow>
         {graph && machines.length === 0 && (
           <div className="graph-empty">
