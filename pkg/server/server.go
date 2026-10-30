@@ -56,6 +56,9 @@ type Config struct {
 	Providers map[string]Provider `json:"providers"`
 	Links     [][2]string         `json:"links,omitempty"`  // pairs of workers, by name, that reach each other on the mesh
 	Memory    *MemoryConfig       `json:"memory,omitempty"` // how memory embeds; none is the built-in hash embedder
+	// Fallbacks names, for a provider, the one its sessions move to when its
+	// account is out of usage, such as {"claude-code": "claude-code-2"}.
+	Fallbacks map[string]string `json:"fallbacks,omitempty"`
 }
 
 // MemoryConfig names the embedder memory uses: an OpenAI compatible
@@ -258,13 +261,17 @@ func Harness(ctx context.Context, path string) error {
 	pool.OnChange = func(name string, connected bool) {
 		bus.Publish(events.Event{Type: "worker", Worker: name, Data: map[string]bool{"connected": connected}})
 	}
+	var fallbacks atomic.Pointer[map[string]string]
+	fallbacks.Store(&c.Fallbacks)
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Memory: mem,
-		OnRecord: func(id string, r statefile.Record) { bus.Publish(recordEvent(id, r)) }}
+		Fallbacks: func() map[string]string { return *fallbacks.Load() },
+		OnRecord:  func(id string, r statefile.Record) { bus.Publish(recordEvent(id, r)) }}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
 			h.SetProviders(ps)
 			coord.Link(c.Links)
+			fallbacks.Store(&c.Fallbacks)
 		}
 		return err
 	})
@@ -292,7 +299,7 @@ func Harness(ctx context.Context, path string) error {
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
 	a := &api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
-	(&webAPI{h: h, coord: coord, bus: bus, mem: mem, url: a.at}).handle(routes)
+	(&webAPI{h: h, coord: coord, bus: bus, mem: mem, url: a.at, path: path}).handle(routes)
 	app(mux)
 	api := store.Bearer(limit, routes)
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

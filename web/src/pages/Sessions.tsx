@@ -17,7 +17,7 @@ export default function Sessions({ id }: { id?: string }) {
   );
   const cur = list.find((s) => s.id === id) ?? (graph?.sessions ?? []).find((s) => s.id === id);
   return (
-    <div className="sessions-page">
+    <div className={`sessions-page ${cur ? "has-cur" : ""}`}>
       <aside className="session-list">
         <div className="row">
           <input placeholder="Filter sessions" value={filter} onChange={(e) => setFilter(e.target.value)} />
@@ -132,10 +132,13 @@ function Transcript({ s }: { s: Session }) {
   return (
     <div className="transcript">
       <header className="transcript-head">
-        <div>
-          <h2>{sessionTitle(s)}</h2>
-          <div className="muted small">
-            {s.config.model} · {s.config.workers?.map((w) => w.name).join(", ") || "no machines"} · {s.id}
+        <a className="only-phone back" href="#/sessions" aria-label="All chats">
+          ‹
+        </a>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <h2 className="ellipsis">{sessionTitle(s)}</h2>
+          <div className="muted small ellipsis">
+            <ModelSwitch s={s} /> · {s.config.workers?.map((w) => w.name).join(", ") || "no machines"}
           </div>
         </div>
         <div className="head-right">
@@ -193,6 +196,39 @@ function Transcript({ s }: { s: Session }) {
   );
 }
 
+// ModelSwitch moves the session to another account or vendor from its next
+// step: the same model on a provider this server serves, or any
+// provider/model typed in.
+function ModelSwitch({ s }: { s: Session }) {
+  const [ps, setPs] = useState<ProviderInfo[]>([]);
+  const [provider, model] = splitModel(s.config.model);
+  useEffect(() => {
+    call<ProviderInfo[]>("GET", "/providers").then(setPs, () => {});
+  }, []);
+  const change = async (to: string) => {
+    if (to === "__other") {
+      to = prompt("Model as provider/model", s.config.model) ?? "";
+      if (!to.trim()) return;
+    }
+    try {
+      await call("PUT", `/sessions/${s.id}/model?via=web`, to.trim(), "text/plain");
+    } catch (e: any) {
+      alert(String(e.message ?? e));
+    }
+  };
+  return (
+    <select className="inline-select" value={s.config.model} onChange={(e) => change(e.target.value)} title="Move this chat to another account or model. History and memory come along.">
+      {ps.map((p) => (
+        <option key={p.name} value={`${p.name}/${model}`}>
+          {model} · {p.name}
+        </option>
+      ))}
+      {!ps.some((p) => p.name === provider) && <option value={s.config.model}>{s.config.model}</option>}
+      <option value="__other">Other model…</option>
+    </select>
+  );
+}
+
 function Record({ r, result }: { r: Rec; result?: Rec }) {
   const [open, setOpen] = useState(false);
   switch (r.kind) {
@@ -240,6 +276,14 @@ function Record({ r, result }: { r: Rec; result?: Rec }) {
       );
     }
     case "system":
+      if (r.source === "failover")
+        return (
+          <div className="memcard compaction">
+            <div className="memhead">
+              <span className="accent">⇄</span> {r.body}
+            </div>
+          </div>
+        );
       if (r.source !== "memory") return null;
       return <MemoryCard r={r} />;
     case "compaction":

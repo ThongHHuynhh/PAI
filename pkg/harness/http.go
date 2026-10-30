@@ -42,6 +42,9 @@ const MaxPost = 8 << 20
 //	                                  it down; kill its environments and jobs        say what happened
 //	PUT  /sessions/{id}/workers       [{"name"}]; ?via= required. a config record  -> {"n"}
 //	                                  with these workers; the next step sees them
+//	PUT  /sessions/{id}/model         provider/model as text; ?via= required. a     -> {"n"}
+//	                                  config record: another account or vendor
+//	                                  takes over from the next step
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
 //	                                  record; empty removes the name
 //	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
@@ -165,6 +168,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	})
 	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
+	handle("PUT /sessions/{id}/model", h.serveModel)
 	handle("PUT /sessions/{id}/name", h.serveName)
 	return mux
 }
@@ -192,6 +196,25 @@ func via(r *http.Request) (string, error) {
 }
 
 // serveWorkers makes a JSON list of {"name"} the session's workers.
+func (h *Harness) serveModel(w http.ResponseWriter, r *http.Request) {
+	via, err := via(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxName))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	n, err := h.SetModel(r.PathValue("id"), via, strings.TrimSpace(string(b)))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, map[string]int{"n": n})
+}
+
 func (h *Harness) serveWorkers(w http.ResponseWriter, r *http.Request) {
 	via, err := via(r)
 	if err != nil {

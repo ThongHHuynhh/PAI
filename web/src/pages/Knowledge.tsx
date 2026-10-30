@@ -11,7 +11,7 @@ const SOURCES: Record<string, string> = {
   consolidation: "merged by consolidation",
   person: "added by you",
 };
-type Tab = "knows" | "recalls" | "learning" | "history";
+type Tab = "knows" | "recalls" | "history";
 
 export default function Knowledge({ focus }: { focus?: string }) {
   const { memoryTick } = useLive();
@@ -24,38 +24,24 @@ export default function Knowledge({ focus }: { focus?: string }) {
       setArms(r.bandit);
     }, () => {});
   }, [memoryTick]);
-  const topics = stats ? Object.keys(stats.by_kind).length : 0;
   return (
     <div className="knowledge-page">
       <header className="page-head">
         <div>
-          <h1>Knowledge</h1>
-          <p className="muted">
-            What PAI has learnt across every session, model and machine. It keeps only lasting, useful items, merges what is about one subject, and
-            never deletes: retired items stay in History.
-          </p>
+          <h1>Memory</h1>
+          <p className="muted">What PAI has learnt from your sessions, on every model and machine. It keeps what lasts, merges what repeats, and never deletes.</p>
         </div>
       </header>
       <div className="stat-row">
-        <StatCard label="Items PAI knows" value={stats?.items ?? "—"} sub={stats ? `${stats.pinned} pinned · ${topics} kinds` : ""} />
-        <StatCard label="Used when recalled" value={stats ? `${Math.round(stats.used_rate * 100)}%` : "—"} sub="share of recalled items the model used" />
-        <StatCard label="Recall reward" value={stats ? stats.reward.toFixed(2) : "—"} sub={stats ? `mean of ${stats.recalls} recalls` : ""} />
-        <StatCard label="Retired or merged" value={stats?.invalid ?? "—"} sub="kept in History" />
-        <StatCard label="Embedder" value={stats?.embedder.split(":")[0] ?? "—"} sub={stats?.embedder.includes(":") ? stats.embedder.split(":").slice(-1)[0] : "built in, no model needed"} />
+        <StatCard label="Things PAI knows" value={stats?.items ?? "—"} sub={stats?.pinned ? `${stats.pinned} pinned` : "across every session"} />
+        <StatCard label="Helpful when recalled" value={stats ? `${Math.round(stats.used_rate * 100)}%` : "—"} sub={stats ? `${stats.recalls} recalls so far` : ""} />
+        <StatCard label="Merged or retired" value={stats?.invalid ?? "—"} sub="kept in History" />
       </div>
-      {stats && (
-        <div className="kind-bar" title="Items by kind">
-          {KINDS.filter((k) => stats.by_kind[k]).map((k) => (
-            <i key={k} className={`k-${k}`} style={{ flex: stats.by_kind[k] }} title={`${k}: ${stats.by_kind[k]}`} />
-          ))}
-        </div>
-      )}
       <div className="tabs">
         {(
           [
             ["knows", "What PAI knows"],
-            ["recalls", "Recall log"],
-            ["learning", "How it learns"],
+            ["recalls", "Recalls"],
             ["history", "History"],
           ] as [Tab, string][]
         ).map(([t, l]) => (
@@ -65,8 +51,15 @@ export default function Knowledge({ focus }: { focus?: string }) {
         ))}
       </div>
       {tab === "knows" && <Knows focus={focus} tick={memoryTick} />}
-      {tab === "recalls" && <Recalls tick={memoryTick} />}
-      {tab === "learning" && <Learning arms={arms} stats={stats} />}
+      {tab === "recalls" && (
+        <>
+          <Recalls tick={memoryTick} />
+          <details className="more">
+            <summary>How PAI decides what to keep and recall</summary>
+            <Learning arms={arms} stats={stats} />
+          </details>
+        </>
+      )}
       {tab === "history" && <History tick={memoryTick} />}
     </div>
   );

@@ -34,6 +34,7 @@ export default function App() {
 }
 
 function Login({ onIn }: { onIn: () => void }) {
+  useTheme();
   const [key, setK] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,15 +81,41 @@ function Login({ onIn }: { onIn: () => void }) {
 }
 
 const NAV: { page: Route["page"]; label: string; icon: string; hint: string }[] = [
-  { page: "graph", label: "Live graph", icon: "◎", hint: "Machines, models and sessions, live" },
-  { page: "sessions", label: "Sessions", icon: "☰", hint: "Talk to PAI and read every session" },
-  { page: "knowledge", label: "Knowledge", icon: "◆", hint: "What PAI has learnt, and why it recalls it" },
-  { page: "settings", label: "Settings", icon: "⚙", hint: "Providers, machines, keys" },
+  { page: "graph", label: "Overview", icon: "◎", hint: "Your machines, models and sessions, live" },
+  { page: "sessions", label: "Chat", icon: "☰", hint: "Talk to PAI" },
+  { page: "knowledge", label: "Memory", icon: "◆", hint: "What PAI has learnt" },
+  { page: "settings", label: "Settings", icon: "⚙", hint: "Accounts, machines, keys" },
 ];
+
+// The theme: white unless the person picked dark. Kept in this browser.
+const THEME = "pai.theme";
+function initialTheme(): "light" | "dark" {
+  try {
+    const t = localStorage.getItem(THEME);
+    if (t === "light" || t === "dark") return t;
+  } catch {
+    /* no storage: white */
+  }
+  return "light";
+}
+
+export function useTheme(): ["light" | "dark", () => void] {
+  const [t, setT] = useState(initialTheme);
+  useEffect(() => {
+    document.documentElement.dataset.theme = t;
+    try {
+      localStorage.setItem(THEME, t);
+    } catch {
+      /* the choice lasts this tab */
+    }
+  }, [t]);
+  return [t, () => setT(t === "light" ? "dark" : "light")];
+}
 
 function Shell({ onOut }: { onOut: () => void }) {
   const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
   const { live, graph, error } = useLive();
+  const [theme, toggle] = useTheme();
   useEffect(() => {
     const on = () => setRoute(parse(window.location.hash));
     window.addEventListener("hashchange", on);
@@ -106,20 +133,22 @@ function Shell({ onOut }: { onOut: () => void }) {
         {NAV.map((n) => (
           <a key={n.page} href={`#/${n.page}`} className={route.page === n.page ? "active" : ""} title={n.hint}>
             <span className="icon">{n.icon}</span>
-            {n.label}
+            <span className="label">{n.label}</span>
           </a>
         ))}
         <div className="grow" />
-        <div className="nav-status">
-          <span className={`dot ${live ? "on" : ""}`} /> {live ? "Live" : "Reconnecting…"}
-          <div className="muted small">
-            {online} machine{online === 1 ? "" : "s"} · {stepping} working
-          </div>
-          <div className="muted small">{graph ? `v${graph.server.version}` : ""}</div>
+        <div className="nav-status" title={`${online} machine${online === 1 ? "" : "s"} connected, ${stepping} working${graph ? `, PAI ${graph.server.version}` : ""}`}>
+          <span className={`dot ${live ? "on" : ""}`} />
+          <span className="label">{live ? `${online} machine${online === 1 ? "" : "s"} · ${stepping} working` : "Reconnecting…"}</span>
         </div>
-        <button className="ghost small" onClick={onOut}>
-          Sign out
-        </button>
+        <div className="nav-tools">
+          <button className="icon-btn" onClick={toggle} title={theme === "light" ? "Dark theme" : "Light theme"} aria-label="Switch theme">
+            {theme === "light" ? "☾" : "☀"}
+          </button>
+          <button className="icon-btn" onClick={onOut} title="Sign out" aria-label="Sign out">
+            ⎋
+          </button>
+        </div>
       </nav>
       <main className="main">
         {error && <div className="banner error">{error}</div>}

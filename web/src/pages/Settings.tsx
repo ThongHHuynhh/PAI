@@ -13,6 +13,7 @@ export default function Settings() {
         <h1>Settings</h1>
       </header>
       <Providers />
+      <Failover />
       <Machines />
       <Keys />
       <Server />
@@ -24,6 +25,7 @@ function Providers() {
   const [cat, setCat] = useState<Catalog | null>(null);
   const [served, setServed] = useState<ProviderInfo[]>([]);
   const [pick, setPick] = useState("");
+  const [account, setAccount] = useState("");
   const [key, setKey] = useState("");
   const [login, setLogin] = useState<{ name: string; st: LoginState } | null>(null);
   const [paste, setPaste] = useState("");
@@ -51,8 +53,9 @@ function Providers() {
     setErr("");
     try {
       if (subscription) {
-        const st = await call<LoginState>("POST", `/providers/${pick}/login`, { shape: p!.shape });
-        setLogin({ name: pick, st });
+        const name = (account.trim() || pick).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+        const st = await call<LoginState>("POST", `/providers/${name}/login`, { shape: p!.shape });
+        setLogin({ name, st });
         return;
       }
       for (const id of Object.entries(cat!.providers).filter(([id, x]) => id === pick || (p!.group && x.group === p!.group)).map(([id]) => id)) {
@@ -71,8 +74,7 @@ function Providers() {
     <section className="card">
       <h2>Model providers</h2>
       <p className="muted small">
-        Use a Claude or ChatGPT subscription through their official sign-in, on this self-hosted server only, or any API key. Ollama and any
-        OpenAI-compatible server work too: add them in the server config with shape <code>openai-chat</code> and their URL.
+        Sign in with a Claude or ChatGPT subscription, or add an API key. You can add several accounts of one subscription, each under its own name.
       </p>
       <ul className="plain">
         {served.length === 0 && <li className="muted">None connected yet.</li>}
@@ -83,7 +85,17 @@ function Providers() {
         ))}
       </ul>
       <div className="row">
-        <select value={pick} onChange={(e) => setPick(e.target.value)}>
+        <select
+          value={pick}
+          onChange={(e) => {
+            const id = e.target.value;
+            setPick(id);
+            // a second account of a subscription gets its own name
+            let n = id, i = 2;
+            while (served.some((s) => s.name === n)) n = `${id}-${i++}`;
+            setAccount(n);
+          }}
+        >
           <option value="">Connect a provider…</option>
           {ids.map((id) => (
             <option key={id} value={id}>
@@ -93,6 +105,7 @@ function Providers() {
           ))}
         </select>
         {pick && !subscription && <input type="password" placeholder="API key" value={key} onChange={(e) => setKey(e.target.value)} />}
+        {pick && subscription && <input placeholder="account name" value={account} onChange={(e) => setAccount(e.target.value)} title="Each account is its own provider, so a second Claude or ChatGPT account can take over when the first hits its limit." />}
         {pick && (
           <button className="primary small" disabled={!subscription && !key} onClick={connect}>
             {subscription ? "Sign in" : "Save key"}
@@ -134,6 +147,52 @@ function Providers() {
         </div>
       )}
       {err && <p className="error">{err}</p>}
+    </section>
+  );
+}
+
+// Failover is which account takes a session over when another hits its usage
+// limit. History and memory belong to PAI, not to an account, so the new
+// account goes on where the old one stopped.
+function Failover() {
+  const [served, setServed] = useState<ProviderInfo[]>([]);
+  const [fb, setFb] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    call<ProviderInfo[]>("GET", "/providers").then(setServed, () => {});
+    call<Record<string, string>>("GET", "/fallbacks").then(setFb, () => {});
+  }, []);
+  if (served.length < 2) return null;
+  const set = async (from: string, to: string) => {
+    const next = { ...fb, [from]: to };
+    setFb(next);
+    await call("PUT", "/fallbacks", next);
+    setSaved("Saved");
+    window.setTimeout(() => setSaved(""), 1500);
+  };
+  return (
+    <section className="card">
+      <h2>When an account hits its limit</h2>
+      <p className="muted small">PAI moves the chat to the account you pick here and carries on, with the same history and memory.</p>
+      <ul className="plain">
+        {served.map((p) => (
+          <li key={p.name}>
+            <b>{p.name}</b>
+            <span className="muted small">continue on</span>
+            <select value={fb[p.name] ?? ""} onChange={(e) => set(p.name, e.target.value)}>
+              <option value="">nothing, stop</option>
+              {served
+                .filter((o) => o.name !== p.name)
+                .map((o) => (
+                  <option key={o.name} value={o.name}>
+                    {o.name}
+                  </option>
+                ))}
+            </select>
+          </li>
+        ))}
+      </ul>
+      {saved && <p className="muted small">{saved}</p>}
     </section>
   );
 }

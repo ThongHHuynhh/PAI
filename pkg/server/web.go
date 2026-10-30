@@ -35,6 +35,8 @@ import (
 //	POST   /memory/{id}/invalidate      {"reason"} -> the item
 //	POST   /memory/{id}/restore         -> the item
 //	POST   /memory/{id}/feedback        {"up"} -> the item
+//	GET    /fallbacks                   -> {"provider": "the provider its sessions move to at its limit"}
+//	PUT    /fallbacks                   the same, whole: saved in the config and applied
 //	POST   /memory/consolidate          -> {"clusters"}: merge what memory says more than once, with the
 //	                                    model of the newest session
 //
@@ -45,6 +47,7 @@ type webAPI struct {
 	bus   *events.Bus
 	mem   *memory.Store
 	url   func() string
+	path  string // the config, which holds the fallbacks
 }
 
 // heartbeat keeps an idle event stream open through proxies that end quiet
@@ -74,6 +77,41 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 	mux.HandleFunc("POST /memory/{id}/restore", wa.restore)
 	mux.HandleFunc("POST /memory/{id}/feedback", wa.feedback)
 	mux.HandleFunc("POST /memory/consolidate", wa.consolidate)
+	mux.HandleFunc("GET /fallbacks", func(w http.ResponseWriter, r *http.Request) {
+		c, err := loadConfig(wa.path)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if c.Fallbacks == nil {
+			c.Fallbacks = map[string]string{}
+		}
+		reply(w, c.Fallbacks)
+	})
+	mux.HandleFunc("PUT /fallbacks", func(w http.ResponseWriter, r *http.Request) {
+		var fb map[string]string
+		if err := json.NewDecoder(io.LimitReader(r.Body, maxMemoryBody)).Decode(&fb); err != nil {
+			fail(w, err)
+			return
+		}
+		for from, to := range fb {
+			if to == "" || to == from {
+				delete(fb, from)
+			}
+		}
+		keyMu.Lock()
+		defer keyMu.Unlock()
+		c, err := Load(wa.path)
+		if err == nil {
+			c.Fallbacks = fb
+			err = saveConfig(wa.path, c)
+		}
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 }
 
 // app serves the web app's files with no key, and sends a browser that asks
@@ -256,8 +294,8 @@ func (wa *webAPI) retrievals(w http.ResponseWriter, r *http.Request) {
 
 type memoryBody struct {
 	Text, Kind, Scope, Topic, Reason string
-	Pinned                    *bool
-	Up                        bool
+	Pinned                           *bool
+	Up                               bool
 }
 
 func decodeMemory(w http.ResponseWriter, r *http.Request) (memoryBody, bool) {

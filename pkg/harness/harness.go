@@ -43,6 +43,10 @@ type Harness struct {
 	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
 	Rename    func(old, name string) error // the coordinator's: the worker takes another name
 	Memory    *memory.Store                // what PAI knows across sessions; nil for none
+	// Fallbacks, when set, is the provider each provider hands its sessions
+	// to when its account is out of usage: a second account of the same
+	// subscription, or another vendor that serves the same model ids.
+	Fallbacks func() map[string]string
 	// OnRecord, when set, hears every record written, with its n. It must
 	// not block.
 	OnRecord func(id string, r statefile.Record)
@@ -338,6 +342,55 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	return h.step(ctx, s, id, conf, chain)
 }
 
+// fallback is the provider/model the session moves to when model's account
+// is out of usage: the next provider in the fallbacks chain that the server
+// serves and the session has not used since its last person's message, so a
+// chain of exhausted accounts ends instead of going round.
+func (h *Harness) fallback(model string, chain []statefile.Record) string {
+	if h.Fallbacks == nil {
+		return ""
+	}
+	name, m, ok := strings.Cut(model, "/")
+	if !ok {
+		return ""
+	}
+	tried := map[string]bool{name: true}
+	for _, r := range chain {
+		if r.Kind == statefile.Message && r.Via != "job" {
+			tried = map[string]bool{name: true}
+		}
+		if r.Kind == statefile.System && r.Source == "failover" {
+			if from, _, ok := strings.Cut(string(r.Body), " "); ok {
+				tried[from] = true
+			}
+		}
+	}
+	fb, ps := h.Fallbacks(), h.providers()
+	for next := fb[name]; next != "" && !tried[next]; next = fb[next] {
+		if _, ok := ps[next]; ok {
+			return next + "/" + m
+		}
+		tried[next] = true
+	}
+	return ""
+}
+
+// failover moves the session to model to, and says why in the file: the
+// model reads it, and a person sees it.
+func (h *Harness) failover(s *session, conf statefile.Conf, to string, why error) (int, error) {
+	from, _, _ := strings.Cut(conf.Model, "/")
+	conf.Model = to
+	body, err := json.Marshal(conf)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := h.append(s, statefile.Record{Header: statefile.Header{Kind: statefile.Config, Type: "application/json", Via: "failover"}, Body: body}); err != nil {
+		return 0, err
+	}
+	log.Printf("session %s: %s is out of usage, going on with %s: %v", s.id, from, to, why)
+	return h.append(s, system("failover", fmt.Sprintf("%s hit its limit (%s). PAI moved this session to %s; history and memory are the same.", from, clipText(why.Error(), 300), to)))
+}
+
 // compactable is whether a compaction may run now: a step was built since
 // the newest compaction, so its prompt size says what the context is now.
 func compactable(chain []statefile.Record) bool {
@@ -414,6 +467,13 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	})
 	if appendErr != nil {
 		return "", appendErr
+	}
+	if err != nil && s.stoppedBy() == "" && len(calls) == 0 && provider.Exhausted(err) {
+		if to := h.fallback(conf.Model, chain); to != "" {
+			if _, ferr := h.failover(s, conf, to, err); ferr == nil {
+				return statefile.StatusOpen, nil // the next step runs on the fallback
+			}
+		}
 	}
 	if err != nil {
 		if via := s.stoppedBy(); via != "" {

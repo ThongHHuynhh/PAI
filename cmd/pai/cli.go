@@ -35,7 +35,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
-	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1},
+	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "model": {2, 2}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -96,6 +96,10 @@ func cli(verb string, args []string) {
 	case "name":
 		var out struct{ N int }
 		c.call("PUT", "/sessions/"+args[0]+"/name?via="+via, "text/plain", strings.NewReader(strings.Join(args[1:], " ")), &out)
+		fmt.Println(out.N)
+	case "model":
+		var out struct{ N int }
+		c.call("PUT", "/sessions/"+args[0]+"/model?via="+via, "text/plain", strings.NewReader(args[1]), &out)
 		fmt.Println(out.N)
 	case "workers set":
 		ws := make([]statefile.Worker, 0, len(args)-1)

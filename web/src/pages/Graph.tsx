@@ -240,6 +240,22 @@ export default function GraphPage() {
             </button>
           </section>
         )}
+        <section className="card glance only-phone-block">
+          <h3>At a glance</h3>
+          <ul>
+            {machines.map((m) => (
+              <li key={m.name}>
+                <span className={`dot ${m.connected ? "on" : ""}`} /> <b>{m.name}</b> <span className="muted small">{m.connected ? "connected" : "offline"}</span>
+              </li>
+            ))}
+            {sessions.slice(0, 6).map((s) => (
+              <li key={s.id} onClick={() => go({ page: "sessions", arg: s.id })}>
+                <span className={`pill ${s.status}`}>{s.status === "stepping" ? "working" : s.status}</span> <span className="ellipsis">{sessionTitle(s)}</span>
+                <span className="muted small">{splitModel(s.config.model)[1]}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
         <section className="card feed">
           <h3>Activity</h3>
           {feed.length === 0 && <p className="muted small">Waiting for something to happen…</p>}

@@ -3,10 +3,12 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"pai/pkg/memory"
+	"pai/pkg/provider"
 	"pai/pkg/statefile"
 )
 
@@ -76,5 +78,33 @@ func TestApplyOps(t *testing.T) {
 	}
 	if len(valid) != 3 {
 		t.Fatalf("want 3 valid items, got %d: %s", len(valid), got)
+	}
+}
+
+// A session out of usage moves along the fallback chain, skips what it
+// tried since the last message, and stops at the chain's end.
+func TestFallbackChain(t *testing.T) {
+	h := &Harness{
+		Providers: map[string]provider.Provider{"cc1": {}, "cc2": {}, "api": {}},
+		Fallbacks: func() map[string]string {
+			return map[string]string{"cc1": "cc2", "cc2": "gone", "gone": "api", "api": "cc1"}
+		},
+	}
+	msg := r(3, statefile.Message, "hi")
+	if got := h.fallback("cc1/claude-sonnet-5-5", []statefile.Record{msg}); got != "cc2/claude-sonnet-5-5" {
+		t.Fatalf("first fallback: %q", got)
+	}
+	moved := r(4, statefile.System, "cc1 hit its limit")
+	moved.Source = "failover"
+	if got := h.fallback("cc2/claude-sonnet-5-5", []statefile.Record{msg, moved}); got != "api/claude-sonnet-5-5" {
+		t.Fatalf("second fallback should skip the provider not served: %q", got)
+	}
+	moved2 := r(5, statefile.System, "cc2 hit its limit")
+	moved2.Source = "failover"
+	if got := h.fallback("api/claude-sonnet-5-5", []statefile.Record{msg, moved, moved2}); got != "" {
+		t.Fatalf("the chain came back round to a tried account: %q", got)
+	}
+	if !provider.Exhausted(errors.New("claude: You've hit your usage limit")) || provider.Exhausted(errors.New("bad request: unknown field")) {
+		t.Fatal("Exhausted misreads")
 	}
 }

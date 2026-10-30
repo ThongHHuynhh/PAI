@@ -392,6 +392,8 @@ func usage() {
   name       <id> [text]             PUT  /sessions/{id}/name: the session's name; no text removes it
   sessions   [status]                GET  /sessions
   workers                            GET  /workers
+  model      <id> <provider/model>   PUT  /sessions/{id}/model: another account or vendor takes the session over
+                                     from its next step, with the same history and memory
   workers    <id> <name>...          PUT  /sessions/{id}/workers: the session's workers are these from its next step on
   worker     remove <name>           DELETE /workers/{name}: it leaves the mesh for good; pai-server join cycle
                                      too keeps the device code it had from joining machines again
