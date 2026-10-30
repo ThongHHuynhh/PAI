@@ -107,17 +107,17 @@ func newSession(a *App, l *sessionList, id string) *session {
 	s.input.Before = s.slash.Key
 	s.box = inputBox(a, s.input)
 	s.inputRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.box, &Node{Grow: 1})
-	s.slashBox = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{a.Theme.Muted}}, &Node{Grow: 1, BG: a.Theme.Panel, View: s.slash})
+	s.slashBox = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{InkMuted}}, &Node{Grow: 1, Paint: PaintPanel, View: s.slash})
 	s.slashRow = Box(&Node{Dir: Row}, &Node{Grow: 1}, s.slashBox, &Node{Grow: 1})
 	s.body = &Node{Grow: 1, View: s.transcript}
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
 	s.statusRow = Box(&Node{Dir: Row, Min: 1, Max: 3}, &Node{Grow: 1, View: s.status}, &Node{View: s.meta})
 	s.busyRow = &Node{Fixed: 2, Pad: [4]int{0, 1, 0, 0}, View: s.busy}
 	s.orbit = &orbit{on: func() bool { return s.blank }, nodes: func() int { return l.nodes }}
-	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel, Pad: [4]int{0, 1, 0, 1}, View: l}
+	s.sidebar = &Node{Fixed: sidebarWidth, Paint: PaintPanel, Pad: [4]int{0, 1, 0, 1}, View: l}
 	main := Box(&Node{Dir: Col, Grow: 1, Over: s.orbit},
 		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
-	s.root = Box(&Node{Dir: Row, BG: a.Theme.BG}, s.sidebar, main)
+	s.root = Box(&Node{Dir: Row, Paint: PaintScreen}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
 	if d, ok := l.drafts[id]; ok {
 		s.input.els, s.input.cur = append([]elem(nil), d...), len(d)

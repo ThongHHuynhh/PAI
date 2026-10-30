@@ -94,15 +94,15 @@ func newQuickstart(a *App, c *connector.Client) *quickstart {
 	q.input.insert(textElems(qsCommand)...)
 	q.splash = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1},
 		&Node{View: Wordmark{}}, &Node{Fixed: 1},
-		&Node{View: &Text{S: qsAnyKey, Center: true, Style: a.Theme.text()}},
+		&Node{View: &Text{S: qsAnyKey, Center: true, Ink: InkText}},
 		&Node{Grow: 1})
 	q.orbit = &orbit{on: func() bool { return q.step == stepSplash }, nodes: func() int { return len(q.workers) }}
-	q.slashRow = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{a.Theme.Muted}}, &Node{Grow: 1, BG: a.Theme.Panel, View: q.slash})
+	q.slashRow = Box(&Node{Dir: Row}, &Node{Fixed: 1, View: bar{InkMuted}}, &Node{Grow: 1, Paint: PaintPanel, View: q.slash})
 	q.inputRow = Box(&Node{Dir: Col, Pad: [4]int{0, 1, 0, 0}}, inputBox(a, q.input))
 	q.hint = Box(&Node{Dir: Row, Pad: [4]int{margin, 0, 0, 0}}, &Node{Grow: 1, View: q.left}, &Node{View: q.right})
 	q.col = Box(&Node{Dir: Col}, &Node{View: Wordmark{}}, &Node{Fixed: 1}, q.body, q.slashRow, q.inputRow, q.hint)
 	q.steps = Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1}, centered(q.col), &Node{Grow: 1})
-	q.root = Box(&Node{Dir: Col, BG: a.Theme.BG, Over: q.orbit}, q.splash, q.steps)
+	q.root = Box(&Node{Dir: Col, Paint: PaintScreen, Over: q.orbit}, q.splash, q.steps)
 	a.Focus(nil)
 	q.poll(a)
 	return q

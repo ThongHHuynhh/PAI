@@ -26,9 +26,9 @@ func (d closer) Key(a *App, k term.Key) bool {
 func (a *App) Dialog(title string, body *Node) *Layer {
 	l := &Layer{Modal: true}
 	head := Box(&Node{Dir: Row, Fixed: 1},
-		&Node{Grow: 1, View: &Text{S: title, Style: term.Style{FG: a.Theme.Text, Attr: term.Bold}}},
-		&Node{Fixed: 3, View: &Text{S: "esc", Style: a.Theme.muted()}})
-	l.Root = Box(&Node{Dir: Col, BG: a.Theme.Panel, Pad: [4]int{2, 1, 2, 1}, View: closer{l}},
+		&Node{Grow: 1, View: &Text{S: title, Style: term.Style{Attr: term.Bold}, Ink: InkText}},
+		&Node{Fixed: 3, View: &Text{S: "esc", Ink: InkMuted}})
+	l.Root = Box(&Node{Dir: Col, Paint: PaintPanel, Pad: [4]int{2, 1, 2, 1}, View: closer{l}},
 		head, &Node{Fixed: 1}, body)
 	l.Place = func(w, h int) Rect {
 		dw := min(dialogWidth, w-4)

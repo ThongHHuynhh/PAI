@@ -58,6 +58,7 @@ func wrapLine(gs []glyph, w int) [][2]int {
 type Text struct {
 	S      string
 	Style  term.Style
+	Ink    Ink // when set, the theme color the text takes, over Style's
 	Center bool
 }
 
@@ -75,6 +76,10 @@ func (t *Text) rows(w int) [][]glyph {
 func (t *Text) Height(w int) int { return len(t.rows(w)) }
 
 func (t *Text) Draw(a *App, c *Canvas, r Rect) {
+	st := t.Style
+	if t.Ink != InkNone {
+		st.FG = a.Theme.ink(t.Ink)
+	}
 	for i, row := range t.rows(r.W) {
 		x := r.X
 		if t.Center {
@@ -85,7 +90,7 @@ func (t *Text) Draw(a *App, c *Canvas, r Rect) {
 			x += max(0, (r.W-w)/2)
 		}
 		for _, g := range row {
-			c.Set(x, r.Y+i, g.g, g.w, t.Style)
+			c.Set(x, r.Y+i, g.g, g.w, st)
 			x += g.w
 		}
 	}

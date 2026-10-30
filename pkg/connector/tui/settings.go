@@ -71,7 +71,7 @@ func question(a *App, title, words, yesLabel, noLabel string, yes func(*App), no
 		a.Pop(l)
 		yes(a)
 	})},
-		&Node{View: &Text{S: words, Style: a.Theme.text()}}, &Node{Fixed: 1},
+		&Node{View: &Text{S: words, Ink: InkText}}, &Node{Fixed: 1},
 		hint(cat(run("esc", key), run(" "+noLabel, muted)), cat(run("enter", key), run(" "+yesLabel, muted)))))
 	l.Esc, l.Cover = no, true
 }
@@ -182,7 +182,7 @@ func (s *session) settingsMenu(a *App) {
 				v.Hint = "Update to " + l
 				v.Pick = func(a *App, _ *MenuItem) { update(a, s.c, l) }
 			}
-			m.Items = []MenuItem{v}
+			m.Items = []MenuItem{v, {Section: "Look", Label: "Theme", Hint: themeLabel(a.ThemeID), Pick: func(a *App, _ *MenuItem) { s.themeMenu(a) }}}
 			a.OpenMenu("Settings", m)
 		})
 	})

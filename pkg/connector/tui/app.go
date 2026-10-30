@@ -79,7 +79,11 @@ type Selector interface {
 type App struct {
 	T     *term.Terminal
 	Theme Theme
-	W, H  int
+	// ThemeID is the theme chosen with /theme; empty follows the terminal.
+	ThemeID string
+	W, H    int
+	// themeGen counts theme switches, so laid out rows know theirs are old.
+	themeGen int
 
 	screen  Screen
 	layers  []*Layer // over the screen, bottom first
@@ -110,7 +114,8 @@ type App struct {
 }
 
 func NewApp(t *term.Terminal) *App {
-	a := &App{T: t, Theme: themeFor(t.Caps), r: term.NewRenderer(t), post: make(chan func(), 64), Status: &Text{}, MouseX: -1, MouseY: -1}
+	theme := loadPrefs().Theme
+	a := &App{T: t, Theme: themeFor(t.Caps, theme), ThemeID: theme, r: term.NewRenderer(t), post: make(chan func(), 64), Status: &Text{}, MouseX: -1, MouseY: -1}
 	a.W, a.H = t.Size()
 	return a
 }
@@ -386,11 +391,11 @@ func (a *App) Copy(text string) {
 }
 
 // Say puts msg on the status line.
-func (a *App) Say(msg string) { *a.Status = Text{S: msg, Style: a.Theme.muted()} }
+func (a *App) Say(msg string) { *a.Status = Text{S: msg, Ink: InkMuted} }
 
 // SayError puts err on the status line in the error color.
 func (a *App) SayError(err error) {
-	*a.Status = Text{S: err.Error(), Style: term.Style{FG: a.Theme.Error}}
+	*a.Status = Text{S: err.Error(), Ink: InkError}
 }
 
 func (a *App) Push(l *Layer) { a.layers = append(a.layers, l) }

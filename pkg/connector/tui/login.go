@@ -17,16 +17,16 @@ const boxWidth = 80
 // bar's cell keeps the screen background, as opencode's does.
 func inputBox(a *App, in *Input) *Node {
 	return Box(&Node{Dir: Row},
-		&Node{Fixed: 1, View: bar{a.Theme.Accent}},
-		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, BG: a.Theme.Panel, View: in})
+		&Node{Fixed: 1, View: bar{InkAccent}},
+		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, Paint: PaintPanel, View: in})
 }
 
 // bar is a vertical line the height of its node.
-type bar struct{ fg term.Color }
+type bar struct{ ink Ink }
 
 func (b bar) Draw(a *App, c *Canvas, r Rect) {
 	for y := range r.H {
-		c.Set(r.X, r.Y+y, "┃", 1, term.Style{FG: b.fg})
+		c.Set(r.X, r.Y+y, "┃", 1, term.Style{FG: a.Theme.ink(b.ink)})
 	}
 }
 
@@ -50,11 +50,11 @@ func newLogin(a *App) *login {
 	s := &login{input: NewInput(), status: &Text{}}
 	s.input.Placeholder, s.input.OnSubmit = "pai_key_...", s.submit
 	s.box = inputBox(a, s.input)
-	s.root = Box(&Node{Dir: Col, BG: a.Theme.BG},
+	s.root = Box(&Node{Dir: Col, Paint: PaintScreen},
 		&Node{Grow: 1},
 		&Node{View: Wordmark{}},
 		&Node{Fixed: 1},
-		&Node{View: &Text{S: "Paste your PAI API key", Center: true, Style: a.Theme.muted()}},
+		&Node{View: &Text{S: "Paste your PAI API key", Center: true, Ink: InkMuted}},
 		&Node{Fixed: 1},
 		centered(s.box),
 		&Node{Fixed: 1},

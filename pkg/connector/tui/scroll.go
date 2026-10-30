@@ -49,6 +49,7 @@ type Scrollbox struct {
 	items  []*item
 	rows   []srow
 	width  int // rows are laid out for this width; 0 is not yet
+	gen    int // and in the colors of this theme switch, App.themeGen
 	dirty  bool
 	top    int
 	sticky bool
@@ -165,8 +166,8 @@ func (s *Scrollbox) Draw(a *App, c *Canvas, r Rect) {
 	if s.Bar && r.W > 2 {
 		tw = r.W - 2
 	}
-	if tw != s.width {
-		s.width, s.sel.on, s.dirty = max(1, tw), false, true
+	if tw != s.width || s.gen != a.themeGen {
+		s.width, s.gen, s.sel.on, s.dirty = max(1, tw), a.themeGen, false, true
 		for _, it := range s.items {
 			it.stale = true
 		}

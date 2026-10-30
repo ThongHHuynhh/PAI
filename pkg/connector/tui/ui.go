@@ -110,6 +110,7 @@ type Node struct {
 	Min, Max int
 	Pad      [4]int // left, top, right, bottom
 	BG       term.Color
+	Paint    Paint // when set, the theme color it fills with, over BG
 	Hidden   bool
 	Kids     []*Node
 	View     View
@@ -220,8 +221,12 @@ func (n *Node) Draw(a *App, c *Canvas) {
 		return
 	}
 	c = c.Sub(n.Rect)
-	if n.BG != 0 {
-		c.Fill(n.Rect, n.BG)
+	bg := n.BG
+	if n.Paint != PaintNone {
+		bg = a.Theme.paint(n.Paint)
+	}
+	if bg != 0 {
+		c.Fill(n.Rect, bg)
 	}
 	if n.View != nil {
 		in := n.content()

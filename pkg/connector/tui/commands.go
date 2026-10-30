@@ -58,6 +58,7 @@ func commands() []command {
 		{"rollback", []string{"revert", "rewind"}, "Roll back to before a message", "", (*session).rollback},
 		{"workers", nil, "Workers", "", (*session).workers},
 		{"settings", nil, "Settings", "", (*session).settingsMenu},
+		{"theme", []string{"themes", "colors"}, "Theme", "", (*session).themeMenu},
 		{"stop", nil, "Stop the session", "esc esc", (*session).halt},
 		{"info", []string{"debug", "id"}, "Session info", "", (*session).infoMenu},
 		{"log", nil, "Save the session's log file", "", (*session).saveLog},

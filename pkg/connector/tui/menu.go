@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"pai/pkg/connector/tui/term"
@@ -22,6 +23,8 @@ type Menu struct {
 	Items  []MenuItem
 	Checks bool
 	Single bool
+	Start  int                        // the item selected when it opens
+	Hover  func(a *App, it *MenuItem) // runs when the selection moves to it
 
 	query string
 	sel   int // index into rows
@@ -40,7 +43,17 @@ type mrow struct {
 // OpenMenu shows m in a dialog.
 func (a *App) OpenMenu(title string, m *Menu) {
 	m.filter()
+	if i := slices.IndexFunc(m.rows, func(r mrow) bool { return r.item == m.Start && r.item >= 0 }); i >= 0 {
+		m.sel = i
+	}
 	m.layer = a.Dialog(title, &Node{View: m})
+}
+
+// moved runs Hover when the selection is no longer on row was.
+func (m *Menu) moved(a *App, was int) {
+	if m.Hover != nil && m.sel != was && m.sel >= 0 && m.sel < len(m.rows) && m.rows[m.sel].item >= 0 {
+		m.Hover(a, &m.Items[m.rows[m.sel].item])
+	}
 }
 
 // filter shows the items that hold the query, those that start with it
@@ -186,6 +199,7 @@ func (m *Menu) pick(a *App, row int) {
 }
 
 func (m *Menu) Key(a *App, k term.Key) bool {
+	defer m.moved(a, m.sel)
 	switch k.String() {
 	case "up":
 		m.step(-1)
@@ -229,6 +243,7 @@ func (m *Menu) Paste(_ *App, t string) {
 }
 
 func (m *Menu) Mouse(a *App, mo term.Mouse, r Rect) bool {
+	defer m.moved(a, m.sel)
 	switch {
 	case mo.Button == term.WheelUp:
 		m.step(-1)
