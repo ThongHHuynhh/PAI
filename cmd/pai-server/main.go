@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
 	"pai/pkg/auth"
 	"pai/pkg/elevate"
 	"pai/pkg/identity"
@@ -37,7 +38,6 @@ import (
 	"pai/pkg/server"
 	"pai/pkg/version"
 	"pai/pkg/worker"
-	"golang.org/x/term"
 )
 
 func main() {

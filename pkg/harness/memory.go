@@ -44,7 +44,7 @@ var memoryTools = map[string]bool{"recall": true, "remember": true, "forget": tr
 
 type memArgs struct {
 	Query, Text, Kind, Scope, Topic, ID, Reason string
-	K                                    int
+	K                                           int
 }
 
 // memoryCall runs a memory tool for session id. A failure is a result the
