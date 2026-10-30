@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,7 +35,7 @@ const (
 
 var (
 	recall   = provider.Tool{Name: "recall", Description: "Search PAI's long-term memory: what was learnt in every earlier session, on every machine and model. Returns items with ids", Schema: schema(`{"type":"object","properties":{"query":{"type":"string"},"k":{"type":"integer","description":"how many items, default 8"}},"required":["query"]}`)}
-	remember = provider.Tool{Name: "remember", Description: "Save one lasting item to PAI's long-term memory, as one self-contained sentence. Use for facts about the user, their machines and projects, preferences, decisions and why, todos, and procedures that worked", Schema: schema(`{"type":"object","properties":{"text":{"type":"string"},"kind":{"type":"string","enum":["fact","preference","decision","todo","procedure"]},"scope":{"type":"string","description":"global, or project:<name>; default global"}},"required":["text"]}`)}
+	remember = provider.Tool{Name: "remember", Description: "Save one lasting item to PAI's long-term memory, as one self-contained sentence. Use for facts about the user, their machines and projects, preferences, decisions and why, todos, and procedures that worked", Schema: schema(`{"type":"object","properties":{"text":{"type":"string"},"topic":{"type":"string","description":"a short lower case name of the subject, shared by related items, such as deploy or database"},"kind":{"type":"string","enum":["fact","preference","decision","todo","procedure"]},"scope":{"type":"string","description":"global, or project:<name>; default global"}},"required":["text"]}`)}
 	forget   = provider.Tool{Name: "forget", Description: "Mark a memory item as no longer true, by its id, with why. It stops being recalled; it is never deleted", Schema: schema(`{"type":"object","properties":{"id":{"type":"string"},"reason":{"type":"string"}},"required":["id","reason"]}`)}
 )
 
@@ -42,7 +43,7 @@ var (
 var memoryTools = map[string]bool{"recall": true, "remember": true, "forget": true}
 
 type memArgs struct {
-	Query, Text, Kind, Scope, ID, Reason string
+	Query, Text, Kind, Scope, Topic, ID, Reason string
 	K                                    int
 }
 
@@ -75,7 +76,7 @@ func (h *Harness) memoryCall(ctx context.Context, id string, call statefile.Reco
 		}
 		return result(call.ID, b.String())
 	case "remember":
-		it, fresh, err := h.Memory.Remember(ctx, memory.Item{Text: a.Text, Kind: a.Kind, Scope: a.Scope, Session: id, From: call.N, To: call.N, Source: "model"})
+		it, fresh, err := h.Memory.Remember(ctx, memory.Item{Text: a.Text, Kind: a.Kind, Scope: a.Scope, Topic: a.Topic, Session: id, From: call.N, To: call.N, Source: "model"})
 		if err != nil {
 			return result(call.ID, "error: "+err.Error())
 		}
@@ -191,13 +192,14 @@ func (h *Harness) afterTurn(ctx context.Context, id string) {
 		return
 	}
 	h.settle(ctx, id, chain)
+	conf, err := config(chain)
+	if err != nil {
+		return
+	}
 	from := h.Memory.Extracted(ctx, id)
 	tip := chain[len(chain)-1].N
 	if tip-from < extractEvery {
-		return
-	}
-	conf, err := config(chain)
-	if err != nil {
+		h.consolidateSoon(ctx, conf) // what remember saved may repeat what was known
 		return
 	}
 	go func() {
@@ -209,14 +211,15 @@ func (h *Harness) afterTurn(ctx context.Context, id string) {
 			log.Printf("session %s: extract: %v", id, err)
 			return
 		}
-		h.keep(ctx, id, from+1, tip, out)
+		h.keep(ctx, conf, id, from+1, tip, out)
 		if err := h.Memory.SetExtracted(ctx, id, tip); err != nil {
 			log.Printf("session %s: extract: %v", id, err)
 		}
+		h.consolidateSoon(ctx, conf)
 	}()
 }
 
-const memoryRules = `Memory: a JSON array in one ` + "```json" + ` fence of lasting items worth knowing in later sessions, each {"kind": "fact" | "preference" | "decision" | "todo" | "procedure", "text": one self-contained sentence that names what it is about, "scope": "global" or "project:<name>"}. Keep only knowledge that outlives this session: the user, their machines, projects, accounts and paths, preferences, decisions and why, open todos, and procedures that worked. Leave out passing steps and anything secret, such as keys and passwords. An empty array when there is none.`
+const memoryRules = `Memory: a JSON array in one ` + "```json" + ` fence of lasting items worth knowing in later sessions, each {"kind": "fact" | "preference" | "decision" | "todo" | "procedure", "topic": a short lower case name of the subject, such as "deploy", "database" or "editor", the same for items about one subject, "text": one self-contained sentence that names what it is about, "scope": "global" or "project:<name>"}. Keep only knowledge that outlives this session and would change what an agent does later: the user, their machines, projects, accounts and paths, preferences, decisions and why, open todos, and procedures that worked. Leave out passing steps, chatter, what is obvious, guesses, and anything secret, such as keys and passwords. Put everything about one subject in one item, not one item per detail. An empty array when there is none.`
 
 const extractSystem = `You read a stretch of an agent session and list what is worth remembering. Reply with only: ` + memoryRules
 
@@ -231,30 +234,266 @@ What the user wants; what was done and found, with exact file paths, commands, n
 // fence finds a json fence.
 var fence = regexp.MustCompile("(?s)```json\\s*(.*?)```")
 
-// keep saves the memory items a reply lists, learnt from session records
-// from through to.
-func (h *Harness) keep(ctx context.Context, id string, from, to int, reply string) []memory.Item {
+// candidate is an item a model proposes for memory.
+type candidate struct{ Kind, Topic, Text, Scope string }
+
+// keep saves what a reply lists for memory, learnt from session records
+// from through to. Useless and secret items go first. Items with nothing
+// related in memory are stored; the rest, with what they relate to, go to
+// the model to add, merge, update, retire or skip, so memory stays small and
+// says each thing once.
+func (h *Harness) keep(ctx context.Context, conf statefile.Conf, id string, from, to int, reply string) []memory.Item {
 	m := fence.FindStringSubmatch(reply)
 	if m == nil {
 		return nil
 	}
-	var items []struct{ Kind, Text, Scope string }
-	if err := json.Unmarshal([]byte(m[1]), &items); err != nil {
+	var cands []candidate
+	if err := json.Unmarshal([]byte(m[1]), &cands); err != nil {
 		log.Printf("session %s: memory reply: %v", id, err)
 		return nil
 	}
+	base := memory.Item{Session: id, From: from, To: to, Source: "extract"}
+	var fresh []candidate
+	related := map[string]memory.Item{}
 	var kept []memory.Item
-	for _, it := range items {
-		got, fresh, err := h.Memory.Remember(ctx, memory.Item{Text: it.Text, Kind: it.Kind, Scope: it.Scope, Session: id, From: from, To: to, Source: "extract"})
-		if err != nil {
-			log.Printf("session %s: remember: %v", id, err)
+	for _, c := range cands {
+		if err := memory.Useful(c.Text); err != nil {
 			continue
 		}
-		if fresh {
-			kept = append(kept, got)
+		rel, err := h.Memory.Related(ctx, memory.Item{Text: c.Text, Topic: c.Topic, Scope: c.Scope})
+		if err != nil {
+			log.Printf("session %s: related: %v", id, err)
+			continue
+		}
+		if len(rel) == 0 {
+			kept = append(kept, h.store(ctx, base, c)...)
+			continue
+		}
+		fresh = append(fresh, c)
+		for _, r := range rel {
+			related[r.ID] = r
 		}
 	}
-	return kept
+	if len(fresh) == 0 {
+		return kept
+	}
+	var existing []memory.Item
+	for _, r := range related {
+		existing = append(existing, r)
+	}
+	ops, err := h.consolidate(ctx, conf, id, existing, fresh)
+	if err != nil {
+		log.Printf("session %s: consolidate: %v; storing as they are", id, err)
+		for _, c := range fresh {
+			kept = append(kept, h.store(ctx, base, c)...)
+		}
+		return kept
+	}
+	return append(kept, h.apply(ctx, base, ops, fresh)...)
+}
+
+// store saves one candidate as it is; repeats merge in the store.
+func (h *Harness) store(ctx context.Context, base memory.Item, c candidate) []memory.Item {
+	it := base
+	it.Kind, it.Topic, it.Text, it.Scope = c.Kind, c.Topic, c.Text, c.Scope
+	got, isNew, err := h.Memory.Remember(ctx, it)
+	if err != nil {
+		log.Printf("session %s: remember: %v", base.Session, err)
+		return nil
+	}
+	if isNew {
+		return []memory.Item{got}
+	}
+	return nil
+}
+
+const consolidateSystem = `You keep PAI's long-term memory small, correct and free of repeats. You get EXISTING items, with ids, and NEW candidate items, by index. Reply with only a JSON array of operations in one ` + "```json" + ` fence:
+- {"op": "add", "new": i}: new item i says something memory does not, keep it as it is
+- {"op": "merge", "ids": [existing ids], "new": [indexes], "kind", "topic", "scope", "text"}: items about one subject or field become one complete self-contained statement that keeps every useful detail of them; the items merged are retired
+- {"op": "update", "id": existing id, "new": [indexes], "text"}: an existing item changed or gains detail; text is its new whole statement
+- {"op": "retire", "id": existing id, "reason"}: an existing item is wrong, contradicted or no longer true
+- {"op": "skip", "new": i, "reason"}: new item i is already known, trivial, passing, a guess, or holds a secret
+Every new item appears in exactly one operation. Prefer merge whenever items share a subject. Newer information wins a conflict. Leave existing items no operation names as they are.`
+
+// op is one consolidation operation. New is an index or a list of them.
+type op struct {
+	Op     string          `json:"op"`
+	New    json.RawMessage `json:"new"`
+	IDs    []string        `json:"ids"`
+	ID     string          `json:"id"`
+	Text   string          `json:"text"`
+	Kind   string          `json:"kind"`
+	Topic  string          `json:"topic"`
+	Scope  string          `json:"scope"`
+	Reason string          `json:"reason"`
+}
+
+func (o op) news() []int {
+	var one int
+	if json.Unmarshal(o.New, &one) == nil {
+		return []int{one}
+	}
+	var many []int
+	_ = json.Unmarshal(o.New, &many)
+	return many
+}
+
+// consolidate asks the session's model what to do with fresh beside
+// existing.
+func (h *Harness) consolidate(ctx context.Context, conf statefile.Conf, id string, existing []memory.Item, fresh []candidate) ([]op, error) {
+	var b strings.Builder
+	b.WriteString("EXISTING:\n")
+	for _, it := range existing {
+		fmt.Fprintf(&b, "- id %s (%s, topic %q, %s) %s\n", it.ID, it.Kind, it.Topic, it.Scope, it.Text)
+	}
+	b.WriteString("\nNEW:\n")
+	for i, c := range fresh {
+		fmt.Fprintf(&b, "- %d (%s, topic %q, %s) %s\n", i, c.Kind, c.Topic, cmp.Or(c.Scope, memory.Global), c.Text)
+	}
+	out, err := h.complete(ctx, conf, id, consolidateSystem, b.String())
+	if err != nil {
+		return nil, err
+	}
+	m := fence.FindStringSubmatch(out)
+	if m == nil {
+		return nil, fmt.Errorf("no json in the reply")
+	}
+	var ops []op
+	return ops, json.Unmarshal([]byte(m[1]), &ops)
+}
+
+// apply runs ops. A new item no op names is stored as it is: nothing a model
+// leaves out is lost.
+func (h *Harness) apply(ctx context.Context, base memory.Item, ops []op, fresh []candidate) []memory.Item {
+	done := make([]bool, len(fresh))
+	var out []memory.Item
+	from := func(o op) memory.Item {
+		it := base
+		it.Text, it.Kind, it.Topic, it.Scope = o.Text, o.Kind, o.Topic, o.Scope
+		for _, i := range o.news() {
+			if i >= 0 && i < len(fresh) {
+				done[i] = true
+				it.Kind, it.Topic, it.Scope = cmp.Or(it.Kind, fresh[i].Kind), cmp.Or(it.Topic, fresh[i].Topic), cmp.Or(it.Scope, fresh[i].Scope)
+			}
+		}
+		return it
+	}
+	for _, o := range ops {
+		var err error
+		switch o.Op {
+		case "add":
+			for _, i := range o.news() {
+				if i >= 0 && i < len(fresh) && !done[i] {
+					done[i] = true
+					out = append(out, h.store(ctx, base, fresh[i])...)
+				}
+			}
+		case "skip":
+			for _, i := range o.news() {
+				if i >= 0 && i < len(fresh) {
+					done[i] = true
+				}
+			}
+		case "merge", "update":
+			ids := o.IDs
+			if o.Op == "update" {
+				ids = []string{o.ID}
+			}
+			it := from(o)
+			if len(ids) == 0 || ids[0] == "" {
+				out = append(out, h.store(ctx, base, candidate{it.Kind, it.Topic, it.Text, it.Scope})...)
+				continue
+			}
+			var got memory.Item
+			if got, err = h.Memory.Merge(ctx, ids, it); err == nil {
+				out = append(out, got)
+			}
+		case "retire":
+			_, err = h.Memory.Invalidate(ctx, o.ID, cmp.Or(o.Reason, "retired by consolidation"))
+		}
+		if err != nil {
+			log.Printf("session %s: memory %s: %v", base.Session, o.Op, err)
+		}
+	}
+	for i, c := range fresh {
+		if !done[i] {
+			out = append(out, h.store(ctx, base, c)...)
+		}
+	}
+	return out
+}
+
+// consolidateEvery spaces background passes: one pass reads every cluster,
+// and memory changes slowly.
+const consolidateEvery = 10 * time.Minute
+
+// maxClusters bounds one pass: each cluster is one model call.
+const maxClusters = 6
+
+// Consolidate merges what memory says more than once: each cluster of items
+// about one subject goes to the model, which merges, updates or retires.
+// conf is the session config whose model it uses. It returns how many
+// clusters it read.
+func (h *Harness) Consolidate(ctx context.Context, conf statefile.Conf) (int, error) {
+	if h.Memory == nil {
+		return 0, fmt.Errorf("this server has no memory store")
+	}
+	clusters, err := h.Memory.Clusters(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, c := range clusters[:min(len(clusters), maxClusters)] {
+		ops, err := h.consolidate(ctx, conf, "consolidate", c, nil)
+		if err != nil {
+			return n, err
+		}
+		h.apply(ctx, memory.Item{Source: "consolidation"}, ops, nil)
+		n++
+	}
+	h.cmu.Lock()
+	h.consolidated = time.Now()
+	h.cmu.Unlock()
+	return n, nil
+}
+
+// LatestConf is the config of the session updated last: the model a
+// consolidation started by a person uses.
+func (h *Harness) LatestConf() (statefile.Conf, error) {
+	infos, err := h.List()
+	if err != nil {
+		return statefile.Conf{}, err
+	}
+	if len(infos) == 0 {
+		return statefile.Conf{}, fmt.Errorf("no session yet: consolidation uses the model of the newest session")
+	}
+	return infos[0].Config, nil
+}
+
+// consolidateSoon runs a background pass with conf's model when the last
+// was long enough ago.
+func (h *Harness) consolidateSoon(ctx context.Context, conf statefile.Conf) {
+	h.cmu.Lock()
+	if time.Since(h.consolidated) < consolidateEvery || h.consolidating {
+		h.cmu.Unlock()
+		return
+	}
+	h.consolidating = true
+	h.cmu.Unlock()
+	go func() {
+		defer func() {
+			h.cmu.Lock()
+			h.consolidating = false
+			h.cmu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), maxClusters*memoryTime)
+		defer cancel()
+		if n, err := h.Consolidate(ctx, conf); err != nil {
+			log.Printf("memory: consolidate: %v", err)
+		} else if n > 0 {
+			log.Printf("memory: consolidated %d clusters", n)
+		}
+	}()
 }
 
 // compact replaces the oldest records of a full context with a summary, when
@@ -295,8 +534,12 @@ func (h *Harness) compact(ctx context.Context, s *session, id string, conf state
 		return false, err
 	}
 	if h.Memory != nil {
-		kept := h.keep(ctx, id, prev+1, cut, out)
-		if _, _, err := h.Memory.Remember(ctx, memory.Item{Kind: memory.Summary, Text: summary, Scope: "session:" + id, Session: id, From: prev + 1, To: cut, Source: "compaction"}); err != nil {
+		kept := h.keep(ctx, conf, id, prev+1, cut, out)
+		sum, _, err := h.Memory.Remember(ctx, memory.Item{Kind: memory.Summary, Topic: "session", Text: summary, Scope: "session:" + id, Session: id, From: 1, To: cut, Source: "compaction"})
+		if err == nil {
+			err = h.Memory.Supersede(ctx, id, sum.ID) // this summary covers the ones before it
+		}
+		if err != nil {
 			log.Printf("session %s: summary to memory: %v", id, err)
 		}
 		if h.Memory.OnEvent != nil {

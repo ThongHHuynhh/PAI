@@ -1,9 +1,12 @@
 package harness
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"pai/pkg/memory"
 	"pai/pkg/statefile"
 )
 
@@ -28,5 +31,50 @@ func TestCutPointKeepsCallsWhole(t *testing.T) {
 	}
 	if got != 7 {
 		t.Fatalf("want the cut after the result, 7; got %d", got)
+	}
+}
+
+// apply runs a model's operations, and stores what no operation names.
+func TestApplyOps(t *testing.T) {
+	st, err := memory.Open(t.TempDir(), memory.Hash{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	h := &Harness{Memory: st}
+	ctx := context.Background()
+	old, _, _ := st.Remember(ctx, memory.Item{Text: "Production runs on the VPS named atlas", Topic: "deploy", Source: "test"})
+	wrong, _, _ := st.Remember(ctx, memory.Item{Text: "The user's editor is Sublime Text", Topic: "editor", Source: "test"})
+	fresh := []candidate{
+		{Kind: "fact", Topic: "deploy", Text: "Production deploys run through GitHub Actions"},
+		{Kind: "fact", Topic: "chat", Text: "The user said thanks for the help"},
+		{Kind: "preference", Topic: "editor", Text: "The user's editor is Helix"},
+		{Kind: "fact", Topic: "dns", Text: "DNS for the user's domains is on Cloudflare"},
+	}
+	ops := []op{
+		{Op: "merge", IDs: []string{old.ID}, New: json.RawMessage(`[0]`), Text: "Production runs on the VPS atlas and deploys through GitHub Actions"},
+		{Op: "skip", New: json.RawMessage(`1`), Reason: "chatter"},
+		{Op: "retire", ID: wrong.ID, Reason: "the user moved to Helix"},
+		{Op: "add", New: json.RawMessage(`2`)},
+	}
+	h.apply(ctx, memory.Item{Session: "s1", Source: "extract"}, ops, fresh)
+	valid, _ := st.List(ctx, memory.Filter{})
+	var texts []string
+	for _, it := range valid {
+		texts = append(texts, it.Text)
+	}
+	got := strings.Join(texts, "|")
+	for _, want := range []string{"deploys through GitHub Actions", "editor is Helix", "DNS for the user's domains"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %s", want, got)
+		}
+	}
+	for _, gone := range []string{"Sublime", "thanks", "Production runs on the VPS named atlas"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%q should not be valid: %s", gone, got)
+		}
+	}
+	if len(valid) != 3 {
+		t.Fatalf("want 3 valid items, got %d: %s", len(valid), got)
 	}
 }

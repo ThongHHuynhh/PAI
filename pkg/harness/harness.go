@@ -47,6 +47,10 @@ type Harness struct {
 	// not block.
 	OnRecord func(id string, r statefile.Record)
 
+	cmu           sync.Mutex // guards the two below
+	consolidated  time.Time  // the last consolidation pass
+	consolidating bool
+
 	pmu sync.RWMutex
 	mu  sync.Mutex
 	s   map[string]*session

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -45,12 +46,37 @@ const Global = "global"
 // sit near 0.8; a repeat sits above 0.95.
 const dupCosine = 0.93
 
+// minText is the shortest item worth keeping: a statement shorter than this
+// names nothing a later session could use.
+const minText = 12
+
+// secret finds text that looks like a credential, which memory never keeps:
+// it would be recalled into any session on any model.
+var secret = regexp.MustCompile(`(?i)(sk-[a-z0-9_-]{16,}|sk-ant-[a-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|xox[abpr]-[A-Za-z0-9-]{10,}|pai_(key|join)_[A-Za-z0-9_.-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(password|passwd|secret|token|api[_ -]?key)\s*[:=]\s*\S{6,})`)
+
+// ErrNotUseful is an item refused before it is stored, and why.
+var ErrNotUseful = errors.New("memory: not stored")
+
+// Useful is nil when text is worth storing: long enough to say something,
+// and no credential in it.
+func Useful(text string) error {
+	switch {
+	case len([]rune(strings.TrimSpace(text))) < minText:
+		return fmt.Errorf("%w: too short to be useful", ErrNotUseful)
+	case secret.MatchString(text):
+		return fmt.Errorf("%w: it looks like it holds a secret", ErrNotUseful)
+	}
+	return nil
+}
+
 // Item is one thing PAI knows.
 type Item struct {
 	ID      string    `json:"id"`
 	Kind    string    `json:"kind"`
 	Text    string    `json:"text"`
 	Scope   string    `json:"scope"`
+	Topic   string    `json:"topic,omitempty"`   // a short name for what it is about, such as "deploy" or "editor": related items share one
+	Merged  []string  `json:"merged,omitempty"`  // the items it replaced by a merge or an update
 	Session string    `json:"session,omitempty"` // where it was learnt
 	From    int       `json:"from,omitempty"`    // the records of that session it was learnt from
 	To      int       `json:"to,omitempty"`
@@ -115,6 +141,12 @@ CREATE TABLE IF NOT EXISTS bandit (arm INTEGER PRIMARY KEY, a TEXT NOT NULL, b T
 CREATE TABLE IF NOT EXISTS extracted (session TEXT PRIMARY KEY, upto INTEGER NOT NULL);
 `
 
+// columns are added to stores made before them.
+var columns = map[string]string{
+	"topic":  `ALTER TABLE items ADD COLUMN topic TEXT NOT NULL DEFAULT ''`,
+	"merged": `ALTER TABLE items ADD COLUMN merged TEXT NOT NULL DEFAULT ''`,
+}
+
 // Open is the store in dir, made there the first time, with e to embed.
 func Open(dir string, e Embedder) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -127,6 +159,17 @@ func Open(dir string, e Embedder) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("memory: %w", err)
+	}
+	for col, alter := range columns {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name=?`, col).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			if _, err := db.Exec(alter); err != nil {
+				return nil, fmt.Errorf("memory: %w", err)
+			}
+		}
 	}
 	s := &Store{db: db, embed: e}
 	return s, s.reembed(context.Background())
@@ -147,8 +190,9 @@ func newID() string { return fmt.Sprintf("m%x", time.Now().UnixNano()&0xffffffff
 // statement.
 func (s *Store) Remember(ctx context.Context, it Item) (Item, bool, error) {
 	it.Text = strings.TrimSpace(it.Text)
-	if it.Text == "" {
-		return it, false, errors.New("memory: empty text")
+	it.Topic = strings.ToLower(strings.TrimSpace(it.Topic))
+	if err := Useful(it.Text); err != nil {
+		return it, false, err
 	}
 	if it.Kind == "" {
 		it.Kind = Fact
@@ -178,9 +222,12 @@ func (s *Store) Remember(ctx context.Context, it Item) (Item, bool, error) {
 		return dup, false, nil
 	}
 	now := time.Now().UTC()
-	it.ID, it.Created, it.Updated, it.Utility = newID(), now, now, 0.5
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO items (id,kind,text,scope,session,rec_from,rec_to,source,created,updated,pinned,utility,embedder,vec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		it.ID, it.Kind, it.Text, it.Scope, it.Session, it.From, it.To, it.Source, now.UnixMilli(), now.UnixMilli(), it.Pinned, it.Utility, s.embed.Name(), pack(it.vec)); err != nil {
+	it.ID, it.Created, it.Updated = newID(), now, now
+	if it.Utility == 0 {
+		it.Utility = 0.5
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO items (id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,pinned,utility,shown,used,embedder,vec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		it.ID, it.Kind, it.Text, it.Scope, it.Topic, strings.Join(it.Merged, ","), it.Session, it.From, it.To, it.Source, now.UnixMilli(), now.UnixMilli(), it.Pinned, it.Utility, it.Shown, it.Used, s.embed.Name(), pack(it.vec)); err != nil {
 		return it, false, err
 	}
 	s.emit(Event{Type: "remembered", Session: it.Session, Items: []Item{it}})
@@ -221,29 +268,26 @@ func (s *Store) Pin(ctx context.Context, id string, on bool) (Item, error) {
 	return s.change(ctx, id, "pinned", `UPDATE items SET pinned=?, updated=? WHERE id=?`, on, time.Now().UnixMilli(), id)
 }
 
-// Edit replaces an item's text, kind or scope, as a person corrects it.
-func (s *Store) Edit(ctx context.Context, id, text, kind, scope string) (Item, error) {
+// Edit is a person's correction of an item's text, kind, scope or topic: a
+// new version that replaces it, as a merge of one, so the old text stays.
+func (s *Store) Edit(ctx context.Context, id, text, kind, scope, topic string) (Item, error) {
 	it, err := s.Get(ctx, id)
 	if err != nil {
 		return it, err
 	}
-	if text = strings.TrimSpace(text); text == "" {
-		text = it.Text
+	if text = strings.TrimSpace(text); text != "" {
+		it.Text = text
 	}
-	if kind == "" {
-		kind = it.Kind
+	for _, f := range []struct {
+		to *string
+		v  string
+	}{{&it.Kind, kind}, {&it.Scope, scope}, {&it.Topic, topic}} {
+		if f.v != "" {
+			*f.to = f.v
+		}
 	}
-	if !valid(kind) {
-		return it, fmt.Errorf("memory: kind %q is not one of %s", kind, strings.Join(kinds, ", "))
-	}
-	if scope == "" {
-		scope = it.Scope
-	}
-	vecs, err := s.embed.Embed(ctx, []string{text})
-	if err != nil {
-		return it, err
-	}
-	return s.change(ctx, id, "edited", `UPDATE items SET text=?, kind=?, scope=?, vec=?, embedder=?, updated=? WHERE id=?`, text, kind, scope, pack(vecs[0]), s.embed.Name(), time.Now().UnixMilli(), id)
+	it.Source, it.Shown, it.Used, it.Merged = "person", 0, 0, nil
+	return s.Merge(ctx, []string{id}, it)
 }
 
 func (s *Store) change(ctx context.Context, id, event, q string, args ...any) (Item, error) {
@@ -301,7 +345,7 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Item, error) {
 	return s.query(ctx, "WHERE "+strings.Join(where, " AND ")+fmt.Sprintf(" ORDER BY updated DESC LIMIT %d", limit), args...)
 }
 
-const cols = `id,kind,text,scope,session,rec_from,rec_to,source,created,updated,invalid,reason,pinned,utility,shown,used,vec`
+const cols = `id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,invalid,reason,pinned,utility,shown,used,vec`
 
 func (s *Store) query(ctx context.Context, where string, args ...any) ([]Item, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+cols+" FROM items "+where, args...)
@@ -314,7 +358,8 @@ func (s *Store) query(ctx context.Context, where string, args ...any) ([]Item, e
 		var it Item
 		var created, updated, invalid int64
 		var vec []byte
-		if err := rows.Scan(&it.ID, &it.Kind, &it.Text, &it.Scope, &it.Session, &it.From, &it.To, &it.Source, &created, &updated, &invalid, &it.Reason, &it.Pinned, &it.Utility, &it.Shown, &it.Used, &vec); err != nil {
+		var merged string
+		if err := rows.Scan(&it.ID, &it.Kind, &it.Text, &it.Scope, &it.Topic, &merged, &it.Session, &it.From, &it.To, &it.Source, &created, &updated, &invalid, &it.Reason, &it.Pinned, &it.Utility, &it.Shown, &it.Used, &vec); err != nil {
 			return nil, err
 		}
 		it.Created, it.Updated = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
@@ -322,6 +367,9 @@ func (s *Store) query(ctx context.Context, where string, args ...any) ([]Item, e
 			it.Invalid = time.UnixMilli(invalid).UTC()
 		}
 		it.vec = unpack(vec)
+		if merged != "" {
+			it.Merged = strings.Split(merged, ",")
+		}
 		out = append(out, it)
 	}
 	return out, rows.Err()
@@ -335,7 +383,7 @@ type Stats struct {
 	ByKind   map[string]int `json:"by_kind"`
 	ByScope  map[string]int `json:"by_scope"`
 	Recalls  int            `json:"recalls"`
-	Reward   float64        `json:"reward"`   // mean reward of settled recalls
+	Reward   float64        `json:"reward"`    // mean reward of settled recalls
 	UsedRate float64        `json:"used_rate"` // share of recalled items that were used
 	Embedder string         `json:"embedder"`
 }

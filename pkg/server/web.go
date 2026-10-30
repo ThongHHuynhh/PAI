@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"pai/pkg/catalog"
 	"strconv"
 	"strings"
 	"time"
@@ -24,14 +25,18 @@ import (
 //
 //	GET    /events                      text/event-stream of events.Event, a hello first
 //	GET    /graph                       -> the server, every machine and every session, for the graph
+//	GET    /catalog                     -> the providers and model presets this server knows
 //	GET    /memory                      ?q= searches, else lists; ?kind= ?scope= ?session= ?invalid=1 ?limit=
 //	GET    /memory/stats                -> memory.Stats with the bandit's arms
 //	GET    /memory/retrievals           ?session= -> the newest automatic recalls, with why
-//	POST   /memory                      {"text","kind","scope"} -> the item, made or merged
-//	PATCH  /memory/{id}                 {"text","kind","scope"} and/or {"pinned"} -> the item
+//	POST   /memory                      {"text","kind","scope","topic"} -> the item, made or merged
+//	PATCH  /memory/{id}                 {"text","kind","scope","topic"} and/or {"pinned"} -> the item; an edit
+//	                                    is a new version that replaces it, so its id changes
 //	POST   /memory/{id}/invalidate      {"reason"} -> the item
 //	POST   /memory/{id}/restore         -> the item
 //	POST   /memory/{id}/feedback        {"up"} -> the item
+//	POST   /memory/consolidate          -> {"clusters"}: merge what memory says more than once, with the
+//	                                    model of the newest session
 //
 // The app itself is at /app/, with no key: it asks for one.
 type webAPI struct {
@@ -52,6 +57,14 @@ const maxMemoryBody = 256 << 10
 func (wa *webAPI) handle(mux *http.ServeMux) {
 	mux.HandleFunc("GET /events", wa.events)
 	mux.HandleFunc("GET /graph", wa.graph)
+	mux.HandleFunc("GET /catalog", func(w http.ResponseWriter, r *http.Request) {
+		c, err := catalog.Load()
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, c)
+	})
 	mux.HandleFunc("GET /memory", wa.list)
 	mux.HandleFunc("GET /memory/stats", wa.stats)
 	mux.HandleFunc("GET /memory/retrievals", wa.retrievals)
@@ -60,6 +73,7 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 	mux.HandleFunc("POST /memory/{id}/invalidate", wa.invalidate)
 	mux.HandleFunc("POST /memory/{id}/restore", wa.restore)
 	mux.HandleFunc("POST /memory/{id}/feedback", wa.feedback)
+	mux.HandleFunc("POST /memory/consolidate", wa.consolidate)
 }
 
 // app serves the web app's files with no key, and sends a browser that asks
@@ -241,7 +255,7 @@ func (wa *webAPI) retrievals(w http.ResponseWriter, r *http.Request) {
 }
 
 type memoryBody struct {
-	Text, Kind, Scope, Reason string
+	Text, Kind, Scope, Topic, Reason string
 	Pinned                    *bool
 	Up                        bool
 }
@@ -263,7 +277,7 @@ func (wa *webAPI) add(w http.ResponseWriter, r *http.Request) {
 	if !ok || !wa.store(w) {
 		return
 	}
-	it, _, err := wa.mem.Remember(r.Context(), memory.Item{Text: b.Text, Kind: b.Kind, Scope: b.Scope, Source: "person"})
+	it, _, err := wa.mem.Remember(r.Context(), memory.Item{Text: b.Text, Kind: b.Kind, Scope: b.Scope, Topic: b.Topic, Source: "person"})
 	wa.answer(w, it, err)
 }
 
@@ -275,13 +289,16 @@ func (wa *webAPI) patch(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var it memory.Item
 	var err error
-	if b.Text != "" || b.Kind != "" || b.Scope != "" {
-		if it, err = wa.mem.Edit(r.Context(), id, b.Text, b.Kind, b.Scope); err != nil {
+	if b.Text != "" || b.Kind != "" || b.Scope != "" || b.Topic != "" {
+		if it, err = wa.mem.Edit(r.Context(), id, b.Text, b.Kind, b.Scope, b.Topic); err != nil {
 			fail(w, err)
 			return
 		}
 	}
 	if b.Pinned != nil {
+		if it.ID != "" {
+			id = it.ID // pin the new version
+		}
 		it, err = wa.mem.Pin(r.Context(), id, *b.Pinned)
 	}
 	if it.ID == "" && err == nil {
@@ -317,6 +334,23 @@ func (wa *webAPI) feedback(w http.ResponseWriter, r *http.Request) {
 	}
 	it, err := wa.mem.Feedback(r.Context(), r.PathValue("id"), b.Up)
 	wa.answer(w, it, err)
+}
+
+func (wa *webAPI) consolidate(w http.ResponseWriter, r *http.Request) {
+	if !wa.store(w) {
+		return
+	}
+	conf, err := wa.h.LatestConf()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	n, err := wa.h.Consolidate(r.Context(), conf)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, map[string]int{"clusters": n})
 }
 
 func (wa *webAPI) answer(w http.ResponseWriter, it memory.Item, err error) {
