@@ -8,6 +8,12 @@ wall time, tokens and whether each answer is right.
 
 Needs: pai logged in (pai login <key>), claude logged in, codex logged in.
 Each agent runs in its own empty directory, so its memory files start empty.
+PAI_BIN names the pai binary when it is not on PATH.
+
+Tokens are split three ways, the same for every agent: fresh (input the
+model read without a cache hit, cache writes included), cached (cache
+reads) and output. Codex counts cached input inside input_tokens, so it is
+taken out of fresh rather than added twice.
 """
 import argparse, json, os, re, subprocess, tempfile, time
 
@@ -21,24 +27,38 @@ FACTS = [
 TEACH = "Please remember these facts for future sessions, using whatever memory you have:\n" + "\n".join("- " + f for f, _, _ in FACTS)
 ASK = "Answer each question in one short line, from what you know from earlier sessions:\n" + "\n".join(f"{i+1}. {q}" for i, (_, q, _) in enumerate(FACTS))
 
+PAI = os.environ.get("PAI_BIN", "pai")
+
 
 def run(cmd, cwd):
     t0 = time.time()
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=900)
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL, timeout=900)
     return p.stdout, p.stderr, time.time() - t0
 
 
-def claude(prompt, cwd):
-    out, err, dt = run(["claude", "-p", prompt, "--output-format", "json", "--permission-mode", "acceptEdits"], cwd)
+def tokens(fresh, cached, output):
+    return {"fresh": fresh, "cached": cached, "output": output, "total": fresh + cached + output}
+
+
+def claude(prompt, cwd, model):
+    out, err, dt = run(["claude", "-p", prompt, "--model", model, "--output-format", "json", "--permission-mode", "acceptEdits"], cwd)
     j = json.loads(out or "{}")
-    u = j.get("usage", {})
-    tok = sum(u.get(k, 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"))
+    # modelUsage covers every model the run called, side calls included.
+    mu = j.get("modelUsage", {}).values()
+    tok = tokens(sum(m.get("inputTokens", 0) + m.get("cacheCreationInputTokens", 0) for m in mu),
+                 sum(m.get("cacheReadInputTokens", 0) for m in mu),
+                 sum(m.get("outputTokens", 0) for m in mu))
     return j.get("result", out + err), tok, dt
 
 
-def codex(prompt, cwd):
-    out, err, dt = run(["codex", "exec", "--json", "--skip-git-repo-check", "--full-auto", prompt], cwd)
-    text, tok = "", 0
+def codex(prompt, cwd, model, config):
+    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write"]
+    if model:
+        cmd += ["-m", model]
+    for c in config:
+        cmd += ["-c", c]
+    out, err, dt = run(cmd + [prompt], cwd)
+    text, fresh, cached, output = "", 0, 0, 0
     for line in out.splitlines():
         try:
             e = json.loads(line)
@@ -48,26 +68,28 @@ def codex(prompt, cwd):
         if item.get("type") == "agent_message":
             text = item.get("text", text)
         u = e.get("usage") or {}
-        tok += sum(v for v in u.values() if isinstance(v, int))
-    return text or out + err, tok, dt
+        c = u.get("cached_input_tokens", 0)
+        fresh += u.get("input_tokens", 0) - c
+        cached += c
+        output += u.get("output_tokens", 0)  # reasoning tokens are part of it
+    return text or out + err, tokens(fresh, cached, output), dt
 
 
 def pai(prompt, cwd, model):
     body = json.dumps({"model": model, "tools": "default", "context_limit": 200000, "workers": []})
-    p = subprocess.run(["pai", "new"], input=body, capture_output=True, text=True, check=True)
+    p = subprocess.run([PAI, "new"], input=body, capture_output=True, text=True, check=True)
     sid = p.stdout.strip()
     t0 = time.time()
-    subprocess.run(["pai", "message", sid, prompt], capture_output=True, check=True)
+    subprocess.run([PAI, "message", sid, prompt], capture_output=True, check=True)
     while True:
-        info = json.loads(subprocess.run(["pai", "info", sid], capture_output=True, text=True, check=True).stdout)
+        info = json.loads(subprocess.run([PAI, "info", sid], capture_output=True, text=True, check=True).stdout)
         if info["status"] in ("closed", "failed"):
             break
-        time.sleep(1)
+        time.sleep(0.5)
     dt = time.time() - t0
-    tail = subprocess.run(["pai", "tail", sid], capture_output=True, text=True).stdout
+    tail = subprocess.run([PAI, "tail", sid], capture_output=True, text=True, encoding="utf-8").stdout
     u = info.get("usage", {})
-    tok = sum(u.get(k, 0) for k in ("input", "output", "cache_read", "cache_write"))
-    return tail, tok, dt
+    return tail, tokens(u.get("input", 0) + u.get("cache_write", 0), u.get("cache_read", 0), u.get("output", 0)), dt
 
 
 def score(text):
@@ -78,14 +100,25 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--agents", default="pai,claude,codex")
     ap.add_argument("--pai-model", default="claude-code/claude-sonnet-5-5")
+    ap.add_argument("--claude-model", default="claude-sonnet-5-5")
+    ap.add_argument("--codex-model", default="", help="none uses codex's configured model")
+    # On Windows, sandbox = "elevated" writes files as a separate sandbox user,
+    # which the next session cannot read: -c windows.sandbox="unelevated".
+    ap.add_argument("--codex-config", action="append", default=[], help="a codex -c override; repeatable")
     a = ap.parse_args()
+    fns = {"claude": lambda p, c: claude(p, c, a.claude_model),
+           "codex": lambda p, c: codex(p, c, a.codex_model, a.codex_config),
+           "pai": lambda p, c: pai(p, c, a.pai_model)}
     results = []
     for agent in a.agents.split(","):
         cwd = tempfile.mkdtemp(prefix=f"bench-{agent}-")
-        fn = {"claude": claude, "codex": codex, "pai": lambda p, c: pai(p, c, a.pai_model)}[agent]
-        _, t1, d1 = fn(TEACH, cwd)
-        text, t2, d2 = fn(ASK, cwd)
-        results.append({"agent": agent, "accuracy": score(text), "tokens": t1 + t2, "seconds": round(d1 + d2, 1), "answer": text[-1500:]})
+        _, t1, d1 = fns[agent](TEACH, cwd)
+        text, t2, d2 = fns[agent](ASK, cwd)
+        results.append({"agent": agent, "accuracy": score(text),
+                        "tokens": t1["total"] + t2["total"], "seconds": round(d1 + d2, 1),
+                        "teach": {"tokens": t1, "seconds": round(d1, 1)},
+                        "ask": {"tokens": t2, "seconds": round(d2, 1)},
+                        "files": sorted(os.listdir(cwd)), "answer": text[-1500:]})
     print(json.dumps(results, indent=2))
 
 

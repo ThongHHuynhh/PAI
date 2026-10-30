@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAI Live Benchmark</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #fcfcfb; --card: #ffffff; --line: #e6e5e0;
+  --ink: #0b0b0b; --ink-2: #52514e; --ink-3: #8a8983;
+  --pai: #2a78d6; --claude: #eb6834; --codex: #1baf7a;
+  --good: #008300; --bad: #e34948; --code: #f6f6f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1a1a19; --card: #222220; --line: #34332f;
+    --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8f8e86;
+    --pai: #3987e5; --claude: #d95926; --codex: #199e70;
+    --good: #3fae3f; --bad: #e66767; --code: #262624;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1a19; --card: #222220; --line: #34332f;
+  --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8f8e86;
+  --pai: #3987e5; --claude: #d95926; --codex: #199e70;
+  --good: #3fae3f; --bad: #e66767; --code: #262624;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 20px 16px 40px; }
+h1 { font-size: 22px; margin: 0 0 2px; }
+h2 { font-size: 15px; margin: 22px 0 8px; }
+.sub { color: var(--ink-2); margin: 0 0 14px; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.tile .k { color: var(--ink-2); font-size: 12px; }
+.tile .v { font-size: 24px; font-weight: 650; }
+.tile .d { color: var(--ink-3); font-size: 12px; }
+.charts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.chart { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.chart h3 { font-size: 13px; margin: 0 0 8px; color: var(--ink-2); font-weight: 600; }
+.row { display: grid; grid-template-columns: 82px 1fr; align-items: center; gap: 8px; height: 26px; }
+.row .n { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.track { position: relative; height: 16px; }
+.bar { height: 16px; border-radius: 0 4px 4px 0; min-width: 2px; cursor: default; }
+.bar + .val { position: absolute; top: 0; font-size: 12px; color: var(--ink); line-height: 16px; white-space: nowrap; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); margin: 8px 0 0; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:nth-last-child(-n+6), td:nth-last-child(-n+6) { text-align: right; } /* the six number columns end every row */
+th { color: var(--ink-2); font-weight: 600; font-size: 12px; }
+tr:last-child td { border-bottom: 0; }
+.tbl { overflow-x: auto; }
+.ok { color: var(--good); font-weight: 600; }
+.no { color: var(--bad); font-weight: 600; }
+.mute { color: var(--ink-3); }
+.ans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ans pre { margin: 0; white-space: pre-wrap; font-size: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 120px; }
+.ans b { display: block; font-size: 12px; margin-bottom: 4px; }
+ul { margin: 0; padding-left: 18px; color: var(--ink-2); }
+li { margin: 3px 0; }
+a { color: var(--pai); }
+abbr { text-decoration: underline dotted; cursor: help; }
+.ref { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
+.ref h3 { font-size: 13px; margin: 0 0 6px; }
+.ref pre { margin: 6px 0 0; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+.ref pre code.hljs { background: var(--code); padding: 8px 10px; }
+#tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12px; padding: 5px 8px; border-radius: 4px; visibility: hidden; white-space: nowrap; z-index: 9; }
+.tiles > *, .charts > *, .ans > * { min-width: 0; }
+main { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .tiles, .charts, .ans { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<main>
+<h1>PAI vs Claude Code vs Codex</h1>
+<p class="sub">Live, end to end · 2026-10-30 · Windows 11 · one run · <abbr title="Session 1 is told 5 facts and asked to keep them. Session 2 is a fresh session in the same folder and is asked 5 questions about them. Script: bench/live/live.py">teach → recall test</abbr></p>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Tokens, PAI vs Claude Code</div><div class="v">9.9× fewer</div><div class="d">19,430 vs 192,620 · same model</div></div>
+  <div class="tile"><div class="k">Wall time, PAI vs Claude Code</div><div class="v">2.3× faster</div><div class="d">8.7 s vs 19.9 s</div></div>
+  <div class="tile"><div class="k">Recall (5 facts)</div><div class="v">5 · 5 · 0</div><div class="d">PAI · Claude Code · Codex</div></div>
+</div>
+
+<h2>Results</h2>
+<div class="charts">
+  <div class="chart"><h3>Total tokens</h3><div data-chart="tokens"></div></div>
+  <div class="chart"><h3>Wall time (s)</h3><div data-chart="seconds"></div></div>
+  <div class="chart"><h3>Facts recalled (of 5)</h3><div data-chart="recall"></div></div>
+</div>
+<div class="legend"><span><i class="sw" style="background:var(--pai)"></i>PAI</span><span><i class="sw" style="background:var(--claude)"></i>Claude Code</span><span><i class="sw" style="background:var(--codex)"></i>Codex</span></div>
+
+<h2>Per session</h2>
+<div class="tbl">
+<table>
+  <thead><tr>
+    <th>Agent</th><th>Model</th><th>Session</th>
+    <th><abbr title="Input read without a cache hit, cache writes included">Fresh</abbr></th>
+    <th><abbr title="Input served from the prompt cache">Cached</abbr></th>
+    <th>Output</th><th>Total</th><th>Time</th><th>Recall</th>
+  </tr></thead>
+  <tbody>
+    <tr><td rowspan="2">PAI</td><td rowspan="2">Sonnet 5.5</td><td>teach</td><td>5,385</td><td>7,103</td><td>857</td><td>13,345</td><td>6.5 s</td><td></td></tr>
+    <tr><td>ask</td><td>4,674</td><td>1,330</td><td>81</td><td>6,085</td><td>2.2 s</td><td class="ok">5/5</td></tr>
+    <tr><td rowspan="2">Claude Code</td><td rowspan="2"><abbr title="Plus a small claude-haiku-5-5 side call, counted">Sonnet 5.5</abbr></td><td>teach</td><td>21,267</td><td>121,018</td><td>2,548</td><td>144,833</td><td>16.0 s</td><td></td></tr>
+    <tr><td>ask</td><td>17,509</td><td>30,135</td><td>143</td><td>47,787</td><td>3.9 s</td><td class="ok">5/5</td></tr>
+    <tr><td rowspan="2"><abbr title="Your config: [windows] sandbox = &quot;elevated&quot;">Codex</abbr></td><td rowspan="2"><abbr title="Reasoning effort: low (your config)">gpt-6.1-sol</abbr></td><td>teach</td><td>8,694</td><td>60,672</td><td>438</td><td>69,804</td><td>21.0 s</td><td></td></tr>
+    <tr><td>ask</td><td>2,563</td><td>12,416</td><td>104</td><td>15,083</td><td>5.6 s</td><td class="no">0/5</td></tr>
+    <tr class="mute"><td rowspan="2"><abbr title="Re-run with -c windows.sandbox=&quot;unelevated&quot;">Codex, unelevated</abbr></td><td rowspan="2">gpt-6.1-sol</td><td>teach</td><td>6,335</td><td>46,208</td><td>260</td><td>52,803</td><td>14.7 s</td><td></td></tr>
+    <tr class="mute"><td>ask</td><td>3,132</td><td>12,416</td><td>96</td><td>15,644</td><td>5.3 s</td><td class="no">0/5</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Session 2 answers</h2>
+<div class="ans">
+  <div><b style="color:var(--pai)">PAI</b><pre>1. Port 5433 (Postgres 17).
+2. Through Kamal to the Hetzner VPS named atlas.
+3. Rust.
+4. forge (run ./rotate-pulse.sh).
+5. The NAS named quartz.</pre></div>
+  <div><b style="color:var(--claude)">Claude Code</b><pre>1. Port 5433 (Postgres 17).
+2. Via Kamal to the Hetzner VPS "atlas".
+3. Rust.
+4. forge (run `./rotate-pulse.sh`).
+5. The NAS "quartz".</pre></div>
+  <div><b style="color:var(--codex)">Codex</b><pre>1. I don't have the harbor staging database port in this session.
+2. I don't have the ledger deploy destination in this session.
+3. I don't have Mai's preferred CLI language in this session.
+4. I don't have the machine used to rotate pulse's secrets in this session.
+5. I don't have the backup vault's machine in this session.</pre></div>
+</div>
+
+<h2>Why</h2>
+<ul>
+  <li><b>PAI</b>: session 1 saved the facts to its memory store with the <code>remember</code> tool; session 2 recalled them automatically into one short system block (<a href="#ref-recall">recall</a>). Its claude-code provider also turns off CLAUDE.md, auto memory and telemetry for each step (<a href="#ref-env">env</a>), so each request is small.</li>
+  <li><b>Claude Code</b>: saved to its auto memory and read the memory index in session 2. It ran with your normal setup (global CLAUDE.md, plugins, MCP servers, skills), which is most of its extra tokens.</li>
+  <li><b>Codex</b>: no built-in cross-session memory. Run 1 wrote <code>AGENTS.md</code>, but the elevated Windows sandbox wrote it as a separate sandbox user, so the next session could not read it (your own user gets "Access is denied"). Run 2 (unelevated) could not write the file at all and said "Persistent memory isn't available here".</li>
+</ul>
+
+<h2>Limits</h2>
+<ul>
+  <li>One run per agent: times will vary run to run; token counts are steadier.</li>
+  <li>Codex uses a different model, so its speed and tokens are not a like-for-like harness comparison. PAI and Claude Code both ran Sonnet 5.5.</li>
+  <li>Recall is scored by matching the expected word (5433, atlas, Rust, forge, quartz) in the answer (<a href="#ref-score">score</a>).</li>
+  <li>Token split is the same for every agent (<a href="#ref-tokens">tokens</a>). Codex's <code>input_tokens</code> already includes cached input, so it is not added twice.</li>
+  <li>Versions: Claude Code 2.1.312; PAI's pinned claude 2.1.307; codex-cli 0.164.0.</li>
+</ul>
+
+<h2>Code references</h2>
+<div class="ref" id="ref-task">
+  <h3><a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/live.py#L20-L28">bench/live/live.py:20-28</a> · the task</h3>
+<pre><code class="language-python">FACTS = [
+    ("The staging database for project harbor is Postgres 17 on port 5433.", "What port does the harbor staging database use?", "5433"),
+    ...
+]
+TEACH = "Please remember these facts for future sessions, using whatever memory you have:\n" + ...
+ASK = "Answer each question in one short line, from what you know from earlier sessions:\n" + ...</code></pre>
+</div>
+<div class="ref" id="ref-tokens">
+  <h3><a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/live.py#L43-L92">bench/live/live.py:43-92</a> · token accounting</h3>
+<pre><code class="language-python"># claude: modelUsage covers every model the run called, side calls included.
+tok = tokens(sum(m["inputTokens"] + m["cacheCreationInputTokens"]), sum(m["cacheReadInputTokens"]), sum(m["outputTokens"]))
+# codex: cached input is inside input_tokens
+c = u.get("cached_input_tokens", 0)
+fresh += u.get("input_tokens", 0) - c
+cached += c
+# pai
+tokens(u["input"] + u["cache_write"], u["cache_read"], u["output"])</code></pre>
+</div>
+<div class="ref" id="ref-score">
+  <h3><a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/live.py#L95-L96">bench/live/live.py:95-96</a> · scoring</h3>
+<pre><code class="language-python">def score(text):
+    return sum(1 for _, _, a in FACTS if re.search(re.escape(a), text, re.I)) / len(FACTS)</code></pre>
+</div>
+<div class="ref" id="ref-recall">
+  <h3><a href="https://github.com/ThongHHuynhh/PAI/blob/main/pkg/harness/memory.go#L105-L140">pkg/harness/memory.go:105-140</a> · PAI auto recall per turn</h3>
+<pre><code class="language-go">func (h *Harness) recallTurn(ctx context.Context, s *session, id string, conf statefile.Conf, chain []statefile.Record) error {
+	...
+	fmt.Fprintf(&amp;b, "Memory recalled for this turn (retrieval %s). Use what helps and ignore the rest. ...", rv.ID)</code></pre>
+</div>
+<div class="ref" id="ref-env">
+  <h3><a href="https://github.com/ThongHHuynhh/PAI/blob/main/pkg/provider/claudecode.go#L77-L86">pkg/provider/claudecode.go:77-86</a> · PAI's claude-code step environment</h3>
+<pre><code class="language-go">var claudeEnv = []string{
+	"DISABLE_AUTOUPDATER=1",
+	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+	"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1",
+	"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+	...
+}</code></pre>
+</div>
+<div class="ref" id="ref-raw">
+  <h3><a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/results.json">bench/live/results.json</a> · raw results (and <a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/results-codex-unelevated.json">results-codex-unelevated.json</a>)</h3>
+<pre><code class="language-bash">PAI_BIN=working_dir/pai py bench/live/live.py --agents pai,claude,codex &gt; bench/live/results.json
+py bench/live/live.py --agents codex --codex-config 'windows.sandbox="unelevated"'</code></pre>
+</div>
+</main>
+<div id="tip"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+const data = [
+  { name: "PAI", c: "--pai", tokens: 19430, seconds: 8.7, recall: 5, tip: "fresh 10,059 · cached 8,433 · output 938" },
+  { name: "Claude Code", c: "--claude", tokens: 192620, seconds: 19.9, recall: 5, tip: "fresh 38,776 · cached 151,153 · output 2,691" },
+  { name: "Codex", c: "--codex", tokens: 84887, seconds: 26.7, recall: 0, tip: "fresh 11,257 · cached 73,088 · output 542" },
+];
+const fmt = { tokens: v => v.toLocaleString("en-US"), seconds: v => v.toFixed(1) + " s", recall: v => v + "/5" };
+const max = { tokens: 192620, seconds: 26.7, recall: 5 };
+const tip = document.getElementById("tip");
+document.querySelectorAll("[data-chart]").forEach(el => {
+  const k = el.dataset.chart;
+  data.forEach(d => {
+    const pct = d[k] / max[k] * 78; // leave room for the value label
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="n">${d.name}</span><span class="track"><div class="bar" style="width:${pct}%;background:var(${d.c})"></div><span class="val" style="left:calc(${pct}% + 6px)">${fmt[k](d[k])}</span></span>`;
+    row.addEventListener("mousemove", e => {
+      tip.textContent = `${d.name}: ${fmt[k](d[k])}` + (k === "tokens" ? " · " + d.tip : "");
+      tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px";
+      tip.style.top = e.clientY + 12 + "px";
+      tip.style.visibility = "visible";
+    });
+    row.addEventListener("mouseleave", () => tip.style.visibility = "hidden");
+    el.appendChild(row);
+  });
+});
+if (window.hljs) hljs.highlightAll();
+</script>
+</body>
+</html>

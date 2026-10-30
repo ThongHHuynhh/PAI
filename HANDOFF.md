@@ -17,7 +17,7 @@ State of the project for whoever continues it: what was asked, what is done, how
 7. **Accounts don't matter.** Claude account 2 can take over from Claude account 1.
 8. **Clean origin.** The project started as a fork of an open-source agent harness (MIT). Nothing of the old brand may remain, including the TUI animation. A new animation for PAI.
 9. **Benchmark.** Compare PAI with Claude Code and Codex on speed, accuracy, recall and tokens, and publish the result.
-10. **Push** to the owner's GitHub as a new repo named `PAI`. Not done: see Next.
+10. **Push** to the owner's GitHub as a new repo named `PAI`. Done: private repo, module path and `OWNER` placeholders not yet replaced (see Next).
 
 ## What is done
 
@@ -37,7 +37,7 @@ State of the project for whoever continues it: what was asked, what is done, how
 | Web app: Overview (React Flow live graph + activity), Chat, Memory (by topic, lineage, recall log, history), Settings (providers, account names, failover, machines, keys, update); white/dark; desktop/tablet/phone | `web/src`, built into `web/dist`, embedded | done; screenshots checked at 3 sizes, no horizontal overflow |
 | Docs, CI (gofmt, vet, race tests, cross-build, web build current), release workflow | `docs/`, `.github/workflows` | done, not yet run on GitHub |
 | Benchmark, model-free | `bench/main.go`, `bench/results.json` | done; published as a private claude.ai artifact |
-| Live benchmark harness (PAI vs `claude -p` vs `codex exec`) | `bench/live/live.py` | written, never run (no credentials in the build sandbox) |
+| Live benchmark harness (PAI vs `claude -p` vs `codex exec`) | `bench/live/live.py` | run once on Windows 2026-10-30: `bench/live/results.json`, report `bench/report.html` |
 
 ### Benchmark result so far (2,000 facts, model-free)
 
@@ -47,7 +47,7 @@ State of the project for whoever continues it: what was asked, what is done, how
 | Claude Code style (CLAUDE.md loaded whole) | 100% | 40,276 |
 | Codex style (AGENTS.md read up to 32 KiB) | 21% | 8,192 |
 
-Outdated facts reached the model in every strategy. With updates applied, PAI drops that to 11%. The learnt policy skips recall on 96% of chatter turns, with no loss on questions. No speed, cost or answer-accuracy numbers exist yet with real models.
+Outdated facts reached the model in every strategy. With updates applied, PAI drops that to 11%. The learnt policy skips recall on 96% of chatter turns, with no loss on questions. Live run (one run, Sonnet 5.5 for PAI and Claude Code): PAI 5/5 recall, 19,430 tokens, 8.7 s; Claude Code 5/5, 192,620 tokens, 19.9 s; Codex 0/5, 84,887 tokens, 26.7 s. See `bench/report.html`.
 
 ## How to check it locally
 
@@ -85,7 +85,7 @@ Connect a provider in Settings, or add an OpenAI-compatible URL to `config.json`
    - `pai install <url> <code>` on another machine;
    - a session that runs `run` on it.
 4. **Check the subscriptions.** Sign in with a Claude subscription (`claude-code` shape) and a ChatGPT plan (`chatgpt` shape). Test failover by naming a second account and setting `fallbacks`. `provider.Exhausted` matches limit errors by status (429/529) and words: confirm against the real error text of both plans and adjust `exhaustedWords`.
-5. **Run the live benchmark.** `python3 bench/live/live.py --agents pai,claude,codex` with all three logged in. Add the results to the benchmark report, or a new one: speed, tokens and answer accuracy.
+5. **Repeat the live benchmark.** Run once so far (`bench/report.html`). Run it several times, and on Linux/macOS, where the Codex sandbox can write files its next session reads.
 6. **Memory performance.**
    - Search compares every vector (52 ms at 2,000 items).
    - `Remember` scans its scope and kind for duplicates on every insert, and `Related` reads every item, so loading many facts is slow.

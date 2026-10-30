@@ -1,0 +1,28 @@
+[
+  {
+    "agent": "codex",
+    "accuracy": 0.0,
+    "tokens": 68447,
+    "seconds": 20.0,
+    "teach": {
+      "tokens": {
+        "fresh": 6335,
+        "cached": 46208,
+        "output": 260,
+        "total": 52803
+      },
+      "seconds": 14.7
+    },
+    "ask": {
+      "tokens": {
+        "fresh": 3132,
+        "cached": 12416,
+        "output": 96,
+        "total": 15644
+      },
+      "seconds": 5.3
+    },
+    "files": [],
+    "answer": "1. I don\u2019t have the harbor staging database port in this session.\n2. I don\u2019t have the ledger deployment destination in this session.\n3. I don\u2019t have Mai\u2019s preferred CLI language in this session.\n4. I don\u2019t have the machine for rotating pulse\u2019s secrets in this session.\n5. I don\u2019t have the backup vault\u2019s machine in this session."
+  }
+]

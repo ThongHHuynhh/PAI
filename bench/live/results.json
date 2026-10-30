@@ -1,0 +1,82 @@
+[
+  {
+    "agent": "pai",
+    "accuracy": 1.0,
+    "tokens": 19430,
+    "seconds": 8.7,
+    "teach": {
+      "tokens": {
+        "fresh": 5385,
+        "cached": 7103,
+        "output": 857,
+        "total": 13345
+      },
+      "seconds": 6.5
+    },
+    "ask": {
+      "tokens": {
+        "fresh": 4674,
+        "cached": 1330,
+        "output": 81,
+        "total": 6085
+      },
+      "seconds": 2.2
+    },
+    "files": [],
+    "answer": "    1  start     2026-10-30 10:47:25\n    2  config    {\"model\":\"claude-code/claude-sonnet-5-5\",\"tools\":\"default\",\"workers\":[],\"context_limit\":200000}\n    3  system    harness | You are an extremely capable AI agent running in PAI, a personal AI cloud  (+108 lines)\n    4  system    agents | The following read and run calls were made automatically\n    5  system    workers | Workers:\n    6  message   via=cli\nAnswer each question in one short line, from what you know from earlier sessions:\n1. What port does the harbor staging database use?\n2. Where do ledger deploys go?\n3. Which language does Mai prefer for CLI tools?\n4. Which machine do I rotate pulse's secrets on?\n5. Which machine holds the backup vault?\n    7  system    memory | Memory recalled for this turn (retrieval m5602989658ec). Use what helps and ignore the rest. Call forget with an id that is no longer true, and recall for more.  (+5 lines)\n    8  text\n1. Port 5433 (Postgres 17).\n2. Through Kamal to the Hetzner VPS named atlas.\n3. Rust.\n4. forge (run ./rotate-pulse.sh).\n5. The NAS named quartz.\n    9  step      claude-sonnet-5-5  in=6004 out=81  stop=end_turn\n"
+  },
+  {
+    "agent": "claude",
+    "accuracy": 1.0,
+    "tokens": 192620,
+    "seconds": 19.9,
+    "teach": {
+      "tokens": {
+        "fresh": 21267,
+        "cached": 121018,
+        "output": 2548,
+        "total": 144833
+      },
+      "seconds": 16.0
+    },
+    "ask": {
+      "tokens": {
+        "fresh": 17509,
+        "cached": 30135,
+        "output": 143,
+        "total": 47787
+      },
+      "seconds": 3.9
+    },
+    "files": [],
+    "answer": "1. Port 5433 (Postgres 17).\n2. Via Kamal to the Hetzner VPS \"atlas\".\n3. Rust.\n4. forge (run `./rotate-pulse.sh`).\n5. The NAS \"quartz\".\n\nThese come from my memory index only. I haven't opened the individual memory files, so the details are as recorded then and may be out of date."
+  },
+  {
+    "agent": "codex",
+    "accuracy": 0.0,
+    "tokens": 84887,
+    "seconds": 26.7,
+    "teach": {
+      "tokens": {
+        "fresh": 8694,
+        "cached": 60672,
+        "output": 438,
+        "total": 69804
+      },
+      "seconds": 21.0
+    },
+    "ask": {
+      "tokens": {
+        "fresh": 2563,
+        "cached": 12416,
+        "output": 104,
+        "total": 15083
+      },
+      "seconds": 5.6
+    },
+    "files": [
+      "AGENTS.md"
+    ],
+    "answer": "1. I don\u2019t have the harbor staging database port in this session.\n2. I don\u2019t have the ledger deploy destination in this session.\n3. I don\u2019t have Mai\u2019s preferred CLI language in this session.\n4. I don\u2019t have the machine used to rotate pulse\u2019s secrets in this session.\n5. I don\u2019t have the backup vault\u2019s machine in this session."
+  }
+]
