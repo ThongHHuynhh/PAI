@@ -21,7 +21,7 @@ PAI runs your AI agents across every machine you own, on any model, with one mem
 On an always-on machine (a VPS, a home server, your desktop):
 
 ```bash
-curl -fsSL https://github.com/OWNER/PAI/releases/latest/download/install.sh | sh -s -- server quickstart
+curl -fsSL https://github.com/ThongHHuynhh/PAI/releases/latest/download/install.sh | sh -s -- server quickstart
 ```
 
 The quickstart connects a model provider, then your other machines. Open the web app at the server's URL, under `/app/`, and sign in with the API key the install printed.
@@ -29,7 +29,7 @@ The quickstart connects a model provider, then your other machines. Open the web
 Connect another machine with the line the server prints (`pai-server join` prints it again):
 
 ```bash
-curl -fsSL https://github.com/OWNER/PAI/releases/latest/download/install.sh | sh -s -- https://pai.example.com XXXX-XXXX
+curl -fsSL https://github.com/ThongHHuynhh/PAI/releases/latest/download/install.sh | sh -s -- https://pai.example.com XXXX-XXXX
 ```
 
 Windows uses `install.ps1` the same way. See [docs/self-hosting.md](docs/self-hosting.md) for URLs, tunnels, accounts and failover, and [docs/architecture.md](docs/architecture.md) for how it works.

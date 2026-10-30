@@ -36,4 +36,6 @@ jobs:
           node-version: 22
       - run: npm ci && npm run build
         working-directory: web
-      - run: git diff --exit-code -- web/dist || { echo "web/dist is stale: run npm run build in web/ and commit it"; exit 1; }
+      # A block scalar: a plain one may not hold ": ", which the message has.
+      - run: |
+          git diff --exit-code -- web/dist || { echo "web/dist is stale: run npm run build in web/ and commit it"; exit 1; }

@@ -33,7 +33,7 @@ import (
 //
 // A build with no key updates nothing.
 var (
-	Repo = "pai-project/PAI"
+	Repo = "ThongHHuynhh/PAI"
 	Key  = ""
 )
 

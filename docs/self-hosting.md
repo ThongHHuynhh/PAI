@@ -11,7 +11,7 @@ PAI is one server you run for yourself, plus a small client on each machine. The
 ## Install the server
 
 ```bash
-curl -fsSL https://github.com/OWNER/PAI/releases/latest/download/install.sh | sh -s -- server quickstart
+curl -fsSL https://github.com/ThongHHuynhh/PAI/releases/latest/download/install.sh | sh -s -- server quickstart
 ```
 
 It installs `pai-server` as a service, makes this machine the worker `admin`, prints an API key named `default` and the line that connects other machines, then opens the quickstart.
