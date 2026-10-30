@@ -29,6 +29,9 @@ const (
 	Result   Kind = "result"
 	Error    Kind = "error"
 	Name     Kind = "name" // the session's name, newest wins; empty removes it. Never in the context
+	// Compaction is a summary of records through its upto, which the context
+	// carries in their place. The records stay in the file.
+	Compaction Kind = "compaction"
 )
 
 // Usage counts tokens. Input excludes cache reads and writes on every
@@ -70,7 +73,7 @@ type Header struct {
 	IdempotencyKey string `json:"idempotency_key,omitempty"` // message: the poster's key; a repost with it appends nothing. job system record: the job's call id
 	Source         string `json:"source,omitempty"`          // system: where the text came from
 
-	Upto    int             `json:"upto,omitempty"`    // step: last record in its context
+	Upto    int             `json:"upto,omitempty"`    // step: last record in its context. compaction: last record it summarizes
 	Model   string          `json:"model,omitempty"`   // step
 	Harness string          `json:"harness,omitempty"` // step: version that built the request
 	Request string          `json:"request,omitempty"` // step: sha256 of the request bytes

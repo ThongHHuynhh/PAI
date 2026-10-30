@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"pai/pkg/memory"
 	"pai/pkg/provider"
 	"pai/pkg/statefile"
 	"pai/pkg/version"
@@ -41,6 +42,10 @@ type Harness struct {
 	Workers   *Pool
 	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
 	Rename    func(old, name string) error // the coordinator's: the worker takes another name
+	Memory    *memory.Store                // what PAI knows across sessions; nil for none
+	// OnRecord, when set, hears every record written, with its n. It must
+	// not block.
+	OnRecord func(id string, r statefile.Record)
 
 	pmu sync.RWMutex
 	mu  sync.Mutex
@@ -284,7 +289,18 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if err != nil {
 		return "", err
 	}
-	if p := statefile.ContextUsed(chain); p > conf.ContextLimit {
+	if compactable(chain) {
+		done, err := h.compact(ctx, s, id, conf, chain)
+		if err != nil {
+			log.Printf("session %s: %v", id, err) // the limit below still holds
+		}
+		if done {
+			if chain, err = h.Sessions.Load(id); err != nil {
+				return "", err
+			}
+		}
+	}
+	if p := statefile.ContextUsed(chain); p > conf.ContextLimit && !compactedSince(chain) {
 		h.killAll(ctx, id, chain)
 		_, err := h.append(s, errorRecord("", fmt.Sprintf("context %d exceeds limit %d", p, conf.ContextLimit)))
 		return statefile.StatusFailed, err
@@ -306,8 +322,36 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 			return "", err
 		}
 	}
+	n := chain[len(chain)-1].N
+	if err := h.recallTurn(ctx, s, id, conf, chain); err != nil {
+		return "", err
+	}
+	if s.f.N() != n {
+		if chain, err = h.Sessions.Load(id); err != nil {
+			return "", err
+		}
+	}
 	return h.step(ctx, s, id, conf, chain)
 }
+
+// compactable is whether a compaction may run now: a step was built since
+// the newest compaction, so its prompt size says what the context is now.
+func compactable(chain []statefile.Record) bool {
+	c, step := 0, 0
+	for _, r := range chain {
+		switch r.Kind {
+		case statefile.Compaction:
+			c = r.N
+		case statefile.Step:
+			step = r.Upto
+		}
+	}
+	return step >= c
+}
+
+// compactedSince is whether the newest compaction came after the last step,
+// whose prompt size then no longer says what the context is.
+func compactedSince(chain []statefile.Record) bool { return !compactable(chain) }
 
 // rebuilt explains a refusal this harness can see coming: it no longer
 // compiles the last step's context to the bytes that step sent, so the
@@ -443,6 +487,9 @@ func last(chain []statefile.Record, source string) string {
 func (h *Harness) Run(ctx context.Context, id string) (statefile.Status, error) {
 	for {
 		st, err := h.Step(ctx, id)
+		if err == nil && st == statefile.StatusClosed {
+			h.afterTurn(ctx, id)
+		}
 		if err != nil || st != statefile.StatusOpen {
 			return st, err
 		}
@@ -510,6 +557,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	var a args
 	if err := json.Unmarshal(c.Arguments, &a); err != nil {
 		return result(call.ID, "error: "+err.Error())
+	}
+	if memoryTools[c.Name] {
+		return h.memoryCall(ctx, id, call, c)
 	}
 	if a.Worker == worker.Harness { // a model may take the mesh's name for the machine
 		return result(call.ID, "error: harness is the harness's address on the mesh, not a worker; the worker on the harness's machine is "+worker.Admin)

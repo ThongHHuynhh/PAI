@@ -28,8 +28,10 @@ import (
 
 	"pai/pkg/auth"
 	"pai/pkg/coordinator"
+	"pai/pkg/events"
 	"pai/pkg/harness"
 	"pai/pkg/identity"
+	"pai/pkg/memory"
 	"pai/pkg/provider"
 	"pai/pkg/relay"
 	"pai/pkg/statefile"
@@ -52,7 +54,25 @@ type Config struct {
 	URL       string              `json:"url,omitempty"`    // the harness URL, which the user's own proxy carries to HTTP: no tunnel
 	Tunnel    *Tunnel             `json:"tunnel,omitempty"` // the user's own Cloudflare tunnel; none, and no URL, is loopback only
 	Providers map[string]Provider `json:"providers"`
-	Links     [][2]string         `json:"links,omitempty"` // pairs of workers, by name, that reach each other on the mesh
+	Links     [][2]string         `json:"links,omitempty"`  // pairs of workers, by name, that reach each other on the mesh
+	Memory    *MemoryConfig       `json:"memory,omitempty"` // how memory embeds; none is the built-in hash embedder
+}
+
+// MemoryConfig names the embedder memory uses: an OpenAI compatible
+// /embeddings endpoint, such as OpenAI's or Ollama's at
+// http://localhost:11434/v1. Values expand from the environment.
+type MemoryConfig struct {
+	URL   string `json:"url"`
+	Key   string `json:"key,omitempty"`
+	Model string `json:"model"`
+}
+
+// embedder is the one c names, else the hash embedder, which needs nothing.
+func (c *MemoryConfig) embedder() memory.Embedder {
+	if c == nil || c.URL == "" || c.Model == "" {
+		return memory.Hash{}
+	}
+	return memory.OpenAI{URL: os.ExpandEnv(c.URL), Key: os.ExpandEnv(c.Key), Model: os.ExpandEnv(c.Model)}
 }
 
 // Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
@@ -226,7 +246,20 @@ func Harness(ctx context.Context, path string) error {
 	pool := harness.NewPool()
 	coord.Gone = pool.Drop
 	coord.Link(c.Links)
-	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename}
+	bus := events.New()
+	mem, err := memory.Open(filepath.Join(dir, "memory"), c.Memory.embedder())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = mem.Close() }()
+	mem.OnEvent = func(e memory.Event) {
+		bus.Publish(events.Event{Type: "memory", Session: e.Session, Data: e})
+	}
+	pool.OnChange = func(name string, connected bool) {
+		bus.Publish(events.Event{Type: "worker", Worker: name, Data: map[string]bool{"connected": connected}})
+	}
+	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Memory: mem,
+		OnRecord: func(id string, r statefile.Record) { bus.Publish(recordEvent(id, r)) }}
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
@@ -259,8 +292,16 @@ func Harness(ctx context.Context, path string) error {
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
 	a := &api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
 	a.handle(routes)
+	(&webAPI{h: h, coord: coord, bus: bus, mem: mem, url: a.at}).handle(routes)
+	app(mux)
 	api := store.Bearer(limit, routes)
-	mux.Handle("/", api)
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" && browser(r) {
+			http.Redirect(w, r, "/app/", http.StatusFound)
+			return
+		}
+		api.ServeHTTP(w, r)
+	}))
 	srv := &http.Server{Addr: c.HTTP, Handler: mux}
 	if c.URL != "" {
 		srv.Handler = proxied(mux)

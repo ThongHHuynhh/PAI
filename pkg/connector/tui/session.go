@@ -408,7 +408,15 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 // show puts a record in the transcript, or a result in its call's block.
 func (s *session) show(r statefile.Record) {
 	switch r.Kind {
-	case statefile.Start, statefile.Config, statefile.System, statefile.Name, statefile.Thinking, statefile.Step:
+	case statefile.Start, statefile.Config, statefile.Name, statefile.Thinking, statefile.Step:
+	case statefile.System:
+		if r.Source == "memory" {
+			body := string(r.Body)
+			n := strings.Count(body, "\n- [")
+			s.transcript.Append(&memBlock{head: fmt.Sprintf("◆ recalled %d memories", n), body: body[strings.Index(body, "\n")+1:]})
+		}
+	case statefile.Compaction:
+		s.transcript.Append(&memBlock{head: fmt.Sprintf("⟲ compacted records 1–%d into a summary; the full history stays in the session file", r.Upto), body: string(r.Body)})
 	case statefile.Message:
 		b := &msgBlock{r}
 		s.asked = append(s.asked, b)

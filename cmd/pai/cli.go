@@ -324,6 +324,8 @@ func render(r statefile.Record) {
 		fmt.Printf("%s  %s\n", head, r.Body)
 	case statefile.System:
 		fmt.Printf("%s  %s | %s\n", head, r.Source, skim(r.Body))
+	case statefile.Compaction:
+		fmt.Printf("%s  through %d | %s\n", head, r.Upto, skim(r.Body))
 	case statefile.Name:
 		fmt.Printf("%s  via=%s  %s\n", head, r.Via, r.Body)
 	case statefile.Message:

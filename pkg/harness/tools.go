@@ -75,13 +75,19 @@ Networking:
 - Workers reach each other only when the harness config links them. A worker name that does not resolve is not linked to this worker. A worker name that resolves but does not answer is offline or not listening
 - pai status on a worker shows each peer's path, direct or relay
 
-Context Management:
-- Every tool result ends with the time since session start and the input context size of the step that made the call: "time 3m12s context 48210". There is a set limit at which point the session will end
+Context and memory:
+- Every tool result ends with the time since session start and the input context size of the step that made the call: "time 3m12s context 48210"
+- When the context passes 70%% of its limit, PAI compacts it: the oldest records are replaced in your context by a summary system record from source compaction. The records stay in the .state file
+- PAI has a long-term memory shared by every session, machine and model. Each item has an id, a kind (fact, preference, decision, todo, procedure, summary) and a scope (global, project:<name>, session:<id>)
+- When a person sends a message, PAI may add a system record from source memory after it with the items it recalled for the turn. A learnt policy decides whether to recall and how much, from whether recalled items get used. Use what helps and ignore the rest
+- Call recall to search memory for more. Call remember to save one lasting item as a self-contained sentence: facts about the user and their machines, projects, accounts and paths, preferences, decisions and why, todos, and procedures that worked. Never save secrets
+- Call forget with an id when an item is no longer true, with why. Nothing is deleted: it stops being recalled
+- PAI also extracts lasting items from each session by itself, so remember what matters most, not everything
 - When a session ends, its .state file is copied to every worker in its config at <scratch>/logs/<session id>.log. The .log file is a copy of the .state file with media bodies removed
 - A new session may be effectively continuing a previous session. The user message will specify the path to the previous session's .log file. That file holds the whole previous session and is searchable with rg
 - A .state or .log file is a sequence of records. Each record is one JSON header line, then exactly "len" raw bytes of body, then a newline
 - Every header has: n, kind, id, time, len, type. n counts from 1 with no gaps
-- kind is one of: start, config, system, message, text, thinking, call, step, result, error
+- kind is one of: start, config, system, message, text, thinking, call, step, result, error, compaction
 - message headers carry "via", who sent it. system headers carry "source". result headers carry "for", the call id they answer, and "exit". call bodies are JSON {"name","arguments"}
 - rg -n on the file finds text in bodies. The header of the record a line belongs to is the nearest line above it that begins with {"n":
 - Record 1 is start, record 2 is config
@@ -157,14 +163,15 @@ type Output struct {
 	Full string
 }
 
-// Tools is the tool set a config record names. Every tool takes a worker. The
-// read description names the media types the session's input lists.
+// Tools is the tool set a config record names. Every worker tool takes a
+// worker; the memory tools run on the server. The read description names the
+// media types the session's input lists.
 func Tools(name string, input []string) []provider.Tool {
 	read := provider.Tool{Name: "read", Description: "Read a file on a worker as text", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
 	if len(input) > 0 {
 		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
 	}
-	return map[string][]provider.Tool{"default": {run, read, write, edit}, "patch": {run, read, patch}}[name]
+	return map[string][]provider.Tool{"default": {run, read, write, edit, recall, remember, forget}, "patch": {run, read, patch, recall, remember, forget}}[name]
 }
 
 func schema(s string) json.RawMessage { return json.RawMessage(s) }

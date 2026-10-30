@@ -515,6 +515,28 @@ func (b *errBlock) Rows(a *App, w int) []Line {
 	return rows
 }
 
+// memBlock is what memory added to a turn, or a compaction's summary: a
+// row in the accent naming it, then its lines muted, behind an accent bar.
+type memBlock struct {
+	head, body string
+	open       bool
+}
+
+func (b *memBlock) Rows(a *App, w int) []Line {
+	bar := deco("│ ", term.Style{FG: a.Theme.Accent})
+	rows := flow(run(b.head, term.Style{FG: a.Theme.Accent, Attr: term.Bold}), w-1, bar, bar)
+	if !b.open {
+		return rows
+	}
+	for _, l := range lines(b.body) {
+		rows = append(rows, flow(run(l, a.Theme.muted()), w-1, bar, bar)...)
+	}
+	return rows
+}
+
+// Click opens and closes the block.
+func (b *memBlock) Click(*App) { b.open = !b.open }
+
 // callBlock is a call and its result: two muted rows, the call and the
 // result's line, or every line of both in color when open. A click opens and
 // closes it.

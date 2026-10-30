@@ -20,6 +20,9 @@ type Pool struct {
 	mu      sync.Mutex
 	m       map[string]*Remote
 	refused map[string]Listed // admitted workers the last connection of which was refused
+	// OnChange, when set, hears each worker that connects or leaves. It must
+	// not block.
+	OnChange func(name string, connected bool)
 }
 
 // Listed is a worker as GET /workers shows it: its hello, and why its last
@@ -123,11 +126,18 @@ func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
 	}
 	log.Printf("worker %s connected from %s: %s %s %s", r.Name, who, r.OS, r.Arch, r.Version)
 	p.Add(r)
+	if p.OnChange != nil {
+		p.OnChange(r.Name, true)
+	}
 	<-r.done
 	p.mu.Lock()
-	if p.m[r.Name] == r {
+	gone := p.m[r.Name] == r
+	if gone {
 		delete(p.m, r.Name)
 		log.Printf("worker %s disconnected", r.Name)
 	}
 	p.mu.Unlock()
+	if gone && p.OnChange != nil {
+		p.OnChange(r.Name, false)
+	}
 }

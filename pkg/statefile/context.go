@@ -5,6 +5,53 @@ func seen(r, s Record) bool { return r.N <= s.Upto }
 
 func isBlock(k Kind) bool { return k == Text || k == Thinking || k == Call }
 
+// compacted is chain as the context sees it after its newest compaction: the
+// records that open the file, the summary in place of what it covers, the
+// newest workers list when it was covered, then every record after.
+func compacted(chain []Record) []Record {
+	c := -1
+	for i, r := range chain {
+		if r.Kind == Compaction {
+			c = i
+		}
+	}
+	if c < 0 {
+		return chain
+	}
+	upto := chain[c].Upto
+	var out []Record
+	var workers *Record
+	opening := true
+	for i, r := range chain {
+		if r.N > upto {
+			break
+		}
+		switch {
+		case opening && (r.Kind == Start || r.Kind == Config || r.Kind == System || r.Kind == Name):
+			out = append(out, r)
+		case r.Kind == System && r.Source == "workers":
+			workers = &chain[i]
+			opening = false
+		default:
+			opening = false
+		}
+	}
+	// The summary takes the place of upto, so every step after the cut counts
+	// it as seen, and it builds where what it covers was.
+	summary := chain[c]
+	summary.Kind, summary.Source, summary.N = System, "compaction", upto
+	out = append(out, summary)
+	if workers != nil {
+		out = append(out, *workers)
+	}
+	for _, r := range chain {
+		if r.N > upto && r.Kind != Compaction {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // Build reorders a file into context order and returns it with the index the
 // next step's upto must carry. File order is time order; the API wants each
 // step's results directly after it. So for each step: the results it saw,
@@ -12,6 +59,8 @@ func isBlock(k Kind) bool { return k == Text || k == Thinking || k == Call }
 // record itself. Blocks no step closed are dropped. Start and config never
 // enter.
 func Build(chain []Record) ([]Record, int) {
+	tip := chain[len(chain)-1].N
+	chain = compacted(chain)
 	var ctx, pending []Record
 	blocks := map[string][]Record{}
 	flush := func(s *Record) {
@@ -32,7 +81,7 @@ func Build(chain []Record) ([]Record, int) {
 	}
 	for _, r := range chain {
 		switch {
-		case r.Kind == Start || r.Kind == Config || r.Kind == Name:
+		case r.Kind == Start || r.Kind == Config || r.Kind == Name || r.Kind == Compaction:
 		case isBlock(r.Kind):
 			blocks[r.Step] = append(blocks[r.Step], r)
 		case r.Kind == Step:
@@ -45,7 +94,7 @@ func Build(chain []Record) ([]Record, int) {
 		}
 	}
 	flush(nil)
-	return ctx, chain[len(chain)-1].N
+	return ctx, tip
 }
 
 type Status string

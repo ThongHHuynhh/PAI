@@ -84,6 +84,10 @@ func (h *Harness) write(s *session, f *statefile.File, r statefile.Record) (int,
 	close(s.changed)
 	s.changed = make(chan struct{})
 	h.touch(s.id)
+	if h.OnRecord != nil {
+		r.N = f.N()
+		h.OnRecord(s.id, r)
+	}
 	return f.N(), nil
 }
 

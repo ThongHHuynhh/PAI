@@ -241,6 +241,34 @@ func (c *Coordinator) Known(k key.NodePublic) bool {
 	return n != nil && !n.Removed
 }
 
+// Machine is a node as the web graph shows it.
+type Machine struct {
+	Name      string `json:"name"`
+	Address   string `json:"address"`
+	OS        string `json:"os,omitempty"`
+	Hostname  string `json:"hostname,omitempty"`
+	Online    bool   `json:"online"` // it holds a map poll now
+	Ephemeral bool   `json:"ephemeral,omitempty"`
+}
+
+// Machines is every node that is not removed, the server's own but for it.
+func (c *Coordinator) Machines() []Machine {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []Machine
+	for _, n := range c.st.Nodes {
+		if n.Removed || n.Name == worker.Harness {
+			continue
+		}
+		m := Machine{Name: n.Name, Address: address(n.ID).String(), Online: n.streams > 0, Ephemeral: n.Ephemeral}
+		if n.Hostinfo != nil {
+			m.OS, m.Hostname = n.Hostinfo.OS, n.Hostinfo.Hostname
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 // Node is the name of the registered node at address a.
 func (c *Coordinator) Node(a netip.Addr) (string, bool) {
 	c.mu.Lock()
