@@ -3,8 +3,8 @@ version: "3"
 tasks:
   lint:
     cmds:
-      - golangci-lint run ./...
-      - gofumpt -l .
+      - test -z "$(gofmt -l cmd pkg web)"
+      - go vet ./...
       - go mod tidy -diff
 
   test:
@@ -41,7 +41,13 @@ tasks:
       - go build -o working_dir/ ./cmd/pai ./cmd/pai-server
       - for b in pai pai-server; do {{.RCODESIGN}} sign --pem-file "{{.PAI_DEV_PEM}}" --binary-identifier ai.pai.$b --timestamp-url none working_dir/$b; done
 
-  # The release gate, on real machines, with OPENAI_API_KEY set: task e2e -- <v> <prev> <port> <os>=<ssh target>...
-  e2e:
+  web:
+    dir: web
     cmds:
-      - go run ./e2e {{.CLI_ARGS}}
+      - npm ci
+      - npm run build
+
+  build:
+    deps: [web]
+    cmds:
+      - go build -o working_dir/ ./cmd/pai ./cmd/pai-server

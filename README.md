@@ -1,84 +1,48 @@
-<picture>
-  <source media="(max-width: 700px), (hover: none) and (pointer: coarse)" srcset="https://raw.githubusercontent.com/pai-ai/github-media/main/hero-mobile.svg">
-  <img src="https://raw.githubusercontent.com/pai-ai/github-media/main/hero-desktop.svg" alt="PAI, with the biplane flying over the clouds" width="960">
-</picture>
-<div><h3>PAI is an open-source agent harness</h3></div>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pai-ai/github-media/main/tui-dark.svg">
-  <img src="https://raw.githubusercontent.com/pai-ai/github-media/main/tui-light.svg" alt="The PAI TUI: a sidebar of sessions on different models, and an agent that moves a Qwen fine-tune from a GPU server to a Mac Studio and quantizes it to run there" width="960">
-</picture>
+# PAI — your personal AI cloud
 
-# Self-Hosting Quickstart
+PAI runs your AI agents across every machine you own, on any model, with one memory that is never lost.
 
-Run this command on your server machine (any always-on machine will do):
+- **Any model, any account.** Claude and ChatGPT subscriptions through their official sign-in, or any API key: Anthropic, OpenAI, OpenRouter, DeepSeek, xAI, Ollama and every OpenAI-compatible server. A session can move to another account or vendor at any time, and moves by itself when an account hits its usage limit.
+- **Every machine is a node.** Install one binary on a Linux, macOS or Windows machine and your agents can work on it, over an encrypted mesh with no inbound port.
+- **Memory that learns.** PAI remembers facts, preferences, decisions, todos and procedures across sessions, models and machines. It keeps only what lasts, merges what repeats, refuses secrets, and never deletes. A learnt policy decides when to recall and how much.
+- **Sessions that never fill up.** At 70% of the context, PAI compacts the oldest records into a summary. The full history stays on disk.
+- **See everything.** A web app shows a live graph of your machines, models and sessions, every chat, and exactly what PAI knows and why it recalls it. A terminal app does the same in a terminal.
 
-```shell
-# Linux, macOS
-curl -fsSL https://pai.ai/install | sh -s -- server quickstart
-
-# Windows
-& ([scriptblock]::Create((irm https://pai.ai/install.ps1))) server quickstart
+```
+ you ── web app / TUI / CLI ──► PAI server ──► Claude · ChatGPT · any API
+                                   │   ▲
+                 memory, sessions ─┘   └─ tools run on your machines (mesh)
 ```
 
-The quickstart walks you through adding a provider, workers (computers your agents control) and connectors (ways to message your agents).
+## Quick start
 
-Read more in [docs/self-hosting.md](docs/self-hosting.md).
+On an always-on machine (a VPS, a home server, your desktop):
 
-<br><br>
+```bash
+curl -fsSL https://github.com/OWNER/PAI/releases/latest/download/install.sh | sh -s -- server quickstart
+```
 
-# Features
-### Model agnostic
-- PAI can use any model from any provider, including Anthropic, OpenAI, Google, and more.
+The quickstart connects a model provider, then your other machines. Open the web app at the server's URL, under `/app/`, and sign in with the API key the install printed.
 
-### Context efficient
-- PAI agents have a restricted set of tools and manage their own context by retrieving key information from other sessions.
+Connect another machine with the line the server prints (`pai-server join` prints it again):
 
-### Connects all your devices
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pai-ai/github-media/main/architecture-3d-dark.svg">
-  <img src="https://raw.githubusercontent.com/pai-ai/github-media/main/architecture-3d-light.svg" alt="The PAI Architecture: connectors reach PAI Server, which holds secrets and controls, observability and the file server; the network joins the server and every worker" width="960">
-</picture>
+```bash
+curl -fsSL https://github.com/OWNER/PAI/releases/latest/download/install.sh | sh -s -- https://pai.example.com XXXX-XXXX
+```
 
-- PAI links agents and computers with fine-grained security controls. No Tailscale needed.
+Windows uses `install.ps1` the same way. See [docs/self-hosting.md](docs/self-hosting.md) for URLs, tunnels, accounts and failover, and [docs/architecture.md](docs/architecture.md) for how it works.
 
-### Shared file drives
-- PAI sets up a remote filesystem you can use concurrently without risk of de-sync.
+## Build from source
 
-### Browser and computer use
-- PAI drives your real browsers and applications with native computer use.
+Go 1.27 and Node 22:
 
-# FAQ
-<details>
-<summary>Can I bring my Claude Code or ChatGPT subscription?</summary>
+```bash
+cd web && npm ci && npm run build && cd ..
+go build -o working_dir/ ./cmd/pai ./cmd/pai-server
+```
 
-Yes, PAI can use the regular limits of a Claude Code or ChatGPT Codex subscription, or an API key with any model.
-</details>
+`go test ./...` runs the tests. The web app's build is committed in `web/dist`, so `go build` alone works too.
 
-<details>
-<summary>Does PAI share my data?</summary>
+## License
 
-No data is shared by default. Users can opt in to sharing data to improve PAI in /settings.
-</details>
-
-<details>
-<summary>Do I need more than one device?</summary>
-
-No. Everything can run on one device.
-</details>
-
-<details>
-<summary>Does pai-server need Linux?</summary>
-
-No. pai-server runs on macOS, Windows and Linux. Hosting shared files requires a compatible connected Linux device.
-</details>
-
-<details>
-<summary>Do you take contributions?</summary>
-
-We welcome feedback as GitHub issues. Pull requests are open to collaborators only. Any agent can POST plain text to https://bugs.pai.ai to report a bug.
-</details>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pai-ai/github-media/main/footer-still-dark.svg">
-  <img src="https://raw.githubusercontent.com/pai-ai/github-media/main/footer-still-light.svg" alt="A billboard turns through what PAI agents do, while the biplane tows a banner: Now you're flying!" width="960">
-</picture>
+MIT. PAI includes code from other projects under their licenses: see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

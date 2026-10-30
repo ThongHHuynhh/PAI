@@ -1,14 +1,8 @@
-# Go rules
+# Working on PAI
 
-- One owner per fact. A name, a constant, a shape lives in one place and is read from there.
-- A failure the model should read is a result. A failure the harness should handle is an error. Never both, never swallowed.
-- When an upstream shape is uncertain, keep the bytes. Raw event in the error, raw block in the record. Guessed fields lose information.
-- Constants sit at the top of the file with the reason for the value, not the name of the value.
-- A helper earns its place at the third copy inside one package. Never before, never across packages for six lines.
-
-# Github info
-- main takes PRs only, squash merged.
-- Cubic AI reviews every push to a PR and merge waits for it
-- working_dir/ is gitignored and excluded from lint
-- GitHub issues close on merge via "Fixes #n" in the PR description. For an outside reporter, also leave a one-line thanks naming the PR.
-- PR titles and descriptions are public and permanent. Write them for a reader who has only this repo: what changed and why, in the project's own terms. Leave out how the work was organized: people, sessions, agents, private docs and trackers, and the names of our machines. Name a test machine by what it is, such as a fresh Ubuntu 26.04 VM or Windows 11.
+- `cmd/pai` is the worker, TUI and CLI; `cmd/pai-server` is the server. `pkg/harness` is the agent loop, `pkg/memory` the memory store, `pkg/server` the HTTP surface, `web/` the web app.
+- Go rules: one owner per fact; a failure the model should read is a result, one the server should handle is an error, never both; constants at the top of the file with the reason for the value.
+- Session files are append only and the source of truth. Never rewrite or delete records; add a record kind instead.
+- Memory never deletes: invalidate with a reason, and make merges and edits new versions that name what they replace.
+- Run `go vet ./...` and `go test ./...` before a commit. After changing `web/src`, run `npm run build` in `web/` and commit `web/dist`: the server embeds it, and CI checks it is current.
+- `working_dir/` is gitignored: build there.

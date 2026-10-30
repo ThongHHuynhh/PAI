@@ -1,4 +1,10 @@
 name: release
+# A tag vX.Y.Z (or vX.Y.Z-rc.N) on main builds every binary, signs
+# SHA256SUMS with the release key, and publishes a GitHub release. Binaries
+# update only to a release this key signed.
+#
+# Once: go run ./pkg/release/keygen, then in the repository settings add the
+# secret RELEASE_SIGNING_KEY and the variable RELEASE_PUBLIC_KEY it prints.
 on:
   push:
     tags: ["v*"]
@@ -6,183 +12,84 @@ permissions:
   contents: read
 env:
   TAG: ${{ github.ref_name }}
-  BUCKET: pai-releases
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
   release:
     needs: ci
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    # The environment holds the Azure ids and admits v* tags only; Azure trusts
-    # this environment's OIDC subject and nothing else.
-    environment: release-signing
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: useblacksmith/setup-go@647ac649bd5b480f2a262e3e3e5f4d150ed452ad # v6.0.1
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: tag is vX.Y.Z or vX.Y.Z-rc.N, on main
         run: |
           [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "tag $TAG is not vX.Y.Z or vX.Y.Z-rc.N"; exit 1; }
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $TAG is not on main"; exit 1; }
-      # An rc ships the notes of the release it is a candidate for.
       - name: notes from docs/CHANGELOG.md
         run: |
           awk -v h="## ${TAG%%-*}" '$0 == h {f = 1; next} /^## / {f = 0} f' docs/CHANGELOG.md > notes.md
           grep -q . notes.md || { echo "docs/CHANGELOG.md has no section '## ${TAG%%-*}'"; exit 1; }
-      # Windows builds link a VERSIONINFO and an asInvoker manifest from the
-      # .syso files: the name and version Explorer and Defender see.
+      # The model catalog with live prices and limits; offline it is a seed.
+      - run: go run ./pkg/catalog/build > pkg/catalog/catalog.json
       - name: build
+        env:
+          PUB: ${{ vars.RELEASE_PUBLIC_KEY }}
         run: |
-          for b in pai pai-server; do
-            d="PAI Worker"; [ $b = pai-server ] && d="PAI Server"
-            (cd "cmd/$b" && go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64,arm64 --manifest cli --product-name PAI \
-              --file-description "$d" --product-version "$TAG" --file-version "$TAG" --original-filename "$b.exe" --copyright "Copyright (c) 2026 Alexander Yue")
-          done
+          [ -n "$PUB" ] || { echo "set the RELEASE_PUBLIC_KEY variable: go run ./pkg/release/keygen"; exit 1; }
+          ld="-s -w -X pai/pkg/version.V=$TAG -X pai/pkg/release.Repo=$GITHUB_REPOSITORY -X pai/pkg/release.Key=$PUB"
           for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             os=${t%/*} arch=${t#*/} ext=
             [ "$os" = windows ] && ext=.exe
             for b in pai pai-server; do
-              GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X pai/pkg/version.V=$TAG" -o "dist/$b-$os-$arch$ext" "./cmd/$b"
+              GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "$ld" -o "dist/$b-$os-$arch$ext" "./cmd/$b"
             done
           done
           [ "$(dist/pai-linux-amd64 version)" = "$TAG" ]
-          for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g" "install/$s" > "dist/$s"; done
-          cp docs/CHANGELOG.md dist/
-      # BSD and MIT licenses of code in the binaries (Go, tailscale, headscale
-      # in pkg/coordinator) require their notices with binary redistributions.
-      # Dependencies differ by platform, so every target is scanned.
-      - name: THIRD_PARTY_NOTICES
-        run: |
-          set -o pipefail
-          GOBIN=$RUNNER_TEMP go install github.com/google/go-licenses/v2@v2.0.1
-          printf %s '{{range .}}{{.Name}} {{.LicensePath}}{{"\n"}}{{end}}' > "$RUNNER_TEMP/notices.tpl"
-          { echo "Go $(go env GOROOT)/LICENSE"
-            for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-              GOOS=${t%/*} GOARCH=${t#*/} "$RUNNER_TEMP/go-licenses" report --template "$RUNNER_TEMP/notices.tpl" ./cmd/pai ./cmd/pai-server
-            done
-          } | sort -u | while read -r name path; do printf '%s\n\n' "$name"; cat "$path"; printf '\n\n'; done > dist/THIRD_PARTY_NOTICES
-      # macOS keeps a privacy grant (Network Volumes, Screen Recording,
-      # Accessibility) for the code's designated requirement. An ad-hoc
-      # signature's is its cdhash, so each release asked again, and the first
-      # file access on a drive hung until someone answered the dialog (#164).
-      # One self-signed certificate keeps the requirement across releases.
-      - name: codesign macOS binaries
-        env:
-          PEM: ${{ secrets.MACOS_SIGNING_PEM }}
-          # not RCODESIGN_*: rcodesign reads those as its config
-          SIGNER_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
-        run: |
-          curl -fsSLo "$RUNNER_TEMP/rcodesign.tgz" https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
-          echo "$SIGNER_SHA256  $RUNNER_TEMP/rcodesign.tgz" | sha256sum -c
-          tar -xzf "$RUNNER_TEMP/rcodesign.tgz" -C "$RUNNER_TEMP" --strip-components=1
-          printf '%s\n' "$PEM" > "$RUNNER_TEMP/macos.pem"
-          for f in dist/*-darwin-*; do
-            b=$(basename "$f")
-            "$RUNNER_TEMP/rcodesign" sign --pem-file "$RUNNER_TEMP/macos.pem" --binary-identifier "ai.pai.${b%-darwin-*}" --timestamp-url none "$f"
-          done
-          rm "$RUNNER_TEMP/macos.pem"
-      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      # Defender blocks unsigned Go binaries as Sabsik.FL.A!ml. Artifact Signing
-      # certificates live three days, so every signature is timestamped and no
-      # thumbprint is pinned. One jsign call signs all four: each call costs an
-      # extra API request for the chain.
-      - name: Authenticode sign Windows binaries
-        env:
-          JSIGN_SHA256: 7b4a01ba81e9ee866f09a5e45d40c928707eb5286f4e20d4042c67a141ae5e62
-        run: |
-          curl -fsSLo "$RUNNER_TEMP/jsign.deb" https://github.com/ebourg/jsign/releases/download/7.5/jsign_7.5_all.deb
-          echo "$JSIGN_SHA256  $RUNNER_TEMP/jsign.deb" | sha256sum -c
-          sudo apt-get update -qq && sudo apt-get install -y -qq "$RUNNER_TEMP/jsign.deb"
-          TOKEN=$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)
-          echo "::add-mask::$TOKEN"
-          export TOKEN
-          jsign --storetype TRUSTEDSIGNING --keystore "${{ vars.ARTIFACT_SIGNING_ENDPOINT }}" --storepass env:TOKEN \
-            --alias "${{ vars.ARTIFACT_SIGNING_ACCOUNT }}/${{ vars.ARTIFACT_SIGNING_PROFILE }}" \
-            --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 dist/*-windows-*.exe
-      # After signing: the sums cover the bytes users run.
-      - name: SHA256SUMS
-        run: cd dist && sha256sum * > SHA256SUMS
-      # Binaries update only to a SHA256SUMS this key signed; the check stops a
-      # release whose key is not the one the binaries carry.
-      - name: sign SHA256SUMS
+          for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g; s#@REPO@#$GITHUB_REPOSITORY#g" "install/$s" > "dist/$s"; done
+          printf '%s\n' "$TAG" > dist/VERSION
+          cp docs/CHANGELOG.md THIRD_PARTY_NOTICES dist/
+      - name: SHA256SUMS, signed
         env:
           KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
-          printf '%s\n' "$KEY" > "$RUNNER_TEMP/key.pem"
-          grep -qF "$(openssl pkey -in "$RUNNER_TEMP/key.pem" -pubout -outform DER | tail -c 32 | base64)" pkg/release/release.go || { echo "RELEASE_SIGNING_KEY is not the key in pkg/release/release.go"; exit 1; }
-          openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
-          rm "$RUNNER_TEMP/key.pem"
-      # The token is scoped to the bucket, which R2 honors on its S3 API only.
-      # Its S3 key id is the token id and its secret the token's sha256.
-      # latest names the newest stable release for pai-server update, and
-      # the install scripts at the root are that release's, for pai.ai/install.
-      # latest goes last, so it never names a release still uploading. Root
-      # paths are uncached, since their bytes change. A tag below the current
-      # latest leaves them; the first release finds none.
-      - name: upload to R2
-        env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          id=$(curl -fsS -H "Authorization: Bearer $TOKEN" "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/tokens/verify" | jq -r .result.id)
-          secret=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
-          echo "::add-mask::$secret"
-          for f in dist/*; do
-            ct=application/octet-stream
-            case $f in *.sh | *.ps1 | *.md | */SHA256SUMS | */THIRD_PARTY_NOTICES) ct="text/plain; charset=utf-8" ;; esac
-            curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: $ct" -T "$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$TAG/${f#dist/}"
-          done
-          cur=$(curl -fsS https://dl.pai.ai/latest || true)
-          if [[ $TAG != *-rc.* && $(printf '%s\n' "$cur" "$TAG" | sort -V | tail -1) == "$TAG" ]]; then
-            for f in install.sh install.ps1; do
-              curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: text/plain; charset=utf-8" -H "Cache-Control: no-store" -T "dist/$f" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/$f"
-            done
-            printf '%s\n' "$TAG" > "$RUNNER_TEMP/latest"
-            curl -fsS --aws-sigv4 aws:amz:auto:s3 --user "$id:$secret" -H "Content-Type: text/plain" -H "Cache-Control: no-store" -T "$RUNNER_TEMP/latest" "https://$ACCOUNT.r2.cloudflarestorage.com/$BUCKET/latest"
-          fi
+          cd dist && sha256sum * > SHA256SUMS
+          cat > "$RUNNER_TEMP/sign.go" <<'GO'
+          package main
+
+          import (
+          	"crypto/ed25519"
+          	"encoding/base64"
+          	"os"
+          )
+
+          func main() {
+          	seed, err := base64.StdEncoding.DecodeString(os.Getenv("KEY"))
+          	if err != nil || len(seed) != ed25519.SeedSize {
+          		panic("RELEASE_SIGNING_KEY is not a base64 ed25519 seed")
+          	}
+          	k := ed25519.NewKeyFromSeed(seed)
+          	if base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey)) != os.Getenv("PUB") {
+          		panic("RELEASE_SIGNING_KEY is not the pair of RELEASE_PUBLIC_KEY")
+          	}
+          	b, err := os.ReadFile("SHA256SUMS")
+          	if err != nil {
+          		panic(err)
+          	}
+          	if err := os.WriteFile("SHA256SUMS.sig", ed25519.Sign(k, b), 0o644); err != nil {
+          		panic(err)
+          	}
+          }
+          GO
+          PUB='${{ vars.RELEASE_PUBLIC_KEY }}' go run "$RUNNER_TEMP/sign.go"
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           pre=; [[ $TAG == *-rc.* ]] && pre=--prerelease
-          gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md $pre
-  # The npm and PyPI packages run the release binary, checked against the
-  # SHA256SUMS packed in them. Stable releases only, after the release, so a
-  # registry failure cannot hold it back. Both registries trust this workflow
-  # and environment (trusted publishing): no token. npm takes trusted publishing
-  # and provenance only from a GitHub-hosted runner. A failed publish is redone
-  # by rerunning this job alone; each registry skips a version it already has.
-  packages:
-    needs: release
-    if: ${{ !contains(github.ref_name, '-rc.') }}
-    runs-on: ubuntu-24.04
-    environment: release-signing
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - name: npm and PyPI packages
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download "$TAG" -p SHA256SUMS
-          cp SHA256SUMS install/npm/
-          cp SHA256SUMS install/pypi/pai/
-          (cd install/npm && npm version --no-git-tag-version "${TAG#v}" && { npm view "pai@${TAG#v}" version >/dev/null 2>&1 || npm publish --provenance --access public; })
-          (cd install/pypi && sed -i "s/^version = \"0.0.0\"/version = \"${TAG#v}\"/" pyproject.toml && uv build && uv publish --trusted-publishing always --check-url https://pypi.org/simple/)
+          gh release create "$TAG" dist/* --title "PAI $TAG" --notes-file notes.md $pre
