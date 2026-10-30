@@ -23,6 +23,15 @@ export function setKey(k: string | null) {
 
 let memoryKey: string | null = getKey();
 
+// bearer is what the server checks: the secret of a whole api key
+// (pai_key_<server key>.<secret>.<url>, as install prints it), or the key as
+// pasted when it is the secret alone.
+function bearer(): string {
+  const k = memoryKey ?? "";
+  const parts = k.startsWith("pai_key_") ? k.split(".") : [];
+  return `Bearer ${parts.length === 3 ? parts[1] : k}`;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -30,7 +39,7 @@ export class ApiError extends Error {
 }
 
 export async function call<T>(method: string, path: string, body?: unknown, type = "application/json"): Promise<T> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${memoryKey ?? ""}` };
+  const headers: Record<string, string> = { Authorization: bearer() };
   let payload: BodyInit | undefined;
   if (body !== undefined) {
     headers["Content-Type"] = type;
@@ -184,7 +193,7 @@ export function parseRecords(buf: ArrayBuffer): Rec[] {
 
 export async function records(id: string, after: number, wait = ""): Promise<Rec[]> {
   const r = await fetch(`/sessions/${id}/records?after=${after}${wait ? `&wait=${wait}` : ""}`, {
-    headers: { Authorization: `Bearer ${memoryKey ?? ""}` },
+    headers: { Authorization: bearer() },
   });
   if (!r.ok) throw new ApiError(r.status, await r.text());
   return parseRecords(await r.arrayBuffer());
@@ -200,7 +209,7 @@ export function streamEvents(on: (e: PaiEvent) => void, status: (live: boolean) 
     while (!stopped) {
       try {
         ctrl = new AbortController();
-        const r = await fetch("/events", { headers: { Authorization: `Bearer ${memoryKey ?? ""}` }, signal: ctrl.signal });
+        const r = await fetch("/events", { headers: { Authorization: bearer() }, signal: ctrl.signal });
         if (!r.ok || !r.body) throw new Error(String(r.status));
         status(true);
         const reader = r.body.getReader();
