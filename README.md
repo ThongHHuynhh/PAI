@@ -1,5 +1,7 @@
 # PAI — your personal AI cloud
 
+<p align="center"><img src="docs/assets/pai.gif" alt="PAI: the Orbit mark, in the light and dark themes" width="720"></p>
+
 PAI runs your AI agents across every machine you own, on any model, with one memory that is never lost.
 
 - **Any model, any account.** Claude and ChatGPT subscriptions through their official sign-in, or any API key: Anthropic, OpenAI, OpenRouter, DeepSeek, xAI, Ollama and every OpenAI-compatible server. A session can move to another account or vendor at any time, and moves by itself when an account hits its usage limit.
