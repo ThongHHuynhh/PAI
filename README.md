@@ -1,6 +1,6 @@
 # PAI — your personal AI cloud
 
-<p align="center"><img src="docs/assets/pai.gif" alt="PAI: the Orbit mark, in the light and dark themes" width="720"></p>
+<p align="center"><img src="docs/assets/pai.gif" alt="PAI: the Orbit mark and the PAI wordmark" width="720"></p>
 
 PAI runs your AI agents across every machine you own, on any model, with one memory that is never lost.
 

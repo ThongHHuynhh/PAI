@@ -2,20 +2,40 @@
 <html><head><meta charset="utf-8"><title>PAI logo</title>
 <style>
 html, body { margin: 0; }
-.stage { position: relative; width: 720px; height: 240px; overflow: hidden; }
-.layer { position: absolute; inset: 0; display: flex; align-items: center; gap: 28px; padding: 0 48px; background: var(--bg); color: var(--text);
-  font-family: Inter, "Segoe UI", system-ui, sans-serif; }
-.light { --bg: #ffffff; --text: #17151f; --muted: #6b6878; --accent: #6a4fe0; --accent-hi: #c2b8ff; --accent-lo: #4a33b8; --ring: #b9b5c6; --node: #2b2638; }
-.dark  { --bg: #0b0a10; --text: #f5f3fa; --muted: #9a94ab; --accent: #9585f8; --accent-hi: #d9d2ff; --accent-lo: #5b49d6; --ring: #5d5770; --node: #e9e6f3; }
-.word { font-size: 92px; font-weight: 750; letter-spacing: 0.06em; line-height: 1; }
-.tag { font-size: 22px; color: var(--muted); margin-top: 10px; }
+.stage { width: 720px; height: 240px; display: flex; align-items: center; justify-content: center; gap: 40px; background: var(--bg);
+  --bg: #ffffff; --text: #17151f; --accent: #6a4fe0; --accent-hi: #c2b8ff; --accent-lo: #4a33b8; --ring: #b9b5c6; --node: #2b2638; }
 </style></head>
 <body>
-<div class="stage">
-  <div class="layer light"><svg width="200" height="200" viewBox="0 0 100 100"></svg><div><div class="word">PAI</div><div class="tag">Your personal AI cloud</div></div></div>
-  <div class="layer dark"><svg width="200" height="200" viewBox="0 0 100 100"></svg><div><div class="word">PAI</div><div class="tag">Your personal AI cloud</div></div></div>
-</div>
+<div class="stage"><svg id="orbit" width="220" height="220" viewBox="0 0 100 100"></svg><svg id="word"></svg></div>
 <script>
+// The wordmark of pkg/version/version.go, drawn cell by cell: each block
+// character fills quadrants of its cell, so it needs no font.
+const WORDMARK = [
+  "▗▄▄▄▖  ▗▄▄▖  ▗▄▄▄▖",
+  "▐▌ ▐▌ ▐▌  ▐▌   █",
+  "▐▛▀▀▘ ▐▛▀▀▜▌   █",
+  "▐▌    ▐▌  ▐▌ ▗▄█▄▖",
+];
+// quadrants as [top-left, top-right, bottom-left, bottom-right]
+const QUAD = { "▗": [0,0,0,1], "▖": [0,0,1,0], "▘": [1,0,0,0], "▄": [0,0,1,1], "▀": [1,1,0,0], "▐": [0,1,0,1], "▌": [1,0,1,0],
+  "█": [1,1,1,1], "▛": [1,1,1,0], "▜": [1,1,0,1] };
+const CW = 18, CH = 36; // a terminal cell, twice as tall as wide
+(() => {
+  const cols = Math.max(...WORDMARK.map(l => [...l].length));
+  const w = document.getElementById("word");
+  w.setAttribute("width", cols * CW);
+  w.setAttribute("height", WORDMARK.length * CH);
+  let s = "";
+  WORDMARK.forEach((line, row) => [...line].forEach((ch, col) => {
+    const q = QUAD[ch];
+    if (!q) return;
+    q.forEach((on, k) => {
+      if (on) s += `<rect x="${col * CW + (k % 2) * CW / 2}" y="${row * CH + (k >> 1) * CH / 2}" width="${CW / 2 + 0.3}" height="${CH / 2 + 0.3}" fill="var(--text)"/>`;
+    });
+  }));
+  w.innerHTML = s;
+})();
+
 // Orbit from web/src/components/Orbit.tsx, with its rates rounded so that
 // everything repeats every LOOP seconds: each ring turns half a turn (its two
 // machines swap places), pulses run 4 times, the core breathes 5 times.
@@ -39,7 +59,7 @@ function point(i, th) {
 }
 const rings = RINGS.map((_, i) => Array.from({ length: 73 }, (_, k) => point(i, (k / 72) * 2 * Math.PI))
   .map(([x, y], k) => `${k ? "L" : "M"}${(50 + x * R).toFixed(2)},${(50 - y * R).toFixed(2)}`).join(""));
-function svg(t, id) {
+function orbit(t) {
   const core = 9 * (1 + 0.06 * Math.sin(t * 0.625 * 2 * Math.PI));
   const ripple = (t * 0.5) % 1;
   const ns = Array.from({ length: NODES }, (_, j) => {
@@ -49,31 +69,18 @@ function svg(t, id) {
     const f = (t * 0.5 + j * 0.37) % 1;
     return { x: 50 + x * R, y: 50 - y * R, z, p: j % 2 ? 1 - f : f, j };
   });
-  let s = `<defs><radialGradient id="${id}" cx="38%" cy="35%" r="70%"><stop offset="0%" stop-color="var(--accent-hi)"/><stop offset="60%" stop-color="var(--accent)"/><stop offset="100%" stop-color="var(--accent-lo)"/></radialGradient></defs>`;
+  let s = `<defs><radialGradient id="core" cx="38%" cy="35%" r="70%"><stop offset="0%" stop-color="var(--accent-hi)"/><stop offset="60%" stop-color="var(--accent)"/><stop offset="100%" stop-color="var(--accent-lo)"/></radialGradient></defs>`;
   s += rings.map(d => `<path d="${d}" fill="none" stroke="var(--ring)" stroke-width="0.5" stroke-dasharray="0.6 1.6"/>`).join("");
   s += `<circle cx="50" cy="50" r="${core * (1 + 2.2 * ripple)}" fill="none" stroke="var(--accent)" stroke-opacity="${1 - ripple}" stroke-width="0.4"/>`;
   s += ns.filter(n => n.z < 0).map(n => `<circle cx="${n.x}" cy="${n.y}" r="1.6" fill="var(--node)" opacity="0.55"/>`).join("");
-  s += `<circle cx="50" cy="50" r="${core}" fill="url(#${id})"/>`;
+  s += `<circle cx="50" cy="50" r="${core}" fill="url(#core)"/>`;
   s += ns.filter(n => n.z >= 0).map(n => `<line x1="50" y1="50" x2="${n.x}" y2="${n.y}" stroke="var(--ring)" stroke-width="0.35" stroke-dasharray="0.8 1.2"/>` +
     `<circle cx="${50 + (n.x - 50) * n.p}" cy="${50 + (n.y - 50) * n.p}" r="0.9" fill="var(--accent)"/>` +
     `<circle cx="${n.x}" cy="${n.y}" r="${2.2 + n.z}" fill="var(--node)"/>`).join("");
   return s;
 }
-// dark fades in over 3.4-4.0 s and out over 7.4-8.0 s, so the loop is seamless.
-function darkness(t) {
-  const ease = x => x * x * (3 - 2 * x);
-  if (t < 3.4) return 0;
-  if (t < 4) return ease((t - 3.4) / 0.6);
-  if (t < 7.4) return 1;
-  return 1 - ease((t - 7.4) / 0.6);
-}
-const [ls, ds] = document.querySelectorAll("svg");
-const dark = document.querySelector(".layer.dark");
-window.draw = t => {
-  ls.innerHTML = svg(t, "cl");
-  ds.innerHTML = svg(t, "cd");
-  dark.style.opacity = darkness(t);
-};
+const o = document.getElementById("orbit");
+window.draw = t => { o.innerHTML = orbit(t); };
 draw(0);
 </script>
 </body></html>
