@@ -51,8 +51,8 @@ def claude(prompt, cwd, model):
     return j.get("result", out + err), tok, dt
 
 
-def codex(prompt, cwd, model, config):
-    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write"]
+def codex(prompt, cwd, model, config, sandbox):
+    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", sandbox]
     if model:
         cmd += ["-m", model]
     for c in config:
@@ -105,9 +105,10 @@ def main():
     # On Windows, sandbox = "elevated" writes files as a separate sandbox user,
     # which the next session cannot read: -c windows.sandbox="unelevated".
     ap.add_argument("--codex-config", action="append", default=[], help="a codex -c override; repeatable")
+    ap.add_argument("--codex-sandbox", default="workspace-write", help="danger-full-access turns the sandbox off")
     a = ap.parse_args()
     fns = {"claude": lambda p, c: claude(p, c, a.claude_model),
-           "codex": lambda p, c: codex(p, c, a.codex_model, a.codex_config),
+           "codex": lambda p, c: codex(p, c, a.codex_model, a.codex_config, a.codex_sandbox),
            "pai": lambda p, c: pai(p, c, a.pai_model)}
     results = []
     for agent in a.agents.split(","):

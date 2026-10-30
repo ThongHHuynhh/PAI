@@ -82,15 +82,15 @@ main { overflow-wrap: anywhere; }
 <body>
 <main>
 <h1>PAI vs Claude Code vs Codex</h1>
-<p class="sub">Live, end to end · 2026-10-30 · Windows 11 · one run · <abbr title="Session 1 is told 5 facts and asked to keep them. Session 2 is a fresh session in the same folder and is asked 5 questions about them. Script: bench/live/live.py">teach → recall test</abbr></p>
+<p class="sub">Live, end to end · 2026-10-30 · Windows 11 · 2 runs · <abbr title="Session 1 is told 5 facts and asked to keep them. Session 2 is a fresh session in the same folder and is asked 5 questions about them. Script: bench/live/live.py">teach → recall test</abbr></p>
 
 <div class="tiles">
-  <div class="tile"><div class="k">Tokens, PAI vs Claude Code</div><div class="v">9.9× fewer</div><div class="d">19,430 vs 192,620 · same model</div></div>
-  <div class="tile"><div class="k">Wall time, PAI vs Claude Code</div><div class="v">2.3× faster</div><div class="d">8.7 s vs 19.9 s</div></div>
-  <div class="tile"><div class="k">Recall (5 facts)</div><div class="v">5 · 5 · 0</div><div class="d">PAI · Claude Code · Codex</div></div>
+  <div class="tile"><div class="k">Tokens, PAI vs Claude Code</div><div class="v">10× fewer</div><div class="d">19,315 vs 192,631 · same model</div></div>
+  <div class="tile"><div class="k">Wall time, PAI vs Claude Code</div><div class="v">2.7× faster</div><div class="d">7.6 s vs 20.3 s</div></div>
+  <div class="tile"><div class="k">Recall (5 facts)</div><div class="v">5 · 5 · 5</div><div class="d">PAI · Claude Code · Codex</div></div>
 </div>
 
-<h2>Results</h2>
+<h2>Results <span class="mute" style="font-weight:400" title="Run 2: every agent can save its memory. Run 1 is in the table below.">· run 2, Codex sandbox off</span></h2>
 <div class="charts">
   <div class="chart"><h3>Total tokens</h3><div data-chart="tokens"></div></div>
   <div class="chart"><h3>Wall time (s)</h3><div data-chart="seconds"></div></div>
@@ -102,53 +102,65 @@ main { overflow-wrap: anywhere; }
 <div class="tbl">
 <table>
   <thead><tr>
-    <th>Agent</th><th>Model</th><th>Session</th>
+    <th>Run · agent</th><th>Model</th><th>Session</th>
     <th><abbr title="Input read without a cache hit, cache writes included">Fresh</abbr></th>
     <th><abbr title="Input served from the prompt cache">Cached</abbr></th>
     <th>Output</th><th>Total</th><th>Time</th><th>Recall</th>
   </tr></thead>
   <tbody>
-    <tr><td rowspan="2">PAI</td><td rowspan="2">Sonnet 5.5</td><td>teach</td><td>5,385</td><td>7,103</td><td>857</td><td>13,345</td><td>6.5 s</td><td></td></tr>
-    <tr><td>ask</td><td>4,674</td><td>1,330</td><td>81</td><td>6,085</td><td>2.2 s</td><td class="ok">5/5</td></tr>
-    <tr><td rowspan="2">Claude Code</td><td rowspan="2"><abbr title="Plus a small claude-haiku-5-5 side call, counted">Sonnet 5.5</abbr></td><td>teach</td><td>21,267</td><td>121,018</td><td>2,548</td><td>144,833</td><td>16.0 s</td><td></td></tr>
-    <tr><td>ask</td><td>17,509</td><td>30,135</td><td>143</td><td>47,787</td><td>3.9 s</td><td class="ok">5/5</td></tr>
-    <tr><td rowspan="2"><abbr title="Your config: [windows] sandbox = &quot;elevated&quot;">Codex</abbr></td><td rowspan="2"><abbr title="Reasoning effort: low (your config)">gpt-6.1-sol</abbr></td><td>teach</td><td>8,694</td><td>60,672</td><td>438</td><td>69,804</td><td>21.0 s</td><td></td></tr>
-    <tr><td>ask</td><td>2,563</td><td>12,416</td><td>104</td><td>15,083</td><td>5.6 s</td><td class="no">0/5</td></tr>
-    <tr class="mute"><td rowspan="2"><abbr title="Re-run with -c windows.sandbox=&quot;unelevated&quot;">Codex, unelevated</abbr></td><td rowspan="2">gpt-6.1-sol</td><td>teach</td><td>6,335</td><td>46,208</td><td>260</td><td>52,803</td><td>14.7 s</td><td></td></tr>
+    <tr><td rowspan="2">2 · PAI</td><td rowspan="2">Sonnet 5.5</td><td>teach</td><td>5,389</td><td>7,103</td><td>731</td><td>13,223</td><td>5.9 s</td><td></td></tr>
+    <tr><td>ask</td><td>4,680</td><td>1,330</td><td>82</td><td>6,092</td><td>1.7 s</td><td class="ok">5/5</td></tr>
+    <tr><td rowspan="2">2 · Claude Code</td><td rowspan="2"><abbr title="Plus a small claude-haiku-5-5 side call, counted">Sonnet 5.5</abbr></td><td>teach</td><td>21,335</td><td>121,075</td><td>2,303</td><td>144,713</td><td>16.1 s</td><td></td></tr>
+    <tr><td>ask</td><td>17,517</td><td>30,137</td><td>264</td><td>47,918</td><td>4.2 s</td><td class="ok">5/5</td></tr>
+    <tr><td rowspan="2"><abbr title="--sandbox danger-full-access">2 · Codex, no sandbox</abbr></td><td rowspan="2"><abbr title="Reasoning effort: low (your config)">gpt-6.1-sol</abbr></td><td>teach</td><td>13,220</td><td>58,624</td><td>444</td><td>72,288</td><td>20.1 s</td><td></td></tr>
+    <tr><td>ask</td><td>2,394</td><td>12,416</td><td>63</td><td>14,873</td><td>5.1 s</td><td class="ok">5/5</td></tr>
+    <tr class="mute"><td rowspan="2">1 · PAI</td><td rowspan="2">Sonnet 5.5</td><td>teach</td><td>5,385</td><td>7,103</td><td>857</td><td>13,345</td><td>6.5 s</td><td></td></tr>
+    <tr class="mute"><td>ask</td><td>4,674</td><td>1,330</td><td>81</td><td>6,085</td><td>2.2 s</td><td>5/5</td></tr>
+    <tr class="mute"><td rowspan="2">1 · Claude Code</td><td rowspan="2">Sonnet 5.5</td><td>teach</td><td>21,267</td><td>121,018</td><td>2,548</td><td>144,833</td><td>16.0 s</td><td></td></tr>
+    <tr class="mute"><td>ask</td><td>17,509</td><td>30,135</td><td>143</td><td>47,787</td><td>3.9 s</td><td>5/5</td></tr>
+    <tr class="mute"><td rowspan="2"><abbr title="Your config: [windows] sandbox = &quot;elevated&quot;">1 · Codex, elevated</abbr></td><td rowspan="2">gpt-6.1-sol</td><td>teach</td><td>8,694</td><td>60,672</td><td>438</td><td>69,804</td><td>21.0 s</td><td></td></tr>
+    <tr class="mute"><td>ask</td><td>2,563</td><td>12,416</td><td>104</td><td>15,083</td><td>5.6 s</td><td class="no">0/5</td></tr>
+    <tr class="mute"><td rowspan="2"><abbr title="-c windows.sandbox=&quot;unelevated&quot;">1 · Codex, unelevated</abbr></td><td rowspan="2">gpt-6.1-sol</td><td>teach</td><td>6,335</td><td>46,208</td><td>260</td><td>52,803</td><td>14.7 s</td><td></td></tr>
     <tr class="mute"><td>ask</td><td>3,132</td><td>12,416</td><td>96</td><td>15,644</td><td>5.3 s</td><td class="no">0/5</td></tr>
   </tbody>
 </table>
 </div>
 
-<h2>Session 2 answers</h2>
+<h2>Session 2 answers <span class="mute" style="font-weight:400">· run 2</span></h2>
 <div class="ans">
   <div><b style="color:var(--pai)">PAI</b><pre>1. Port 5433 (Postgres 17).
 2. Through Kamal to the Hetzner VPS named atlas.
 3. Rust.
-4. forge (run ./rotate-pulse.sh).
+4. forge, by running ./rotate-pulse.sh.
 5. The NAS named quartz.</pre></div>
   <div><b style="color:var(--claude)">Claude Code</b><pre>1. Port 5433 (Postgres 17).
-2. Via Kamal to the Hetzner VPS "atlas".
+2. They go out with Kamal to the Hetzner VPS "atlas".
 3. Rust.
-4. forge (run `./rotate-pulse.sh`).
+4. On "forge", using `./rotate-pulse.sh`.
 5. The NAS "quartz".</pre></div>
-  <div><b style="color:var(--codex)">Codex</b><pre>1. I don't have the harbor staging database port in this session.
-2. I don't have the ledger deploy destination in this session.
-3. I don't have Mai's preferred CLI language in this session.
-4. I don't have the machine used to rotate pulse's secrets in this session.
-5. I don't have the backup vault's machine in this session.</pre></div>
+  <div><b style="color:var(--codex)">Codex</b><pre>1. Harbor's staging database uses port 5433.
+2. Ledger deploys go through Kamal to the Hetzner VPS atlas.
+3. Mai prefers Rust for CLI tools.
+4. Pulse's secrets are rotated on forge.
+5. The backup vault is on the NAS quartz.</pre></div>
 </div>
 
 <h2>Why</h2>
 <ul>
   <li><b>PAI</b>: session 1 saved the facts to its memory store with the <code>remember</code> tool; session 2 recalled them automatically into one short system block (<a href="#ref-recall">recall</a>). Its claude-code provider also turns off CLAUDE.md, auto memory and telemetry for each step (<a href="#ref-env">env</a>), so each request is small.</li>
   <li><b>Claude Code</b>: saved to its auto memory and read the memory index in session 2. It ran with your normal setup (global CLAUDE.md, plugins, MCP servers, skills), which is most of its extra tokens.</li>
-  <li><b>Codex</b>: no built-in cross-session memory. Run 1 wrote <code>AGENTS.md</code>, but the elevated Windows sandbox wrote it as a separate sandbox user, so the next session could not read it (your own user gets "Access is denied"). Run 2 (unelevated) could not write the file at all and said "Persistent memory isn't available here".</li>
+  <li><b>Codex</b>: no built-in cross-session memory; it writes an <code>AGENTS.md</code> file.
+    <ul>
+      <li>Sandbox off (run 2): 5/5, but it wrote the facts to the global <code>~/.codex/AGENTS.md</code>, which every later Codex session on the machine loads. It was removed after the run.</li>
+      <li>Elevated Windows sandbox (run 1): the file was written as a separate sandbox user, so the next session could not read it ("Access is denied").</li>
+      <li>Unelevated sandbox (run 1): the write failed; Codex said "Persistent memory isn't available here".</li>
+    </ul>
+  </li>
 </ul>
 
 <h2>Limits</h2>
 <ul>
-  <li>One run per agent: times will vary run to run; token counts are steadier.</li>
+  <li>Two runs: times vary run to run; token counts stayed within 3%. PAI's memory was emptied between runs.</li>
   <li>Codex uses a different model, so its speed and tokens are not a like-for-like harness comparison. PAI and Claude Code both ran Sonnet 5.5.</li>
   <li>Recall is scored by matching the expected word (5433, atlas, Rust, forge, quartz) in the answer (<a href="#ref-score">score</a>).</li>
   <li>Token split is the same for every agent (<a href="#ref-tokens">tokens</a>). Codex's <code>input_tokens</code> already includes cached input, so it is not added twice.</li>
@@ -198,21 +210,22 @@ tokens(u["input"] + u["cache_write"], u["cache_read"], u["output"])</code></pre>
 }</code></pre>
 </div>
 <div class="ref" id="ref-raw">
-  <h3><a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/results.json">bench/live/results.json</a> · raw results (and <a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/results-codex-unelevated.json">results-codex-unelevated.json</a>)</h3>
-<pre><code class="language-bash">PAI_BIN=working_dir/pai py bench/live/live.py --agents pai,claude,codex &gt; bench/live/results.json
-py bench/live/live.py --agents codex --codex-config 'windows.sandbox="unelevated"'</code></pre>
+  <h3>Raw results: <a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/results-run2.json">results-run2.json</a> · <a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/results.json">results.json</a> (run 1) · <a href="https://github.com/ThongHHuynhh/PAI/blob/main/bench/live/results-codex-unelevated.json">results-codex-unelevated.json</a></h3>
+<pre><code class="language-bash">PAI_BIN=working_dir/pai py bench/live/live.py --agents pai,claude,codex --codex-sandbox danger-full-access &gt; bench/live/results-run2.json
+PAI_BIN=working_dir/pai py bench/live/live.py --agents pai,claude,codex &gt; bench/live/results.json
+py bench/live/live.py --agents codex --codex-config 'windows.sandbox="unelevated"' &gt; bench/live/results-codex-unelevated.json</code></pre>
 </div>
 </main>
 <div id="tip"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
 const data = [
-  { name: "PAI", c: "--pai", tokens: 19430, seconds: 8.7, recall: 5, tip: "fresh 10,059 · cached 8,433 · output 938" },
-  { name: "Claude Code", c: "--claude", tokens: 192620, seconds: 19.9, recall: 5, tip: "fresh 38,776 · cached 151,153 · output 2,691" },
-  { name: "Codex", c: "--codex", tokens: 84887, seconds: 26.7, recall: 0, tip: "fresh 11,257 · cached 73,088 · output 542" },
+  { name: "PAI", c: "--pai", tokens: 19315, seconds: 7.6, recall: 5, tip: "fresh 10,069 · cached 8,433 · output 813" },
+  { name: "Claude Code", c: "--claude", tokens: 192631, seconds: 20.3, recall: 5, tip: "fresh 38,852 · cached 151,212 · output 2,567" },
+  { name: "Codex", c: "--codex", tokens: 87161, seconds: 25.3, recall: 5, tip: "fresh 15,614 · cached 71,040 · output 507" },
 ];
 const fmt = { tokens: v => v.toLocaleString("en-US"), seconds: v => v.toFixed(1) + " s", recall: v => v + "/5" };
-const max = { tokens: 192620, seconds: 26.7, recall: 5 };
+const max = { tokens: 192631, seconds: 25.3, recall: 5 };
 const tip = document.getElementById("tip");
 document.querySelectorAll("[data-chart]").forEach(el => {
   const k = el.dataset.chart;

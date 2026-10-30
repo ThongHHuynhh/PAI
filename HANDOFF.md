@@ -47,7 +47,7 @@ State of the project for whoever continues it: what was asked, what is done, how
 | Claude Code style (CLAUDE.md loaded whole) | 100% | 40,276 |
 | Codex style (AGENTS.md read up to 32 KiB) | 21% | 8,192 |
 
-Outdated facts reached the model in every strategy. With updates applied, PAI drops that to 11%. The learnt policy skips recall on 96% of chatter turns, with no loss on questions. Live run (one run, Sonnet 5.5 for PAI and Claude Code): PAI 5/5 recall, 19,430 tokens, 8.7 s; Claude Code 5/5, 192,620 tokens, 19.9 s; Codex 0/5, 84,887 tokens, 26.7 s. See `bench/report.html`.
+Outdated facts reached the model in every strategy. With updates applied, PAI drops that to 11%. The learnt policy skips recall on 96% of chatter turns, with no loss on questions. Live run 2 (Sonnet 5.5 for PAI and Claude Code, Codex sandbox off): PAI 5/5 recall, 19,315 tokens, 7.6 s; Claude Code 5/5, 192,631 tokens, 20.3 s; Codex 5/5, 87,161 tokens, 25.3 s. With its Windows sandbox on, Codex recalled 0/5. See `bench/report.html`.
 
 ## How to check it locally
 
@@ -85,7 +85,7 @@ Connect a provider in Settings, or add an OpenAI-compatible URL to `config.json`
    - `pai install <url> <code>` on another machine;
    - a session that runs `run` on it.
 4. **Check the subscriptions.** Sign in with a Claude subscription (`claude-code` shape) and a ChatGPT plan (`chatgpt` shape). Test failover by naming a second account and setting `fallbacks`. `provider.Exhausted` matches limit errors by status (429/529) and words: confirm against the real error text of both plans and adjust `exhaustedWords`.
-5. **Repeat the live benchmark.** Run once so far (`bench/report.html`). Run it several times, and on Linux/macOS, where the Codex sandbox can write files its next session reads.
+5. **Repeat the live benchmark.** Run twice so far (`bench/report.html`). Run it more times, and on Linux/macOS. Codex with its sandbox off writes to the global `~/.codex/AGENTS.md`: remove it after a run.
 6. **Memory performance.**
    - Search compares every vector (52 ms at 2,000 items).
    - `Remember` scans its scope and kind for duplicates on every insert, and `Related` reads every item, so loading many facts is slow.
