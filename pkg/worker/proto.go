@@ -1,0 +1,124 @@
+// Package worker is the side of a worker that runs code and moves files for a
+// harness over one connection. A frame is one JSON header line, len body
+// bytes, and a newline: the state file record shape, so a frame can be read
+// and logged the same way. The body is never escaped.
+package worker
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+// Result limits are opencode's: what current models handle in one result. The
+// worker spills output over them to a file; the harness clips what it shows.
+const (
+	MaxBytes = 50 << 10
+	MaxLines = 2000
+)
+
+// A worker dials the mesh node the coordinator names Harness, at Port, the
+// port the design names. The port is open on the mesh only, and the name is
+// one the coordinator gives no worker. The CLI on a worker calls the API
+// there at APIPort, the harness's loopback port. Admin is the worker on the
+// harness's machine, which the harness install makes: the coordinator gives
+// its name to the node that joins with the join secret of that name, and to
+// no other.
+const (
+	Harness = "harness"
+	Admin   = "admin"
+	Port    = 7000
+	APIPort = 8080
+)
+
+// Kinds. The first six go harness to worker; the rest come back. Hello,
+// update, and the done or error that answers an update are the contract every
+// version from v0.1.0 keeps: they are how a worker of another release becomes
+// this one. Workers from before it do not know update and are reinstalled.
+const (
+	Run    = "run"
+	Read   = "read"
+	Write  = "write"
+	Kill   = "kill"   // end a session's environments and jobs
+	Update = "update" // become release Version, then restart
+
+	Hello   = "hello"   // first frame on a connection: what the worker is
+	Output  = "output"  // run: one chunk, in order
+	Result  = "result"  // run: exit code, path of the whole output when spilled; a job's: its log and tail
+	Started = "started" // run of a job: it runs, as pid, its output in path
+	Bytes   = "bytes"   // read: the file
+	Done    = "done"    // write, kill, update; a job a kill ended
+	Error   = "error"   // any request: text the model reads
+)
+
+// maxFrame bounds a frame's body, so a bad header cannot make the reader
+// allocate without end. The largest is a write after an edit: a file of up to
+// maxRead and what the edit added.
+const maxFrame = 2 * maxRead
+
+type Header struct {
+	ID   string `json:"id,omitempty"`
+	Kind string `json:"kind"`
+	Len  int    `json:"len"`
+
+	Session string `json:"session,omitempty"` // run, kill: environments live per session
+	Interp  string `json:"interp,omitempty"`  // run: empty means the worker's first
+	Timeout int    `json:"timeout,omitempty"` // run: seconds before the environment is killed
+	Job     string `json:"job,omitempty"`     // run: a background job of this id, in an interpreter of its own
+	Path    string `json:"path,omitempty"`    // read, write; started, result: a job's log; update: pai-server, to update the harness beside the worker
+	Pid     int    `json:"pid,omitempty"`     // started
+
+	Exit int    `json:"exit,omitempty"` // result
+	Full string `json:"full,omitempty"` // result: file holding all the output, when over the limits
+
+	Name    string   `json:"name,omitempty"`    // what sessions call this worker: its mesh name, set by the harness
+	OS      string   `json:"os,omitempty"`      // hello
+	Arch    string   `json:"arch,omitempty"`    // hello
+	Interps []string `json:"interps,omitempty"` // hello: first is the default
+	Scratch string   `json:"scratch,omitempty"` // hello: where spilled output lands
+	Version string   `json:"version,omitempty"` // hello: the release this worker was built from; update: the one to become
+}
+
+type Frame struct {
+	Header
+	Body []byte
+}
+
+func Encode(w io.Writer, f Frame) error {
+	f.Len = len(f.Body)
+	h, err := json.Marshal(f.Header)
+	if err != nil {
+		return err
+	}
+	var b bytes.Buffer
+	b.Write(h)
+	b.WriteByte('\n')
+	b.Write(f.Body)
+	b.WriteByte('\n')
+	_, err = w.Write(b.Bytes())
+	return err
+}
+
+func Decode(br *bufio.Reader) (Frame, error) {
+	line, err := br.ReadBytes('\n')
+	if err != nil {
+		return Frame{}, err
+	}
+	var f Frame
+	if err := json.Unmarshal(line, &f.Header); err != nil {
+		return Frame{}, fmt.Errorf("frame header: %w", err)
+	}
+	if f.Len < 0 || f.Len > maxFrame {
+		return Frame{}, fmt.Errorf("frame header: len %d", f.Len)
+	}
+	f.Body = make([]byte, f.Len)
+	if _, err := io.ReadFull(br, f.Body); err != nil {
+		return Frame{}, err
+	}
+	if nl, err := br.ReadByte(); err != nil || nl != '\n' {
+		return Frame{}, fmt.Errorf("frame body: missing newline")
+	}
+	return f, nil
+}

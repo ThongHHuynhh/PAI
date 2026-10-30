@@ -1,0 +1,7 @@
+/bin/
+/dist/
+*.test
+*.out
+.env
+/working_dir/
+*.syso

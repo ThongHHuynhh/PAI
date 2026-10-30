@@ -1,0 +1,81 @@
+#!/bin/sh
+# Installs the PAI CLI, unless this machine has one; with an api key it logs this user's CLI in.
+# With a server URL and device code it makes this Linux or macOS machine a worker. With server it makes this machine
+# the PAI server instead, from the provider keys set in this shell, and logs the CLI in to it; server quickstart then
+# opens the quickstart in the TUI, on the terminal even under curl | sh, and --url <url> last reaches the server
+# at url, which your own proxy carries to it. Run it
+# without sudo, so the login is yours and those keys reach it; it asks for sudo itself. In a root shell
+# with no sudo, all run as root, and code runs as root. The release stamps its version.
+#   curl -fsSL https://github.com/@REPO@/releases/download/@VERSION@/install.sh | sh -s -- [api key | <server url> <device code> | server [quickstart] [--url <url>]]
+set -eu
+v=@VERSION@
+dl=https://github.com/@REPO@/releases/download/$v
+usage() {
+  echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <server url> <device code> | server [quickstart] [--url <url>]]" >&2
+  exit 2
+}
+case $#:${1:-}:${2:-}:${3:-} in
+0::: | 1:pai_key_*:: | 1:server:: | 3:server:--url:* | 4:server:quickstart:--url) ;;
+2:server:--url:) usage ;;
+2:*) ;;
+*) usage ;;
+esac
+case $(uname -m) in
+x86_64 | amd64) arch=amd64 ;;
+arm64 | aarch64) arch=arm64 ;;
+*) echo "no pai build for $(uname -m)" >&2; exit 1 ;;
+esac
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+t=$(mktemp -d)
+trap 'rm -rf "$t"' EXIT
+cd "$t"
+# fetch downloads URL $1 into ./, up to three tries, since one bad read would fail the whole install.
+fetch() {
+  curl -fsSLO "$1" || { sleep 1; curl -fsSLO "$1"; } || { sleep 2; curl -fsSLO "$1"; }
+}
+fetch "$dl/SHA256SUMS"
+# get fetches this machine's build of release binary $1 as ./$1, checked against SHA256SUMS. Modes are
+# set here, since root's umask may be narrower than every user running the CLI.
+get() {
+  echo "downloading $1 $v"
+  fetch "$dl/$1-$os-$arch"
+  grep " $1-$os-$arch\$" SHA256SUMS > sum || { echo "release $v has no $1-$os-$arch" >&2; exit 1; }
+  if command -v sha256sum > /dev/null; then sha256sum --quiet -c sum; else shasum -a 256 --quiet -c sum; fi
+  chmod 755 "$1-$os-$arch"
+  mv "$1-$os-$arch" "$1"
+}
+case $#:${1:-}:${2:-}:${3:-} in
+1:server:: | 2:server:quickstart: | 3:server:--url:* | 4:server:quickstart:--url)
+  get pai
+  get pai-server
+  # install places pai-server, runs it as a service, makes this machine the worker admin with the
+  # pai beside it, which places that in /usr/local/bin, and logs it in. Under curl | sh stdin is
+  # the script, so the quickstart's TUI reads the terminal, when there is one.
+  shift
+  if [ "${1:-}" = quickstart ] && (true < /dev/tty) 2> /dev/null; then
+    ./pai-server install ${1+"$@"} < /dev/tty
+  else
+    ./pai-server install ${1+"$@"}
+  fi
+  ;;
+2:*)
+  get pai
+  ./pai install "$1" "$2"
+  ;;
+*)
+  # A CLI this machine has is used: a worker's or server's is root's to replace.
+  b=/usr/local/bin/pai
+  if [ ! -e $b ]; then
+    get pai
+    # root, as on a fresh VPS, may have no sudo
+    sudo=sudo
+    if [ "$(id -u)" -eq 0 ]; then sudo=; fi
+    $sudo mkdir -p -m 755 /usr/local/bin
+    $sudo install -m 755 pai $b
+    echo "pai $v installed"
+  elif [ $# -eq 0 ]; then
+    echo "pai is installed: $b"
+  fi
+  if [ $# -eq 1 ]; then $b login "$1"; fi
+  ;;
+esac

@@ -1,0 +1,59 @@
+version: "2"
+
+run:
+  relative-path-mode: gomod
+
+linters:
+  exclusions:
+    paths:
+      - working_dir
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - depguard
+    - exhaustive
+    - gocognit
+    - errorlint
+    - nilerr
+  settings:
+    gocognit:
+      min-complexity: 30
+    exhaustive:
+      default-signifies-exhaustive: false
+    depguard:
+      rules:
+        no-sql:
+          files: ["**/pkg/**"]
+          deny:
+            - pkg: database/sql
+              desc: no SQL in the open repo. cloud implements the interfaces
+            - pkg: github.com/jackc/pgx
+              desc: no SQL in the open repo. cloud implements the interfaces
+        worker:
+          files: ["**/pkg/worker/**"]
+          deny:
+            - pkg: pai/pkg/central
+              desc: worker never imports central
+            - pkg: pai/pkg/harness
+              desc: worker never imports harness
+            - pkg: pai/pkg/coordinator
+              desc: worker never imports coordinator
+        central:
+          files: ["**/pkg/central/**"]
+          deny:
+            - pkg: pai/pkg/worker
+              desc: central never imports worker
+            - pkg: pai/pkg/mesh
+              desc: central never imports mesh
+        api:
+          files: ["**/pkg/api/**"]
+          allow:
+            - $gostd
+
+formatters:
+  enable:
+    - gofumpt

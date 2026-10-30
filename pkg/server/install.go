@@ -1,0 +1,371 @@
+package server
+
+import (
+	"context"
+	"crypto/ed25519"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"pai/pkg/auth"
+	"pai/pkg/identity"
+	"pai/pkg/mesh"
+	"pai/pkg/release"
+	"pai/pkg/worker"
+)
+
+// A started harness listens within a second; one that has not after this
+// failed, and its log says why. Its tunnel takes longer: the first start
+// downloads cloudflared, about 50 MB.
+const (
+	startWait  = 10 * time.Second
+	tunnelWait = 3 * time.Minute
+	// Behind the user's own proxy nothing has to start: the URL answers at
+	// once, or a part the user set up is wrong.
+	urlWait = 20 * time.Second
+)
+
+// tunnelFailed, in Dir, is why the harness's tunnel last stopped it. Install
+// and Move remove it before they start the harness, and Reached fails
+// with it at once.
+const tunnelFailed = "tunnel-failed.txt"
+
+// Dir is the installed harness's, and Conf the config it runs from. Admin
+// serves the sessions drive from Dir on Linux.
+var (
+	Dir  = identity.Dir
+	Conf = filepath.Join(Dir, identity.Config)
+)
+
+// adminAgents is admin's root AGENTS.md, which install writes in its scratch
+// when none is there: what only the worker on the harness's machine can do.
+// Every session with admin reads it whole. Conf, then logs.
+const adminAgents = `# Admin:
+- This worker is called admin, a reserved name for workers
+- The worker is on the machine that runs pai-server, the PAI harness
+- Because you have access to admin and are reading this, you are acting as a PAI admin agent
+- You have full access to the config of pai-server, secrets, rules, and access to all connected workers
+- You must be careful and responsible with these permissions
+- If the user wants agents without admin access, their sessions should not include the admin worker
+- The pai CLI here is logged in to this harness with a full API key. pai --help lists every verb
+- You can change this session's workers: pai workers <session id> <name>..., the whole list, admin included
+- Harness config: %s. Providers, links and drives apply when it is saved. It holds the provider keys: never print it whole
+- Harness logs: %s
+- Remember that the pai-server and worker are open source and the code can be referenced
+`
+
+// envProviders are the providers Default takes from the environment, by the
+// variables each provider's own tools read. Their names, shapes and urls are
+// the catalog's, in pkg/catalog/build/source.json: install runs before any
+// network is sure.
+var envProviders = map[string]Provider{
+	"anthropic":  {Shape: "anthropic", Key: "$ANTHROPIC_API_KEY"},
+	"openai":     {Shape: "openai", Key: "$OPENAI_API_KEY"},
+	"openrouter": {Shape: "openai-chat", Key: "$OPENROUTER_API_KEY", URL: "https://openrouter.ai/api/v1"},
+}
+
+// Default is the config install writes when given none and none is
+// installed: the tunnel carries workers and connectors to port 8080 on
+// loopback, and every provider whose key is set in this environment serves.
+// With none set, keys go in the config after install.
+func Default() Config {
+	c := Config{HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}}
+	for name, p := range envProviders {
+		if os.ExpandEnv(p.Key) != "" {
+			c.Providers[name] = p
+		}
+	}
+	return c
+}
+
+// Expand fills provider values in from this process's environment, which a
+// service will not have, and refuses a provider the harness does not know.
+func (c *Config) Expand() error {
+	c.named()
+	for name, p := range c.Providers {
+		for _, s := range []*string{&p.Key, &p.URL, &p.Region} {
+			if *s != "" && os.ExpandEnv(*s) == "" {
+				return fmt.Errorf("provider %s: %s is empty; set it or put the value in the config. sudo drops the environment, and install asks for root itself", name, *s)
+			}
+			*s = os.ExpandEnv(*s)
+		}
+		c.Providers[name] = p
+	}
+	_, err := providers("", c.Providers)
+	return err
+}
+
+// Install makes this machine run the harness at every boot, from a copy of an
+// expanded c at Conf, or with keep from the config already there, as it is
+// but for c's URL, which c becomes, and makes it the worker admin. It returns while the tunnel
+// starts: the tokens it prints name no URL, and Reached waits for one. Dir is
+// root's and the operator's alone: the config holds the keys, and admin runs
+// code as the operator so that it may read and edit them.
+func Install(c *Config, keep bool) error {
+	if err := prepare(); err != nil {
+		return err
+	}
+	_, err := os.Stat(Conf)
+	write := !keep || err != nil
+	if !write {
+		url := c.URL
+		if *c, err = Load(Conf); err != nil {
+			return err
+		}
+		if write = url != ""; write { // a URL given to install replaces how the kept config is reached
+			c.URL, c.Tunnel = url, nil
+		}
+	}
+	if write {
+		b, err := json.MarshalIndent(c, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(Conf, b, 0o600); err != nil {
+			return err
+		}
+	}
+	k, err := Key(Dir)
+	if err != nil {
+		return err
+	}
+	// before start, so it is the operator's, and before the lines that name it are printed
+	if err := network(Dir); err != nil {
+		return err
+	}
+	// Root writes the auth table after start gives Dir to the operator. A file
+	// root made then would be root's and the harness could not read it, so it
+	// is made now. O_EXCL never writes through a link.
+	f, err := os.OpenFile(Auth(Dir).Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err == nil {
+		_, err = f.WriteString("{}")
+		err = errors.Join(err, f.Close())
+	}
+	if err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if err := place(); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(Dir, tunnelFailed)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := start(); err != nil {
+		return err
+	}
+	if err := answers(c.HTTP); err != nil {
+		return err
+	}
+	if err := admin(k); err != nil {
+		return err
+	}
+	return agents()
+}
+
+// writeAgents writes adminAgents at path unless something is there: a file is
+// the user's to edit and stays as it is, and a link, even a dangling one, is
+// never written through, since install runs as root. It reports whether it
+// wrote.
+func writeAgents(path string) (bool, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, err = fmt.Fprintf(f, adminAgents, Conf, logs)
+	return true, errors.Join(err, f.Close())
+}
+
+// admin makes this machine the worker admin of the harness with k, through
+// the CLI the install line put beside this binary, which the worker install
+// places as the machine's only one. A machine already a worker of this
+// harness stays as it is. admin's token is in no line anyone sees. Its output
+// is shown only when it fails.
+func admin(k ed25519.PrivateKey) error {
+	harness := identity.Encode(k)
+	if h, _, err := mesh.Joined(); err == nil && h == harness {
+		return nil
+	}
+	n, err := LoadNetwork(Dir)
+	if err != nil {
+		return err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cli := filepath.Join(filepath.Dir(exe), "pai"+filepath.Ext(exe))
+	if out, err := exec.Command(cli, "install", auth.Token(auth.Join, harness, adminSecret(k, n.Code), n.URL)).CombinedOutput(); err != nil {
+		return fmt.Errorf("the admin worker: %w: %s", err, out)
+	}
+	return nil
+}
+
+// uninstallAdmin removes the worker admin, and the CLI with it, which goes
+// with the harness it was installed with.
+func uninstallAdmin() error {
+	if _, err := os.Stat(worker.Bin); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return run(worker.Bin, "uninstall")
+}
+
+// run is one command; its output is the error when it fails.
+func run(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, out)
+	}
+	return nil
+}
+
+// Move makes the installed server reached at url, behind the user's own
+// proxy, or through t, or on loopback only when both are none, restarts it,
+// and returns its URL once workers can reach it there. Workers join again
+// with the new URL.
+func Move(url string, t *Tunnel) (string, error) {
+	c, err := Load(Conf)
+	if err != nil {
+		return "", fmt.Errorf("no installed harness: %w", err)
+	}
+	c.URL, c.Tunnel = url, t
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(Conf, b, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Remove(filepath.Join(Dir, tunnelFailed)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	if err := restart(); err != nil {
+		return "", err
+	}
+	k, err := Key(Dir)
+	if err != nil {
+		return "", err
+	}
+	return Reached(identity.Encode(k), c.Public())
+}
+
+// Reached waits until workers can reach the harness with key where they find
+// it, at url when the user's own proxy carries it, and returns that URL. A
+// tunnel that stops the harness fails it at once.
+func Reached(key, url string) (string, error) {
+	wait := urlWait
+	if c, err := Load(Conf); err == nil && c.Tunnel != nil {
+		wait = tunnelWait
+	}
+	for end := time.Now().Add(wait); ; time.Sleep(time.Second) {
+		if b, err := os.ReadFile(filepath.Join(Dir, tunnelFailed)); err == nil {
+			return "", fmt.Errorf("the harness could not start its tunnel: %s", b)
+		}
+		u, err := reach(context.Background(), key, url)
+		if err == nil {
+			return u, nil
+		}
+		if time.Now().After(end) {
+			return "", fmt.Errorf("workers cannot reach the harness after %s: %w", wait, err)
+		}
+	}
+}
+
+// reach is the URL a worker finds the harness with key at, once the harness
+// proves its key there and passes the WebSocket upgrade, as a worker needs.
+func reach(ctx context.Context, key, url string) (string, error) {
+	u, err := identity.Find(ctx, key, url)
+	if err == nil {
+		err = upgrades(ctx, u)
+	}
+	return u, err
+}
+
+// upgrades is nil when u passes a WebSocket upgrade through to the relay:
+// workers reach the relay and the coordinator only through one.
+func upgrades(ctx context.Context, u string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u+"/derp", nil)
+	if err != nil {
+		return err
+	}
+	for k, v := range map[string]string{"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Protocol": "derp"} {
+		req.Header.Set(k, v)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		return fmt.Errorf("%s/derp answered %s to a WebSocket upgrade: the proxy must pass upgrades through, which workers need", u, resp.Status)
+	}
+	return nil
+}
+
+// answers waits for the harness to answer at addr as only it does: 401 to a
+// request with no api key. Another program on the port is an error at once.
+func answers(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	if ip := net.ParseIP(host); host == "" || ip != nil && ip.IsUnspecified() {
+		host = "localhost"
+	}
+	url := "http://" + net.JoinHostPort(host, port) + "/"
+	client := http.Client{Timeout: time.Second}
+	for end := time.Now().Add(startWait); ; time.Sleep(200 * time.Millisecond) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				return fmt.Errorf("%s answered %s, which the harness never does: another program has port %s", url, resp.Status, port)
+			}
+			return nil
+		}
+		if time.Now().After(end) {
+			return fmt.Errorf("the harness service started but did not answer at %s in %s; its log says why", url, startWait)
+		}
+	}
+}
+
+// place copies this binary to bin through a new file and renames. The old one
+// moves aside first: see release.Aside. Installing from bin leaves it. The
+// mode is set apart from the write, which the installer's umask would narrow.
+func place() error {
+	exe, err := os.Executable()
+	if err != nil || exe == bin {
+		return err
+	}
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(bin+".new", b, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(bin+".new", 0o755); err != nil {
+		return err
+	}
+	old, err := release.Aside(bin)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(bin+".new", bin); err != nil {
+		return errors.Join(err, os.Rename(old, bin))
+	}
+	return nil
+}
