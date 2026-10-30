@@ -1,0 +1,133 @@
+import { useCallback, useEffect, useState } from "react";
+import { call, getKey, setKey, type Graph } from "./api";
+import { LiveProvider, useLive } from "./live";
+import GraphPage from "./pages/Graph";
+import Sessions from "./pages/Sessions";
+import Knowledge from "./pages/Knowledge";
+import Settings from "./pages/Settings";
+import { Orbit } from "./components/Orbit";
+
+export type Route = { page: "graph" | "sessions" | "knowledge" | "settings"; arg?: string };
+
+function parse(hash: string): Route {
+  const [page, arg] = hash.replace(/^#\/?/, "").split("/");
+  if (page === "sessions" || page === "knowledge" || page === "settings") return { page, arg: arg ? decodeURIComponent(arg) : undefined };
+  return { page: "graph" };
+}
+
+export function go(r: Route) {
+  window.location.hash = `/${r.page}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}`;
+}
+
+export default function App() {
+  const [authed, setAuthed] = useState(() => !!getKey());
+  const out = useCallback(() => {
+    setKey(null);
+    setAuthed(false);
+  }, []);
+  if (!authed) return <Login onIn={() => setAuthed(true)} />;
+  return (
+    <LiveProvider onAuthFail={out}>
+      <Shell onOut={out} />
+    </LiveProvider>
+  );
+}
+
+function Login({ onIn }: { onIn: () => void }) {
+  const [key, setK] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr("");
+    setKey(key.trim());
+    try {
+      await call<Graph>("GET", "/graph");
+      onIn();
+    } catch (x: any) {
+      setKey(null);
+      setErr(x.status === 401 || x.status === 403 ? "That key is not accepted by this server." : String(x.message ?? x));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="login">
+      <div className="login-art">
+        <Orbit size={260} />
+      </div>
+      <form className="login-card" onSubmit={submit}>
+        <h1>PAI</h1>
+        <p className="muted">Your personal AI cloud. Sign in with an API key from this server.</p>
+        <label className="field">
+          <span>API key</span>
+          <input autoFocus type="password" value={key} onChange={(e) => setK(e.target.value)} placeholder="pai_key_…" />
+        </label>
+        {err && <p className="error">{err}</p>}
+        <button className="primary" disabled={!key.trim() || busy}>
+          {busy ? "Checking…" : "Sign in"}
+        </button>
+        <details className="muted small">
+          <summary>Where do I get a key?</summary>
+          <p>
+            On the server machine, run <code>pai-server key new web</code>. The install printed one too, named <code>default</code>.
+          </p>
+        </details>
+      </form>
+    </div>
+  );
+}
+
+const NAV: { page: Route["page"]; label: string; icon: string; hint: string }[] = [
+  { page: "graph", label: "Live graph", icon: "◎", hint: "Machines, models and sessions, live" },
+  { page: "sessions", label: "Sessions", icon: "☰", hint: "Talk to PAI and read every session" },
+  { page: "knowledge", label: "Knowledge", icon: "◆", hint: "What PAI has learnt, and why it recalls it" },
+  { page: "settings", label: "Settings", icon: "⚙", hint: "Providers, machines, keys" },
+];
+
+function Shell({ onOut }: { onOut: () => void }) {
+  const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
+  const { live, graph, error } = useLive();
+  useEffect(() => {
+    const on = () => setRoute(parse(window.location.hash));
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  const online = (graph?.machines ?? []).filter((m) => m.connected).length;
+  const stepping = (graph?.sessions ?? []).filter((s) => s.status === "stepping").length;
+  return (
+    <div className="shell">
+      <nav className="nav">
+        <div className="brand">
+          <Orbit size={34} still />
+          <span>PAI</span>
+        </div>
+        {NAV.map((n) => (
+          <a key={n.page} href={`#/${n.page}`} className={route.page === n.page ? "active" : ""} title={n.hint}>
+            <span className="icon">{n.icon}</span>
+            {n.label}
+          </a>
+        ))}
+        <div className="grow" />
+        <div className="nav-status">
+          <span className={`dot ${live ? "on" : ""}`} /> {live ? "Live" : "Reconnecting…"}
+          <div className="muted small">
+            {online} machine{online === 1 ? "" : "s"} · {stepping} working
+          </div>
+          <div className="muted small">{graph ? `v${graph.server.version}` : ""}</div>
+        </div>
+        <button className="ghost small" onClick={onOut}>
+          Sign out
+        </button>
+      </nav>
+      <main className="main">
+        {error && <div className="banner error">{error}</div>}
+        {route.page === "graph" && <GraphPage />}
+        {route.page === "sessions" && <Sessions id={route.arg} />}
+        {route.page === "knowledge" && <Knowledge focus={route.arg} />}
+        {route.page === "settings" && <Settings />}
+      </main>
+    </div>
+  );
+}

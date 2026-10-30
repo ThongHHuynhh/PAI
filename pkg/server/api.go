@@ -17,6 +17,7 @@ import (
 	"pai/pkg/coordinator"
 	"pai/pkg/harness"
 	"pai/pkg/identity"
+	"pai/pkg/release"
 	"pai/pkg/version"
 )
 
@@ -36,8 +37,8 @@ const (
 //	GET    /               -> {"version","network"}: network is "ready" once a worker can
 //	                          find the harness at its URL, else why the tunnel last stopped
 //	                          the harness while it starts again, else "starting"
-//	GET    /join           -> {"join"}: the server URL and device code, as a worker
-//	                          installs with them
+//	GET    /join           -> {"join","unix","windows"}: the server URL and device code, as a
+//	                          worker installs with them, and the install lines that use them
 //	POST   /keys           {"name"} -> {"name","key"}: a new api key; a name in use is 409
 //	GET    /settings       -> {"version":{"current","latest"}}
 //	POST   /settings       {"version"} -> the admin worker makes the server that release
@@ -97,7 +98,8 @@ func (a *api) join(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	reply(w, map[string]string{"join": n.String()})
+	unix, windows := release.InstallLines(n.String())
+	reply(w, map[string]string{"join": n.String(), "unix": unix, "windows": windows})
 }
 
 func (a *api) key(w http.ResponseWriter, r *http.Request) {
