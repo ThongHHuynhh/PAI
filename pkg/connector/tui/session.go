@@ -113,7 +113,7 @@ func newSession(a *App, l *sessionList, id string) *session {
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
 	s.statusRow = Box(&Node{Dir: Row, Min: 1, Max: 3}, &Node{Grow: 1, View: s.status}, &Node{View: s.meta})
 	s.busyRow = &Node{Fixed: 2, Pad: [4]int{0, 1, 0, 0}, View: s.busy}
-	s.orbit = &orbit{on: func() bool { return s.blank }}
+	s.orbit = &orbit{on: func() bool { return s.blank }, nodes: func() int { return l.nodes }}
 	s.sidebar = &Node{Fixed: sidebarWidth, BG: a.Theme.Panel, Pad: [4]int{0, 1, 0, 1}, View: l}
 	main := Box(&Node{Dir: Col, Grow: 1, Over: s.orbit},
 		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode

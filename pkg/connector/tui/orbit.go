@@ -20,9 +20,10 @@ const (
 	orbitTilt     = 22.0 // degrees toward the mouse at orbitReach
 	orbitReach    = 1.5  // the pointer's distance from the center, in half screens, that gives the full tilt
 	orbitEase     = 0.45 // seconds the pose takes to follow the mouse
-	orbitFillW    = 0.42 // share of the width the outer ring spans
-	orbitFillH    = 0.9  // share of the height
-	orbitCore     = 0.2  // the core's radius as a share of the outer ring's
+	orbitFillW    = 0.4  // share of the width the outer ring's radius spans
+	orbitFillH    = 0.55 // share of the height the outer ring's radius spans
+	orbitCenterY  = 0.21 // the core's height, as a share from the top: above the wordmark and the input
+	orbitCore     = 0.17 // the core's radius as a share of the outer ring's
 	orbitBreathe  = 0.6  // breaths a second
 	orbitWave     = 0.45 // waves a second leaving the core
 	orbitPulse    = 0.5  // link crossings a second
@@ -155,8 +156,8 @@ func (o *orbit) Draw(a *App, c *Canvas, r Rect) {
 		o.px = o.px[:n]
 		clear(o.px)
 	}
-	o.cx, o.cy = float64(o.pw)/2, float64(o.ph)/2
-	o.scale = min(float64(o.pw)*orbitFillW, float64(o.ph)*orbitFillH/2)
+	o.cx, o.cy = float64(o.pw)/2, float64(o.ph)*orbitCenterY
+	o.scale = min(float64(o.pw)*orbitFillW, float64(o.ph)*orbitFillH)
 	o.render()
 
 	inks := [4]term.Color{0, a.Theme.BG.Blend(a.Theme.Text, orbitStrength*orbitDim), a.Theme.BG.Blend(a.Theme.Text, orbitStrength), a.Theme.BG.Blend(a.Theme.Accent, orbitStrength)}

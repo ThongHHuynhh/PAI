@@ -14,21 +14,19 @@ type Theme struct {
 	Error     term.Color
 }
 
-// Alexander's picks in design's tui-colors tuner, near the brand's hue, 220.
-// Light is the brand's: Paper #F8F8F5, Ink #172428, Blue #0087A4, and Gray
-// #65757A darkened to #59696e to reach WCAG AA, 4.5:1, on the panel. Dark is
-// near black, oklch 0.120 0.0060 220; on it the blue and gray are lifted to
-// read. Each panel is 0.060 in oklch lightness from its screen.
+// PAI's colors: a violet accent, the hue of the core in the Orbit, on a
+// near-neutral screen with a trace of the same hue. Muted text reaches WCAG
+// AA, 4.5:1, on the panel in both themes.
 var (
 	dark = Theme{
-		BG: term.Hex("#040607"), Panel: term.Hex("#0e1213"),
-		Text: term.Hex("#f8f8f5"), Muted: term.Hex("#8b9ca1"), Accent: term.Hex("#26a9c6"),
-		Selection: term.Hex("#1c4e5c"), Error: term.Hex("#e8787a"),
+		BG: term.Hex("#07060b"), Panel: term.Hex("#121019"),
+		Text: term.Hex("#f5f3fa"), Muted: term.Hex("#9a94ab"), Accent: term.Hex("#9585f8"),
+		Selection: term.Hex("#2e2650"), Error: term.Hex("#ef7a7f"),
 	}
 	light = Theme{
-		BG: term.Hex("#f8f8f5"), Panel: term.Hex("#e2e5e4"),
-		Text: term.Hex("#172428"), Muted: term.Hex("#59696e"), Accent: term.Hex("#0087a4"),
-		Selection: term.Hex("#c4e3ea"), Error: term.Hex("#c4363a"),
+		BG: term.Hex("#f8f7fb"), Panel: term.Hex("#e6e3ef"),
+		Text: term.Hex("#1b1726"), Muted: term.Hex("#5a546a"), Accent: term.Hex("#6a4fe0"),
+		Selection: term.Hex("#ddd5fb"), Error: term.Hex("#c4363a"),
 	}
 )
 

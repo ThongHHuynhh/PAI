@@ -36,6 +36,7 @@ type sessionList struct {
 	seen   map[string]time.Time // per session, its update when last read here
 	drafts map[string][]elem    // per session, "" for home, the input it was left with
 	loaded bool
+	nodes  int  // machines connected, as last read: the Orbit draws one node each
 	top    int  // the first row the sidebar shows
 	reveal bool // scroll the open session into view at the next draw
 }
@@ -49,8 +50,19 @@ func newSessionList(a *App, c *connector.Client) *sessionList {
 		for {
 			ctx, cancel := context.WithTimeout(context.Background(), callTime)
 			infos, err := c.Sessions(ctx, "", sessionsMax)
+			ws, werr := c.Workers(ctx)
 			cancel()
-			a.Post(func() { l.update(a, infos, err) })
+			a.Post(func() {
+				if werr == nil {
+					l.nodes = 0
+					for _, w := range ws {
+						if w.Refused == "" {
+							l.nodes++
+						}
+					}
+				}
+				l.update(a, infos, err)
+			})
 			time.Sleep(sessionsEvery)
 		}
 	})
