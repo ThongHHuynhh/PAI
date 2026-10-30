@@ -29,6 +29,7 @@ import (
 //	GET    /memory                      ?q= searches, else lists; ?kind= ?scope= ?session= ?invalid=1 ?limit=
 //	GET    /memory/stats                -> memory.Stats with the bandit's arms
 //	GET    /memory/retrievals           ?session= -> the newest automatic recalls, with why
+//	GET    /metrics                     ?range=24h|7d|30d|all -> Metrics: models, sessions, tools, memory
 //	POST   /memory                      {"text","kind","scope","topic"} -> the item, made or merged
 //	PATCH  /memory/{id}                 {"text","kind","scope","topic"} and/or {"pinned"} -> the item; an edit
 //	                                    is a new version that replaces it, so its id changes
@@ -71,6 +72,7 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 	mux.HandleFunc("GET /memory", wa.list)
 	mux.HandleFunc("GET /memory/stats", wa.stats)
 	mux.HandleFunc("GET /memory/retrievals", wa.retrievals)
+	mux.HandleFunc("GET /metrics", wa.metrics)
 	mux.HandleFunc("POST /memory", wa.add)
 	mux.HandleFunc("PATCH /memory/{id}", wa.patch)
 	mux.HandleFunc("POST /memory/{id}/invalidate", wa.invalidate)

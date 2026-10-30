@@ -8,6 +8,8 @@ One section per release, newest first. An `-rc` tag ships the section of the rel
 - Memory page reads like a notebook: one line per memory under its topic, details and actions on a click. Recalls show as plain Activity.
 - The web app keeps one live connection per browser, shared by its tabs, so any number of tabs open; before, a seventh never loaded.
 - The web app signs in with the whole api key that install prints.
+- Performance page: models (calls, speed, tokens, cache, estimated cost, errors), sessions and their context, tools and the agent loop, and memory, over 24 hours, 7 or 30 days, or all time. Served by `GET /metrics`.
+- Overview: drag any node, and the layout is kept; activity is a fixed box that scrolls. The Orbit is drawn thicker.
 
 ## v0.1.0
 

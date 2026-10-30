@@ -5,13 +5,14 @@ import GraphPage from "./pages/Graph";
 import Sessions from "./pages/Sessions";
 import Knowledge from "./pages/Knowledge";
 import Settings from "./pages/Settings";
+import Performance from "./pages/Performance";
 import { Orbit } from "./components/Orbit";
 
-export type Route = { page: "graph" | "sessions" | "knowledge" | "settings"; arg?: string };
+export type Route = { page: "graph" | "sessions" | "knowledge" | "performance" | "settings"; arg?: string };
 
 function parse(hash: string): Route {
   const [page, arg] = hash.replace(/^#\/?/, "").split("/");
-  if (page === "sessions" || page === "knowledge" || page === "settings") return { page, arg: arg ? decodeURIComponent(arg) : undefined };
+  if (page === "sessions" || page === "knowledge" || page === "performance" || page === "settings") return { page, arg: arg ? decodeURIComponent(arg) : undefined };
   return { page: "graph" };
 }
 
@@ -84,6 +85,7 @@ const NAV: { page: Route["page"]; label: string; icon: string; hint: string }[] 
   { page: "graph", label: "Overview", icon: "◎", hint: "Your machines, models and sessions, live" },
   { page: "sessions", label: "Chat", icon: "☰", hint: "Talk to PAI" },
   { page: "knowledge", label: "Memory", icon: "◆", hint: "What PAI has learnt" },
+  { page: "performance", label: "Performance", icon: "▤", hint: "How the models, sessions, tools and memory perform" },
   { page: "settings", label: "Settings", icon: "⚙", hint: "Accounts, machines, keys" },
 ];
 
@@ -155,6 +157,7 @@ function Shell({ onOut }: { onOut: () => void }) {
         {route.page === "graph" && <GraphPage />}
         {route.page === "sessions" && <Sessions id={route.arg} />}
         {route.page === "knowledge" && <Knowledge focus={route.arg} />}
+        {route.page === "performance" && <Performance />}
         {route.page === "settings" && <Settings />}
       </main>
     </div>
