@@ -45,4 +45,4 @@ go build -o working_dir/ ./cmd/pai ./cmd/pai-server
 
 ## License
 
-MIT. PAI includes code from other projects under their licenses: see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). PAI includes code from other projects under their licenses: see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
