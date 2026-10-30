@@ -1,0 +1,264 @@
+{
+  "facts_note": "synthetic personal knowledge; a tenth said twice, a seventh of the database facts updated",
+  "k": 6,
+  "policy": {
+    "fixed": [
+      {
+        "turns": 100,
+        "tokens": 57.015,
+        "ask_recall": 1,
+        "skip_chat": 0.4117647058823529
+      },
+      {
+        "turns": 200,
+        "tokens": 59.22,
+        "ask_recall": 1,
+        "skip_chat": 0.4583333333333333
+      },
+      {
+        "turns": 300,
+        "tokens": 64.965,
+        "ask_recall": 1,
+        "skip_chat": 0.45
+      },
+      {
+        "turns": 400,
+        "tokens": 56.6675,
+        "ask_recall": 1,
+        "skip_chat": 0.42
+      },
+      {
+        "turns": 500,
+        "tokens": 53.455,
+        "ask_recall": 1,
+        "skip_chat": 0.375
+      },
+      {
+        "turns": 600,
+        "tokens": 63.8875,
+        "ask_recall": 1,
+        "skip_chat": 0.27450980392156865
+      }
+    ],
+    "learnt": [
+      {
+        "turns": 100,
+        "tokens": 57.835,
+        "ask_recall": 1,
+        "skip_chat": 0.7333333333333333
+      },
+      {
+        "turns": 200,
+        "tokens": 50.6675,
+        "ask_recall": 1,
+        "skip_chat": 0.9361702127659575
+      },
+      {
+        "turns": 300,
+        "tokens": 43.165,
+        "ask_recall": 1,
+        "skip_chat": 0.9454545454545454
+      },
+      {
+        "turns": 400,
+        "tokens": 46.7725,
+        "ask_recall": 1,
+        "skip_chat": 0.9423076923076923
+      },
+      {
+        "turns": 500,
+        "tokens": 57.375,
+        "ask_recall": 1,
+        "skip_chat": 0.9767441860465116
+      },
+      {
+        "turns": 600,
+        "tokens": 47.8425,
+        "ask_recall": 1,
+        "skip_chat": 0.9583333333333334
+      }
+    ]
+  },
+  "rows": [
+    {
+      "strategy": "PAI (store only, no model)",
+      "facts": 50,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 102.43,
+      "latency_ms": 2.21916,
+      "note": "hybrid recall, 6 items, nothing consolidated"
+    },
+    {
+      "strategy": "PAI (updates applied)",
+      "facts": 50,
+      "recall": 1,
+      "stale_exposed": 0,
+      "tokens": 102.375,
+      "latency_ms": 2.6000799999999997,
+      "note": "the old version retired when it changed, as forget or consolidation does"
+    },
+    {
+      "strategy": "Claude Code style (CLAUDE.md)",
+      "facts": 50,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 984.25,
+      "latency_ms": 0,
+      "note": "the whole file in every session"
+    },
+    {
+      "strategy": "Codex style (AGENTS.md)",
+      "facts": 50,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 984.25,
+      "latency_ms": 0,
+      "note": "read up to project_doc_max_bytes, 32 KiB"
+    },
+    {
+      "strategy": "No memory",
+      "facts": 50,
+      "recall": 0,
+      "stale_exposed": 0,
+      "tokens": 0,
+      "latency_ms": 0,
+      "note": "a fresh session"
+    },
+    {
+      "strategy": "PAI (store only, no model)",
+      "facts": 200,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 97.49,
+      "latency_ms": 6.999010000000001,
+      "note": "hybrid recall, 6 items, nothing consolidated"
+    },
+    {
+      "strategy": "PAI (updates applied)",
+      "facts": 200,
+      "recall": 1,
+      "stale_exposed": 0,
+      "tokens": 97.9025,
+      "latency_ms": 6.241839999999997,
+      "note": "the old version retired when it changed, as forget or consolidation does"
+    },
+    {
+      "strategy": "Claude Code style (CLAUDE.md)",
+      "facts": 200,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 3946.5,
+      "latency_ms": 0,
+      "note": "the whole file in every session"
+    },
+    {
+      "strategy": "Codex style (AGENTS.md)",
+      "facts": 200,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 3946.5,
+      "latency_ms": 0,
+      "note": "read up to project_doc_max_bytes, 32 KiB"
+    },
+    {
+      "strategy": "No memory",
+      "facts": 200,
+      "recall": 0,
+      "stale_exposed": 0,
+      "tokens": 0,
+      "latency_ms": 0,
+      "note": "a fresh session"
+    },
+    {
+      "strategy": "PAI (store only, no model)",
+      "facts": 800,
+      "recall": 0.9975,
+      "stale_exposed": 1,
+      "tokens": 96.47,
+      "latency_ms": 24.89701875000004,
+      "note": "hybrid recall, 6 items, nothing consolidated"
+    },
+    {
+      "strategy": "PAI (updates applied)",
+      "facts": 800,
+      "recall": 0.9975,
+      "stale_exposed": 0.06451612903225806,
+      "tokens": 96.58125,
+      "latency_ms": 23.50671125000002,
+      "note": "the old version retired when it changed, as forget or consolidation does"
+    },
+    {
+      "strategy": "Claude Code style (CLAUDE.md)",
+      "facts": 800,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 16058.5,
+      "latency_ms": 0,
+      "note": "the whole file in every session"
+    },
+    {
+      "strategy": "Codex style (AGENTS.md)",
+      "facts": 800,
+      "recall": 0.51,
+      "stale_exposed": 0.41935483870967744,
+      "tokens": 8192,
+      "latency_ms": 0,
+      "note": "read up to project_doc_max_bytes, 32 KiB"
+    },
+    {
+      "strategy": "No memory",
+      "facts": 800,
+      "recall": 0,
+      "stale_exposed": 0,
+      "tokens": 0,
+      "latency_ms": 0,
+      "note": "a fresh session"
+    },
+    {
+      "strategy": "PAI (store only, no model)",
+      "facts": 2000,
+      "recall": 0.998,
+      "stale_exposed": 1,
+      "tokens": 97.012625,
+      "latency_ms": 52.376339499999986,
+      "note": "hybrid recall, 6 items, nothing consolidated"
+    },
+    {
+      "strategy": "PAI (updates applied)",
+      "facts": 2000,
+      "recall": 0.998,
+      "stale_exposed": 0.1111111111111111,
+      "tokens": 97.037,
+      "latency_ms": 50.67784549999999,
+      "note": "the old version retired when it changed, as forget or consolidation does"
+    },
+    {
+      "strategy": "Claude Code style (CLAUDE.md)",
+      "facts": 2000,
+      "recall": 1,
+      "stale_exposed": 1,
+      "tokens": 40276.25,
+      "latency_ms": 0,
+      "note": "the whole file in every session"
+    },
+    {
+      "strategy": "Codex style (AGENTS.md)",
+      "facts": 2000,
+      "recall": 0.206,
+      "stale_exposed": 0.2222222222222222,
+      "tokens": 8192,
+      "latency_ms": 0,
+      "note": "read up to project_doc_max_bytes, 32 KiB"
+    },
+    {
+      "strategy": "No memory",
+      "facts": 2000,
+      "recall": 0,
+      "stale_exposed": 0,
+      "tokens": 0,
+      "latency_ms": 0,
+      "note": "a fresh session"
+    }
+  ]
+}
