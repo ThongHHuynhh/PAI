@@ -202,7 +202,87 @@ export async function records(id: string, after: number, wait = ""): Promise<Rec
 // --- the event stream: Server-Sent Events read with fetch, so the key goes
 // in a header, not the URL. It reconnects after a drop. ---
 
+// SHARE names the lock and the channel by which one tab per browser holds the
+// stream and hands its events to the others. Over plain http a browser opens
+// six connections to a server, and a stream per tab held them all: a seventh
+// tab never loaded.
+const SHARE = "pai.events";
+
+// streamEvents feeds on every event and status whether the stream is up. The
+// tab holding the lock streams and broadcasts; the rest listen. When it
+// closes, the next tab waiting on the lock takes over. A browser without
+// locks or channels streams in every tab.
 export function streamEvents(on: (e: PaiEvent) => void, status: (live: boolean) => void): () => void {
+  if (!navigator.locks || typeof BroadcastChannel === "undefined") return stream(on, status);
+  const bc = new BroadcastChannel(SHARE);
+  const post = (m: unknown) => {
+    try {
+      bc.postMessage(m);
+    } catch {
+      /* closed: this tab is going */
+    }
+  };
+  let quit = new AbortController();
+  let lead: { live: boolean } | null = null;
+  let release = () => {};
+  bc.onmessage = ({ data }) => {
+    if (data.event) on(data.event);
+    else if (typeof data.live === "boolean") status(data.live);
+    else if (data.ask && lead) post({ live: lead.live });
+  };
+  const queue = () => {
+    quit = new AbortController();
+    navigator.locks
+      .request(SHARE, { signal: quit.signal }, () =>
+        new Promise<void>((done) => {
+          const me = { live: false };
+          lead = me;
+          const stop = stream(
+            (e) => {
+              on(e);
+              post({ event: e });
+            },
+            (l) => {
+              me.live = l;
+              status(l);
+              post({ live: l });
+            },
+          );
+          release = () => {
+            lead = null;
+            release = () => {};
+            stop();
+            done();
+          };
+        }),
+      )
+      .catch(() => {
+        /* the tab went while it waited for the lock */
+      });
+  };
+  // A tab that closes, or goes into the back-forward cache, hands the stream
+  // on at once; a cached page queues again when it is shown.
+  const hide = () => {
+    quit.abort();
+    release();
+  };
+  const show = (e: PageTransitionEvent) => {
+    if (e.persisted) queue();
+  };
+  window.addEventListener("pagehide", hide);
+  window.addEventListener("pageshow", show);
+  queue();
+  post({ ask: true }); // a tab that opens while the stream is up learns so
+  return () => {
+    window.removeEventListener("pagehide", hide);
+    window.removeEventListener("pageshow", show);
+    hide();
+    bc.close();
+  };
+}
+
+// stream holds one connection to /events until it is stopped.
+function stream(on: (e: PaiEvent) => void, status: (live: boolean) => void): () => void {
   let stopped = false;
   let ctrl = new AbortController();
   const run = async () => {
@@ -237,8 +317,9 @@ export function streamEvents(on: (e: PaiEvent) => void, status: (live: boolean) 
       } catch {
         /* dropped: try again */
       }
+      if (stopped) return;
       status(false);
-      if (!stopped) await new Promise((res) => setTimeout(res, 2000));
+      await new Promise((res) => setTimeout(res, 2000));
     }
   };
   void run();

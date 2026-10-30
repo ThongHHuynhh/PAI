@@ -11,6 +11,7 @@ type Live = {
   pulse: Record<string, number>; // node id -> time of its last activity
   memoryTick: number; // grows on every memory event
   refresh: () => void;
+  subscribe: (fn: (e: PaiEvent) => void) => () => void; // every event, until the returned function is called
   error: string;
 };
 
@@ -32,6 +33,13 @@ export function LiveProvider({ children, onAuthFail }: { children: ReactNode; on
   const [memoryTick, setMemoryTick] = useState(0);
   const [error, setError] = useState("");
   const timer = useRef<number | undefined>(undefined);
+  const listeners = useRef(new Set<(e: PaiEvent) => void>());
+  const subscribe = useCallback((fn: (e: PaiEvent) => void) => {
+    listeners.current.add(fn);
+    return () => {
+      listeners.current.delete(fn);
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     call<Graph>("GET", "/graph")
@@ -56,6 +64,7 @@ export function LiveProvider({ children, onAuthFail }: { children: ReactNode; on
     const every = window.setInterval(refresh, 15000); // catches what a dropped stream missed
     const stop = streamEvents(
       (e) => {
+        listeners.current.forEach((fn) => fn(e));
         if (e.type === "hello") return;
         setFeed((f) => [e, ...f].slice(0, FEED));
         const now = Date.now();
@@ -81,7 +90,7 @@ export function LiveProvider({ children, onAuthFail }: { children: ReactNode; on
     };
   }, [refresh, soon]);
 
-  return <Ctx.Provider value={{ graph, live, feed, pulse, memoryTick, refresh, error }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, live, feed, pulse, memoryTick, refresh, subscribe, error }}>{children}</Ctx.Provider>;
 }
 
 // describe is an event in a few words, for the activity feed.

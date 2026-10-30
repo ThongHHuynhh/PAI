@@ -83,29 +83,58 @@ function Transcript({ s }: { s: Session }) {
   const end = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
 
+  // New records are read when the event stream says the session has them,
+  // not by a long poll: a request held open per chat tab would use up the
+  // six connections a browser opens to the server.
+  const { live, subscribe } = useLive();
+  const pull = useRef<() => void>(() => {});
   useEffect(() => {
     let alive = true;
     let after = 0;
-    (async () => {
-      while (alive) {
-        try {
-          const got = await records(s.id, after, after ? "25s" : "");
+    let seen = 0; // the newest record an event named
+    let busy = false;
+    let again = false;
+    const get = async () => {
+      if (busy) {
+        again = true;
+        return;
+      }
+      busy = true;
+      try {
+        do {
+          again = false;
+          const got = await records(s.id, after);
           if (!alive) return;
           if (got.length) {
             after = got[got.length - 1].n;
             setRecs((r) => [...r, ...got]);
           }
           setErr("");
-        } catch (e: any) {
-          setErr(String(e.message ?? e));
-          await new Promise((r) => setTimeout(r, 3000));
-        }
+        } while (again && alive);
+      } catch (e: any) {
+        if (alive) setErr(String(e.message ?? e));
+      } finally {
+        busy = false;
       }
-    })();
+      if (alive && seen > after) window.setTimeout(get, 500); // the event came before the record could be read
+    };
+    pull.current = () => void get();
+    void get();
+    const off = subscribe((e) => {
+      if (e.type !== "record" || e.session !== s.id) return;
+      seen = Math.max(seen, Number(e.data?.n ?? 0));
+      if (seen > after) void get();
+    });
+    const every = window.setInterval(get, 15000); // catches what a dropped stream missed
     return () => {
       alive = false;
+      off();
+      window.clearInterval(every);
     };
-  }, [s.id]);
+  }, [s.id, subscribe]);
+  useEffect(() => {
+    if (live) pull.current(); // the stream is back: read what it missed
+  }, [live]);
 
   useEffect(() => {
     if (stuck.current) end.current?.scrollIntoView({ block: "end" });
