@@ -2,7 +2,7 @@
 
 One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
 
-## Unreleased
+## v0.2.0
 
 - Sessions are named with two words, such as `calm-otter`, instead of a hex code: easy to say, type and pass to another agent (`pai message calm-otter …`). Sessions from before keep their ids.
 - Memory page reads like a notebook: one line per memory under its topic, details and actions on a click. Recalls show as plain Activity.
