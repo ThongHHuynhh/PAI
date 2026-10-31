@@ -4,7 +4,9 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
-- A new session can be an orchestrator without the CLI: the TUI's `/config` has a Role section (Agent or Orchestrator), and the web New session dialog has an Orchestrator switch.
+## v0.2.3
+
+- A new session can be an orchestrator without the CLI: the TUI's `/config` has a Role section (Agent or Orchestrator), and the web New session dialog has an Orchestrator switch. The role keeps the file tools of the model's preset: a model trained on patches orchestrates with `patch` (new tool set `patch-orchestrator`), the rest with `write` and `edit`. A delegated child gets its parent's file tools instead of always `default`.
 
 ## v0.2.2
 

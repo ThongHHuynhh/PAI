@@ -359,3 +359,22 @@ func TestRoomFor(t *testing.T) {
 		t.Fatal("a child must leave the parent its reserve")
 	}
 }
+
+func TestRoleToolsKeepFileTools(t *testing.T) {
+	for _, c := range []struct {
+		tools       string
+		orchestrate bool
+		want        string
+	}{{"default", true, "orchestrator"}, {"patch", true, "patch-orchestrator"}, {"orchestrator", false, "default"}, {"patch-orchestrator", false, "patch"}, {"patch", false, "patch"}} {
+		if got := RoleTools(c.tools, c.orchestrate); got != c.want {
+			t.Errorf("RoleTools(%q, %v) = %q, want %q", c.tools, c.orchestrate, got, c.want)
+		}
+	}
+	names := map[string]bool{}
+	for _, tl := range Tools("patch-orchestrator", nil) {
+		names[tl.Name] = true
+	}
+	if !names["patch"] || names["edit"] || !names["delegate"] || !Orchestrates("patch-orchestrator") {
+		t.Fatalf("patch-orchestrator tools: %v", names)
+	}
+}

@@ -516,7 +516,9 @@ function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: str
     setErr("");
     try {
       const p = cat?.presets[preset];
-      const tools = orchestrator ? "orchestrator" : custom.trim() ? "default" : p!.tools;
+      // the role keeps the preset's file tools: patch for a model trained on patches
+      const patch = !custom.trim() && p!.tools === "patch";
+      const tools = orchestrator ? (patch ? "patch-orchestrator" : "orchestrator") : custom.trim() ? "default" : p!.tools;
       const body = custom.trim()
         ? { model: custom.trim(), tools, context_limit: limit, workers: workers.map((name) => ({ name })) }
         : { model: `${p!.provider}/${p!.model}`, tools, context_limit: limit, input: p!.input, params: p!.params, preset, workers: workers.map((name) => ({ name })) };

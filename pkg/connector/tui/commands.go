@@ -1109,9 +1109,12 @@ func (s *session) config(a *App) {
 				}})
 			}
 		}
-		for _, r := range []struct{ label, tools string }{{"Agent", "default"}, {"Orchestrator: delegates to child sessions", "orchestrator"}} {
-			m.Items = append(m.Items, MenuItem{Label: r.label, Section: "Role", On: cf.Tools == r.tools, Pick: func(a *App, _ *MenuItem) {
-				cf.Tools = r.tools
+		for _, r := range []struct {
+			label       string
+			orchestrate bool
+		}{{"Agent", false}, {"Orchestrator: delegates to child sessions", true}} {
+			m.Items = append(m.Items, MenuItem{Label: r.label, Section: "Role", On: harness.Orchestrates(cf.Tools) == r.orchestrate, Pick: func(a *App, _ *MenuItem) {
+				cf.Tools = harness.RoleTools(cf.Tools, r.orchestrate)
 				if s.id != "" {
 					a.Pop(m.layer)
 				}

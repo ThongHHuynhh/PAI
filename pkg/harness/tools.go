@@ -180,8 +180,29 @@ func Tools(name string, input []string) []provider.Tool {
 		return []provider.Tool{run, read, patch, ask, recall, remember, forget}
 	case "orchestrator":
 		return append(defaults, delegate, tell, children, stopChild)
+	case "patch-orchestrator":
+		return append(Tools("patch", input), delegate, tell, children, stopChild)
 	}
 	return nil
+}
+
+// Orchestrates is whether the tool set adds the orchestration tools.
+func Orchestrates(tools string) bool { return tools == "orchestrator" || tools == "patch-orchestrator" }
+
+// RoleTools is the tool set with or without the orchestration tools, keeping
+// the file editing tools the model's preset chose: patch for a model trained
+// on patches, write and edit for the rest.
+func RoleTools(tools string, orchestrate bool) string {
+	patch := tools == "patch" || tools == "patch-orchestrator"
+	switch {
+	case patch && orchestrate:
+		return "patch-orchestrator"
+	case patch:
+		return "patch"
+	case orchestrate:
+		return "orchestrator"
+	}
+	return "default"
 }
 
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
