@@ -6,3 +6,4 @@
 - Memory never deletes: invalidate with a reason, and make merges and edits new versions that name what they replace.
 - Run `go vet ./...` and `go test ./...` before a commit. After changing `web/src`, run `npm run build` in `web/` and commit `web/dist`: the server embeds it, and CI checks it is current.
 - `working_dir/` is gitignored: build there.
+- Branches: `beta` is where work lands and where betas are cut; `main` holds stable releases only. Branch from `beta`, open the PR against `beta`, never push or open a PR to `main`. A stable release is a PR from `beta` to `main`, then the tag `vX.Y.Z` on `main`; a beta is the tag `vX.Y.Z-beta.N` on `beta`.

@@ -1,6 +1,6 @@
 # Changelog
 
-One section per release, newest first. An `-rc` tag ships the section of the release it is a candidate for.
+One section per release, newest first. A `-beta` tag, cut from the beta branch, ships the section of the release it is a candidate for.
 
 ## Unreleased
 
