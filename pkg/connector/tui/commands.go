@@ -1109,6 +1109,18 @@ func (s *session) config(a *App) {
 				}})
 			}
 		}
+		for _, r := range []struct {
+			label       string
+			orchestrate bool
+		}{{"Agent", false}, {"Orchestrator: delegates to child sessions", true}} {
+			m.Items = append(m.Items, MenuItem{Label: r.label, Section: "Role", On: harness.Orchestrates(cf.Tools) == r.orchestrate, Pick: func(a *App, _ *MenuItem) {
+				cf.Tools = harness.RoleTools(cf.Tools, r.orchestrate)
+				if s.id != "" {
+					a.Pop(m.layer)
+				}
+				s.reconfig(a, cf, s.price)
+			}})
+		}
 		m.Items = append(m.Items, MenuItem{Label: "Edit full JSON", Pick: func(a *App, _ *MenuItem) { s.configJSON(a, cat, cf) }})
 		title := cf.Model
 		if ok {
