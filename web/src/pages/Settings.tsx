@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { call, type Catalog, type ProviderInfo } from "../api";
+import { ago, call, type Account, type Balance as BalanceT, type Catalog, type ProviderInfo } from "../api";
 import { useLive } from "../live";
 
 type Join = { join: string; unix?: string; windows?: string };
@@ -15,6 +15,7 @@ export default function Settings() {
       </header>
       <Providers />
       <Failover />
+      <Balance />
       <Machines />
       <Keys />
       <Server />
@@ -159,9 +160,11 @@ function Failover() {
   const [served, setServed] = useState<ProviderInfo[]>([]);
   const [fb, setFb] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState("");
+  const [accounts, setAccounts] = useState<Account[]>([]);
   useEffect(() => {
     call<ProviderInfo[]>("GET", "/providers").then(setServed, () => {});
     call<Record<string, string>>("GET", "/fallbacks").then(setFb, () => {});
+    call<Account[]>("GET", "/accounts").then(setAccounts, () => {});
   }, []);
   if (served.length < 2) return null;
   const set = async (from: string, to: string) => {
@@ -179,6 +182,7 @@ function Failover() {
         {served.map((p) => (
           <li key={p.name}>
             <b>{p.name}</b>
+            <Usage a={accounts.find((a) => a.name === p.name || a.name.startsWith(p.name + "/"))} />
             <span className="muted small">continue on</span>
             <select value={fb[p.name] ?? ""} onChange={(e) => set(p.name, e.target.value)}>
               <option value="">nothing, stop</option>
@@ -194,6 +198,73 @@ function Failover() {
         ))}
       </ul>
       {saved && <p className="muted small">{saved}</p>}
+    </section>
+  );
+}
+
+// Usage is an account's share of its 5 hour and 7 day windows spent, as it last
+// reported them, and until when it is out of usage.
+function Usage({ a }: { a?: Account }) {
+  if (!a) return null;
+  const pc = (u: number | null) => (u === null ? "?" : `${Math.round(u * 100)}%`);
+  return (
+    <span className="muted small" title={a.updated ? `seen ${ago(a.updated)}` : "no report yet"}>
+      {a.status === "limited" ? "out of usage" : "ok"} · 5h {pc(a.util_five_hour)} · 7d {pc(a.util_seven_day)}
+      {a.status === "limited" && a.limited_until > "1" ? ` · until ${new Date(a.limited_until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
+    </span>
+  );
+}
+
+// Balance spreads new and running sessions over interchangeable models: a
+// session on a spent account moves to the pool member with the most room, and
+// a new one starts there. A healthy session never moves for more room.
+function Balance() {
+  const [served, setServed] = useState<ProviderInfo[]>([]);
+  const [cat, setCat] = useState<Catalog | null>(null);
+  const [b, setB] = useState<BalanceT | null>(null);
+  const [err, setErr] = useState("");
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    call<ProviderInfo[]>("GET", "/providers").then(setServed, () => {});
+    call<Catalog>("GET", "/catalog").then(setCat, () => {});
+    call<BalanceT>("GET", "/balance").then(setB, () => {});
+  }, []);
+  if (served.length < 2 || !cat || !b) return null;
+  const models = new Set(b.pool);
+  for (const p of served) {
+    const id = cat.providers[p.name] ? p.name : p.shape;
+    for (const pr of Object.values(cat.presets)) if (pr.provider === id) models.add(`${p.name}/${pr.model}`);
+  }
+  const save = async (next: BalanceT) => {
+    setErr("");
+    try {
+      await call("PUT", "/balance", next);
+      setB(next);
+      setSaved("Saved");
+      window.setTimeout(() => setSaved(""), 1500);
+    } catch (e: any) {
+      setErr(String(e.message ?? e));
+    }
+  };
+  const toggle = (m: string) => save({ ...b, pool: b.pool.includes(m) ? b.pool.filter((x) => x !== m) : [...b.pool, m].sort() });
+  return (
+    <section className="card">
+      <h2>Balance across accounts</h2>
+      <p className="muted small">With auto on, a chat whose account is spent moves to the pool member with the most room left, and a new chat starts there. A healthy chat never moves, so its prompt cache stays. Pick at least two models that may stand in for each other.</p>
+      <label className="row">
+        <input type="checkbox" checked={b.mode === "auto"} onChange={(e) => save({ ...b, mode: e.target.checked ? "auto" : "off" })} /> Auto
+      </label>
+      <ul className="plain">
+        {[...models].sort().map((m) => (
+          <li key={m}>
+            <label>
+              <input type="checkbox" checked={b.pool.includes(m)} onChange={() => toggle(m)} /> {m}
+            </label>
+          </li>
+        ))}
+      </ul>
+      {saved && <p className="muted small">{saved}</p>}
+      {err && <p className="error">{err}</p>}
     </section>
   );
 }

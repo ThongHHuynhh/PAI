@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- Settings in the web app: each account shows its 5 hour and 7 day usage and when it is out of usage until, and a new card turns balance across accounts on or off and picks its pool of interchangeable models (the same as `pai balance` and the TUI).
+
 - The web session list shows delegated sessions under their orchestrator, indented, with the orchestrator's child count and whether one is working. A child whose orchestrator is not listed stands alone.
 
 - Swap the model of an open session from the TUI (`/model`) and the web app (the model name in the chat header). Both list every served model, mark the current one, and grey out the ones that cannot take the session with the reason (context too large for its window, media it cannot read, provider not served). `GET /sessions/{id}/models` serves the list. The swap applies from the next step; the first step on the new model re-reads the context, because prompt caches are per account.

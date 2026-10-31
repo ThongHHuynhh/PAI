@@ -215,6 +215,10 @@ export type Rec = {
 
 export type Preset = { name: string; provider: string; model: string; tools: string; context_limit: number; input: string[]; params: Record<string, unknown> };
 export type Catalog = { providers: Record<string, { name: string; shape: string; url?: string; group?: string }>; presets: Record<string, Preset>; groups: Record<string, string[]> };
+// Account is what PAI knows of one account's usage; a null is not known yet.
+export type Account = { name: string; status: "ok" | "limited"; limited_until: string; util_five_hour: number | null; util_seven_day: number | null; updated: string };
+// Balance, in auto mode, spreads sessions over a pool of interchangeable provider/model entries.
+export type Balance = { mode: "off" | "auto"; pool: string[] };
 export type ProviderInfo = { name: string; shape: string; url?: string };
 
 // --- records: the state file's own bytes, a JSON header line, len bytes of
