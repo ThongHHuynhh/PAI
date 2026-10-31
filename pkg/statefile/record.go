@@ -96,6 +96,7 @@ type Record struct {
 // Params are fields for the model's vendor, set on every request as its
 // envelope decides.
 type Conf struct {
+	Parent       string                     `json:"parent,omitempty"`
 	Model        string                     `json:"model"`
 	Tools        string                     `json:"tools"`
 	Workers      []Worker                   `json:"workers"`

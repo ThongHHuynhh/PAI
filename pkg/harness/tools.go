@@ -164,14 +164,23 @@ type Output struct {
 }
 
 // Tools is the tool set a config record names. Every worker tool takes a
-// worker; the memory tools run on the server. The read description names the
-// media types the session's input lists.
+// worker; memory and orchestration tools run on the server. The read
+// description names the media types the session's input lists.
 func Tools(name string, input []string) []provider.Tool {
 	read := provider.Tool{Name: "read", Description: "Read a file on a worker as text", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
 	if len(input) > 0 {
 		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
 	}
-	return map[string][]provider.Tool{"default": {run, read, write, edit, recall, remember, forget}, "patch": {run, read, patch, recall, remember, forget}}[name]
+	defaults := []provider.Tool{run, read, write, edit, recall, remember, forget}
+	switch name {
+	case "default":
+		return defaults
+	case "patch":
+		return []provider.Tool{run, read, patch, recall, remember, forget}
+	case "orchestrator":
+		return append(defaults, delegate, tell, children, stopChild)
+	}
+	return nil
 }
 
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
