@@ -188,6 +188,14 @@ func (s *session) Size(a *App, w, h int) {
 	if s.status.S == "" {
 		s.status.S, s.status.Style = cf.Model, a.Theme.muted()
 	}
+	if s.id != "" && s.info.ID == s.id {
+		if s.info.Parent != "" {
+			s.status.S += " · child of " + s.info.Parent
+		}
+		if children, stepping := s.list.children(s.id); children > 0 {
+			s.status.S += fmt.Sprintf(" · %d children (%d stepping)", children, stepping)
+		}
+	}
 	s.meta.Gs = nil
 	switch {
 	case !empty:
