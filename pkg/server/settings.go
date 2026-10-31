@@ -19,8 +19,9 @@ type settings struct {
 }
 
 type versions struct {
-	Current string `json:"current"`
-	Latest  string `json:"latest,omitempty"`
+	Current string        `json:"current"`
+	Latest  string        `json:"latest,omitempty"`
+	Build   version.Build `json:"build"`
 }
 
 // An update downloads one binary and restarts the harness.
@@ -34,7 +35,7 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 	case latest = <-l:
 	case <-time.After(5 * time.Second):
 	}
-	reply(w, settings{&versions{version.V, latest}})
+	reply(w, settings{&versions{version.V, latest, version.Info()}})
 }
 
 func (a *api) setSettings(w http.ResponseWriter, r *http.Request) {

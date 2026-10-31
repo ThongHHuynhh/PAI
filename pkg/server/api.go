@@ -40,7 +40,7 @@ const (
 //	GET    /join           -> {"join","unix","windows"}: the server URL and device code, as a
 //	                          worker installs with them, and the install lines that use them
 //	POST   /keys           {"name"} -> {"name","key"}: a new api key; a name in use is 409
-//	GET    /settings       -> {"version":{"current","latest"}}
+//	GET    /settings       -> {"version":{"current","latest","build"}}: build is where the binary came from
 //	POST   /settings       {"version"} -> the admin worker makes the server that release
 //	                          and restarts it, so a success seldom answers
 type api struct {

@@ -137,8 +137,8 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .login-card details { margin-top: 14px; }
 
 /* shell */
-.shell { display: grid; grid-template-columns: 216px 1fr; height: 100%; }
-.nav { display: flex; flex-direction: column; gap: 2px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--bg); }
+.shell { display: grid; grid-template-columns: 216px 1fr; grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
+.nav { grid-row: 1 / 3; display: flex; flex-direction: column; gap: 2px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--bg); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; letter-spacing: 0.06em; padding: 0 6px 16px; }
 .nav a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--text); }
 .nav a:hover { background: var(--panel-2); text-decoration: none; }
@@ -147,6 +147,7 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .nav-status { padding: 10px; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
 .nav-tools { display: flex; gap: 4px; padding: 0 4px; }
 .main { overflow: auto; min-width: 0; }
+.foot { grid-column: 2; padding: 3px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); text-align: center; }
 
 /* graph */
 .graph-page { display: grid; grid-template-columns: 1fr 340px; height: 100%; }
@@ -185,9 +186,11 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
 /* sessions */
-.sessions-page { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
+.sessions-page { display: grid; grid-template-columns: 300px 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; }
 .session-list { border-right: 1px solid var(--line); overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
 .session-list .row input { flex: 1; }
+.sessions-page.folded { grid-template-columns: 44px 1fr; }
+.sessions-page.folded .session-list { padding: 8px 4px; align-items: center; }
 .session-row { display: flex; flex-direction: column; gap: 3px; padding: 10px; border-radius: 8px; color: var(--text); }
 .session-row:hover { background: var(--panel); text-decoration: none; }
 .session-row.active { background: var(--accent-soft); }
@@ -212,12 +215,34 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .call-body pre.result { color: var(--muted); }
 .exit { margin-left: auto; font-size: 11px; color: var(--ok); flex: none; }
 .exit.bad { color: var(--error); }
-.memcard { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: 13px; cursor: pointer; max-width: 860px; }
-.memcard ul { margin: 8px 0 2px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.memcard { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: 13px; max-width: 860px; }
+.memcard .memhead { cursor: pointer; }
+.memcard .recalls { list-style: none; margin: 8px 0 6px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.memcard .recalls li { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; overflow-wrap: anywhere; }
+.recall-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 3px; }
 .memcard .text p { color: var(--muted); }
 .stepline { font-size: 11px; color: var(--muted); align-self: flex-start; }
 .thinking { color: var(--accent); font-size: 13px; animation: breathe 1.6s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: 0.45; } }
+.retrieval { border-top: 1px solid var(--line); }
+.retrieval-bar { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 20px; border: 0; border-radius: 0; background: none; font-size: 12.5px; text-align: left; }
+.retrieval-bar:hover { background: var(--panel-2); }
+.retrieval-caret { margin-left: auto; }
+.retrieval-panel { max-height: 40vh; overflow: auto; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.retrieval-panel .tiles { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+.retrieval-panel .tile { height: auto; min-height: 72px; cursor: help; }
+.retrieval-links { margin: 0; }
+.retrieval .warn, .retrieval-panel .warn { color: var(--warn); }
+.retrieval-panel p.warn { margin: 0; }
+.tile.warn { border-color: var(--warn); }
+.used { color: var(--ok); font-weight: 600; }
+.item-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; opacity: 0.35; transition: opacity 0.15s; }
+.recalls li:hover .item-actions, .item-actions:focus-within { opacity: 1; }
+@media (hover: none) { .item-actions { opacity: 1; } }
+.item-actions .link.on { color: var(--ok); font-weight: 600; }
+.item-actions button:disabled { cursor: default; }
+.nudge { margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; opacity: 0.85; }
+.nudge-text { overflow-wrap: anywhere; }
 .composer { display: flex; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); align-items: flex-end; }
 .composer textarea { min-height: 48px; max-height: 220px; }
 .modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: grid; place-items: center; padding: 16px; z-index: 10; }
@@ -375,14 +400,13 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 
 .inline-select { padding: 1px 4px; font-size: 12.5px; border: 0; background: transparent; color: var(--muted); max-width: 100%; }
 .inline-select:hover { background: var(--panel-2); }
-.back { font-size: 26px; line-height: 1; padding: 0 8px 0 0; color: var(--text); align-items: center; }
 .transcript-head { align-items: center; flex-wrap: nowrap; }
 details.more { margin-top: 18px; }
 details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
 
 /* Layouts: a sidebar on desktop, an icon rail on tablets, a tab bar at the
    bottom of phones. Every page fits any width with no sideways scroll. */
-.only-phone, .only-phone-block { display: none; }
+.only-phone-block { display: none; }
 .glance ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .glance li { display: flex; gap: 8px; align-items: center; min-width: 0; }
 @media (hover: hover) {
@@ -403,11 +427,10 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
 }
 @media (max-width: 699px) {
   :root { --tabbar: calc(60px + env(safe-area-inset-bottom)); }
-  .only-phone { display: inline-flex; }
   .only-phone-block { display: block; }
   .graph-page { grid-template-rows: 46vh auto; }
   .shell { grid-template-columns: 1fr; height: 100%; }
-  .main { padding-bottom: var(--tabbar); height: 100%; }
+  .foot { grid-column: 1; margin-bottom: var(--tabbar); }
   .nav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: var(--tabbar);
     flex-direction: row; justify-content: space-around; align-items: flex-start;
@@ -420,13 +443,15 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .nav-tools { flex-direction: row; align-items: center; height: 48px; }
   .graph-page { grid-template-rows: 58vh auto; }
   .graph-side { grid-template-columns: 1fr; }
-  .sessions-page { grid-template-columns: 1fr; grid-template-rows: 1fr; height: 100%; }
-  .sessions-page.has-cur .session-list { display: none; }
+  .sessions-page { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; }
+  .sessions-page.has-cur:not(.folded) .session-view { display: none; }
   .sessions-page:not(.has-cur) .session-view { display: none; }
   .session-list { border-right: 0; }
   .transcript-head { padding: 10px 12px; }
   .records { padding: 12px; }
   .composer { padding: 8px 12px; }
+  .retrieval-bar { padding: 4px 12px; }
+  .retrieval-panel { padding: 8px 12px; }
   .msg { max-width: 100%; }
   .ctx { width: 120px; }
   .knowledge-page, .settings-page { padding: 16px 14px 32px; }

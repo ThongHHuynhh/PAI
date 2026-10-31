@@ -37,6 +37,7 @@ type Hit struct {
 	Vector  int     `json:"vector,omitempty"`  // place by cosine, from 1
 	Cosine  float64 `json:"cosine"`
 	Pinned  bool    `json:"pinned,omitempty"` // here because it is pinned
+	Used    bool    `json:"used,omitempty"`   // once settled: the reply carried its words
 }
 
 // Search is the k valid items most relevant to query, best first. session,
@@ -143,6 +144,7 @@ type Retrieval struct {
 	Features []float64 `json:"features"`
 	Hits     []Hit     `json:"hits"`
 	Reward   *float64  `json:"reward,omitempty"` // once settled
+	Ms       int64     `json:"ms"`               // how long the recall took, embedding included
 }
 
 // Turn is what a session tells recall about the turn it recalls for.
@@ -159,6 +161,7 @@ func (s *Store) Recall(ctx context.Context, t Turn) (Retrieval, error) {
 	if err != nil {
 		return Retrieval{}, err
 	}
+	start := time.Now()
 	x := features(t, st.Items)
 	r := Retrieval{ID: newID(), Session: t.Session, At: time.Now().UTC(), Query: t.Query, Features: x}
 	if st.Items == 0 {
@@ -187,8 +190,9 @@ func (s *Store) Recall(ctx context.Context, t Turn) (Retrieval, error) {
 	}
 	fb, _ := json.Marshal(x)
 	ib, _ := json.Marshal(r.Hits)
+	r.Ms = time.Since(start).Milliseconds()
 	s.mu.Lock()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO retrievals (id,session,at,query,arm,features,items) VALUES (?,?,?,?,?,?,?)`, r.ID, r.Session, r.At.UnixMilli(), r.Query, k, string(fb), string(ib))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO retrievals (id,session,at,query,arm,features,items,ms) VALUES (?,?,?,?,?,?,?,?)`, r.ID, r.Session, r.At.UnixMilli(), r.Query, k, string(fb), string(ib), r.Ms)
 	if err == nil && len(ids) > 0 {
 		_, err = s.db.ExecContext(ctx, `UPDATE items SET shown=shown+1 WHERE id IN (`+placeholders(len(ids))+`)`, anys(ids)...)
 	}
@@ -236,12 +240,13 @@ func (s *Store) Settle(ctx context.Context, session, reply string, calledRecall 
 	}
 	for _, o := range opens {
 		used, recalled := 0, 0
-		for _, h := range o.hits {
+		for i, h := range o.hits {
+			u := usedIn(h.Item.Text, words)
+			o.hits[i].Used = u
 			if h.Pinned {
-				continue // pinned items come whatever the bandit chose
+				continue // pinned items come whatever the bandit chose, so they are marked but not scored
 			}
 			recalled++
-			u := usedIn(h.Item.Text, words)
 			if u {
 				used++
 			}
@@ -266,8 +271,9 @@ func (s *Store) Settle(ctx context.Context, session, reply string, calledRecall 
 		if err := s.update(ctx, o.arm, o.x, reward); err != nil {
 			return err
 		}
+		ib, _ := json.Marshal(o.hits)
 		s.mu.Lock()
-		_, err := s.db.ExecContext(ctx, `UPDATE retrievals SET reward=?, settled=1 WHERE id=?`, reward, o.id)
+		_, err := s.db.ExecContext(ctx, `UPDATE retrievals SET reward=?, settled=1, items=? WHERE id=?`, reward, string(ib), o.id)
 		s.mu.Unlock()
 		if err != nil {
 			return err
@@ -313,7 +319,7 @@ func (s *Store) Retrievals(ctx context.Context, session string, limit int) ([]Re
 	if limit <= 0 {
 		limit = 50
 	}
-	q, args := `SELECT id, session, at, query, arm, features, items, reward FROM retrievals`, []any{}
+	q, args := `SELECT id, session, at, query, arm, features, items, reward, ms FROM retrievals`, []any{}
 	if session != "" {
 		q, args = q+` WHERE session=?`, append(args, session)
 	}
@@ -328,7 +334,7 @@ func (s *Store) Retrievals(ctx context.Context, session string, limit int) ([]Re
 		var at int64
 		var fb, ib string
 		var reward sql.NullFloat64
-		if err := rows.Scan(&r.ID, &r.Session, &at, &r.Query, &r.K, &fb, &ib, &reward); err != nil {
+		if err := rows.Scan(&r.ID, &r.Session, &at, &r.Query, &r.K, &fb, &ib, &reward, &r.Ms); err != nil {
 			return nil, err
 		}
 		r.At = time.UnixMilli(at).UTC()

@@ -13,6 +13,7 @@ import (
 
 	"pai/pkg/catalog"
 	"pai/pkg/memory"
+	"pai/pkg/provider"
 	"pai/pkg/statefile"
 )
 
@@ -42,18 +43,19 @@ const growthSteps = 60
 const recentErrors = 8
 
 type Metrics struct {
-	Range    string         `json:"range"`
-	Since    time.Time      `json:"since"`
-	Bucket   string         `json:"bucket"` // hour, day or week
-	Totals   Totals         `json:"totals"`
-	Series   []Point        `json:"series"`
-	Models   []ModelStats   `json:"models"`
-	Sessions []SessionStats `json:"sessions"`
-	Tools    []ToolStats    `json:"tools"`
-	Harness  HarnessStats   `json:"harness"`
-	Memory   *MemoryMetrics `json:"memory,omitempty"`
-	Priced   bool           `json:"priced"` // this build's catalog has prices
-	Stops    map[string]int `json:"stops"`
+	Range    string                    `json:"range"`
+	Since    time.Time                 `json:"since"`
+	Bucket   string                    `json:"bucket"` // hour, day or week
+	Totals   Totals                    `json:"totals"`
+	Series   []Point                   `json:"series"`
+	Models   []ModelStats              `json:"models"`
+	Sessions []SessionStats            `json:"sessions"`
+	Tools    []ToolStats               `json:"tools"`
+	Harness  HarnessStats              `json:"harness"`
+	Memory   *MemoryMetrics            `json:"memory,omitempty"`
+	Limits   map[string]provider.Limit `json:"limits,omitempty"` // by provider, once it has reported one
+	Priced   bool                      `json:"priced"`           // this build's catalog has prices
+	Stops    map[string]int            `json:"stops"`
 }
 
 type Totals struct {
@@ -146,6 +148,8 @@ type MemoryMetrics struct {
 	Skipped   int               `json:"skipped"`
 	Reward    *float64          `json:"reward,omitempty"`
 	UsedRate  float64           `json:"used_rate"` // all time: memory keeps no per-recall use
+	RecallP50 int64             `json:"recall_p50_ms"`
+	RecallP95 int64             `json:"recall_p95_ms"`
 	Bandit    []memory.ArmStats `json:"bandit"`
 }
 
@@ -367,6 +371,9 @@ func (wa *webAPI) collect(ctx context.Context, name string, span, bucket time.Du
 			}
 		}
 	}
+	if l := provider.ClaudeLimit(); l != nil {
+		m.Limits = map[string]provider.Limit{"claude-code": *l}
+	}
 	return m, nil
 }
 
@@ -402,6 +409,7 @@ func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(ti
 	}
 	var sum float64
 	var n int
+	var lat []int64
 	for _, r := range rs {
 		if r.At.Before(since) {
 			continue
@@ -410,6 +418,7 @@ func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(ti
 			mm.Skipped++
 		} else {
 			mm.Recalls++
+			lat = append(lat, r.Ms)
 		}
 		if r.Reward != nil {
 			sum, n = sum+*r.Reward, n+1
@@ -421,6 +430,7 @@ func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(ti
 	if n > 0 {
 		mm.Reward = new(sum / float64(n))
 	}
+	mm.RecallP50, mm.RecallP95 = pct(lat, 50), pct(lat, 95)
 	st, err := wa.mem.Stats(ctx)
 	if err != nil {
 		return nil, err

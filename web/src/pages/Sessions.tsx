@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ago, call, records, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Session } from "../api";
+import { ago, call, records, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session } from "../api";
 import { useLive } from "../live";
 import { go } from "../App";
+import { ItemActions, Nudge, RetrievalBar, useRetrievals, verdict } from "../components/Retrieval";
 import { splitModel } from "./Graph";
+
+// LIST is where this browser keeps whether the session list is shown.
+const LIST = "pai.sessions.list";
 
 export default function Sessions({ id }: { id?: string }) {
   const { graph, refresh } = useLive();
@@ -16,17 +20,37 @@ export default function Sessions({ id }: { id?: string }) {
     [graph, filter],
   );
   const cur = list.find((s) => s.id === id) ?? (graph?.sessions ?? []).find((s) => s.id === id);
+  // The list stays beside an open session; a person folds it to a thin rail.
+  // Unset, it starts folded on a phone. With no session open it is the page.
+  const [open, setOpen] = useState(() => (localStorage.getItem(LIST) ?? (window.matchMedia("(max-width: 699px)").matches ? "0" : "1")) === "1");
+  const fold = () => {
+    localStorage.setItem(LIST, open ? "0" : "1");
+    setOpen(!open);
+  };
+  const shown = open || !cur;
   return (
-    <div className={`sessions-page ${cur ? "has-cur" : ""}`}>
+    <div className={`sessions-page ${cur ? "has-cur" : ""} ${shown ? "" : "folded"}`}>
       <aside className="session-list">
+        {!shown && (
+          <button className="icon-btn" onClick={fold} title="Show sessions" aria-label="Show sessions">
+            ›
+          </button>
+        )}
+        {shown && (
         <div className="row">
           <input placeholder="Filter sessions" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <button className="primary small" onClick={() => setCreating(true)}>
             New
           </button>
+          {cur && (
+            <button className="icon-btn" onClick={fold} title="Hide sessions" aria-label="Hide sessions">
+              ‹
+            </button>
+          )}
         </div>
-        {list.length === 0 && <p className="muted small pad">No sessions yet. Start one with New.</p>}
-        {list.map((s) => {
+        )}
+        {shown && list.length === 0 && <p className="muted small pad">No sessions yet. Start one with New.</p>}
+        {shown && list.map((s) => {
           const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
           return (
             <a key={s.id} href={`#/sessions/${s.id}`} className={`session-row ${s.id === id ? "active" : ""}`}>
@@ -156,14 +180,13 @@ function Transcript({ s }: { s: Session }) {
   };
 
   const results = useMemo(() => Object.fromEntries(recs.filter((r) => r.kind === "result").map((r) => [r.for, r])), [recs]);
+  const retrievals = useRetrievals(s.id);
+  const recalls = useMemo(() => Object.fromEntries(retrievals.map((r) => [r.id, r])), [retrievals]);
   const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
 
   return (
     <div className="transcript">
       <header className="transcript-head">
-        <a className="only-phone back" href="#/sessions" aria-label="All chats">
-          ‹
-        </a>
         <div className="grow" style={{ minWidth: 0 }}>
           <h2 className="ellipsis">{sessionTitle(s)}</h2>
           <div className="muted small ellipsis">
@@ -199,11 +222,12 @@ function Transcript({ s }: { s: Session }) {
         }}
       >
         {recs.map((r) => (
-          <Record key={r.n} r={r} result={r.kind === "call" ? results[r.id] : undefined} />
+          <Record key={r.n} r={r} result={r.kind === "call" ? results[r.id] : undefined} recalls={recalls} />
         ))}
         {s.status === "stepping" && <div className="thinking">PAI is working…</div>}
         <div ref={end} />
       </div>
+      <RetrievalBar session={s.id} rs={retrievals} />
       {err && <div className="banner error">{err}</div>}
       <footer className="composer">
         <textarea
@@ -258,7 +282,7 @@ function ModelSwitch({ s }: { s: Session }) {
   );
 }
 
-function Record({ r, result }: { r: Rec; result?: Rec }) {
+function Record({ r, result, recalls }: { r: Rec; result?: Rec; recalls: { [id: string]: Retrieval } }) {
   const [open, setOpen] = useState(false);
   switch (r.kind) {
     case "message":
@@ -314,7 +338,7 @@ function Record({ r, result }: { r: Rec; result?: Rec }) {
           </div>
         );
       if (r.source !== "memory") return null;
-      return <MemoryCard r={r} />;
+      return <MemoryCard r={r} recalls={recalls} />;
     case "compaction":
       return (
         <div className="memcard compaction" onClick={() => setOpen(!open)}>
@@ -341,33 +365,48 @@ function Record({ r, result }: { r: Rec; result?: Rec }) {
   }
 }
 
-// MemoryCard is what memory recalled for a turn: each item links to the
-// knowledge view.
-function MemoryCard({ r }: { r: Rec }) {
+// MemoryCard is what memory recalled for a turn: each item is a line with its
+// kind, scope and score, and links to the knowledge view. The recall's own
+// record, when it is loaded, adds the scores and what came of it.
+function MemoryCard({ r, recalls }: { r: Rec; recalls: { [id: string]: Retrieval } }) {
   const [open, setOpen] = useState(false);
   const items = [...r.body.matchAll(/^- \[(m[0-9a-f]+)\] \(([^,]+), ([^)]+)\) (.*)$/gm)].map((m) => ({ id: m[1], kind: m[2], scope: m[3], text: m[4] }));
+  const rv = recalls[r.body.match(/\(retrieval (\w+)\)/)?.[1] ?? ""];
+  const hits = new Map((rv?.hits ?? []).map((h) => [h.item.id, h]));
   return (
-    <div className="memcard" onClick={() => setOpen(!open)}>
-      <div className="memhead">
+    <div className="memcard">
+      <div className="memhead" onClick={() => setOpen(!open)}>
         <span className="accent">◆</span> Recalled {items.length} {items.length === 1 ? "memory" : "memories"} for this turn
         <span className="muted small"> · {open ? "hide" : "show"}</span>
       </div>
       {open && (
-        <ul>
-          {items.map((it) => (
-            <li key={it.id}>
-              <span className={`kind k-${it.kind}`}>{it.kind}</span> {it.text}{" "}
-              <a
-                href={`#/knowledge/${it.id}`}
-                onClick={(e) => e.stopPropagation()}
-                className="small"
-              >
-                {it.id}
-              </a>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="recalls">
+            {items.map((it) => {
+              const h = hits.get(it.id);
+              return (
+                <li key={it.id}>
+                  <div>{it.text}</div>
+                  <div className="recall-meta small muted">
+                    <span className={`kind k-${it.kind}`}>{it.kind}</span>
+                    <span>{it.scope}</span>
+                    {h && <span title="How well it matched the message">{h.pinned ? "pinned" : `match ${h.score.toFixed(2)}`}</span>}
+                    {rv?.reward != null && h && <span className={h.used ? "used" : ""} title="Whether the model's reply carried this memory's words">{h.used ? "used" : "not used"}</span>}
+                    <a href={`#/knowledge/${it.id}`}>{it.id}</a>
+                    <ItemActions id={it.id} pinned={h?.item.pinned ?? false} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {rv && (
+            <div className="small muted">
+              {rv.k ? `PAI chose to recall ${rv.k}` : "PAI chose to skip"} · {verdict(rv).text}
+            </div>
+          )}
+        </>
       )}
+      {rv && <Nudge r={rv} />}
     </div>
   );
 }
