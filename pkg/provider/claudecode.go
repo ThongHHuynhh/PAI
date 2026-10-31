@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"pai/pkg/statefile"
@@ -434,6 +435,26 @@ func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func
 	return claudeStream(out, emit)
 }
 
+// Limit is what claude last said of the account's usage windows, such as
+// five_hour and seven_day. It is only known after a request, so a server
+// that just started has none.
+type Limit struct {
+	At      time.Time         `json:"at"`
+	Status  string            `json:"status"`
+	Windows map[string]Window `json:"windows"`
+}
+
+// Window is the share of one usage window spent, and when it resets.
+type Window struct {
+	Utilization float64   `json:"utilization"` // 0 to 1
+	Resets      time.Time `json:"resets"`
+}
+
+var claudeLimit atomic.Pointer[Limit]
+
+// ClaudeLimit is the newest limit claude reported, or nil.
+func ClaudeLimit() *Limit { return claudeLimit.Load() }
+
 type ccEvent struct {
 	Type    string          `json:"type"`
 	Subtype string          `json:"subtype"`
@@ -444,6 +465,13 @@ type ccEvent struct {
 	Stop    string          `json:"stop_reason"`
 	Usage   anthUsage       `json:"usage"`
 	Message json.RawMessage `json:"message"`
+	Limit   struct {
+		Status  string `json:"status"`
+		Windows map[string]struct {
+			Utilization float64 `json:"utilization"`
+			ResetsAt    int64   `json:"resetsAt"`
+		} `json:"unifiedWindows"`
+	} `json:"rate_limit_info"`
 }
 
 // Stream reads claude's stream-json: an assistant event per finished block,
@@ -488,6 +516,12 @@ func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header
 					emit(rec)
 				}
 			}
+		case "rate_limit_event":
+			l := &Limit{At: time.Now().UTC(), Status: e.Limit.Status, Windows: map[string]Window{}}
+			for name, w := range e.Limit.Windows {
+				l.Windows[name] = Window{w.Utilization, time.Unix(w.ResetsAt, 0).UTC()}
+			}
+			claudeLimit.Store(l)
 		case "result":
 			if e.IsError {
 				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %s: %s", e.Subtype, e.Result)

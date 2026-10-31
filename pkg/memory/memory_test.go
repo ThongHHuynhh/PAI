@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -129,5 +130,8 @@ func TestRecallSettleUpdatesUtility(t *testing.T) {
 	rs, _ := s.Retrievals(ctx, "s1", 10)
 	if len(rs) != 1 || rs[0].Reward == nil || *rs[0].Reward <= 0 {
 		t.Fatalf("retrieval not settled with a positive reward: %+v", rs)
+	}
+	if i := slices.IndexFunc(rs[0].Hits, func(h Hit) bool { return h.Item.ID == it.ID }); i < 0 || !rs[0].Hits[i].Used {
+		t.Fatalf("the used item is not marked used: %+v", rs[0].Hits)
 	}
 }

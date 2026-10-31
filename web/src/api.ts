@@ -103,7 +103,7 @@ export type Item = {
   used: number;
 };
 
-export type Hit = { item: Item; score: number; lexical?: number; vector?: number; cosine: number; pinned?: boolean };
+export type Hit = { item: Item; score: number; lexical?: number; vector?: number; cosine: number; pinned?: boolean; used?: boolean };
 
 export type Stats = {
   items: number;
@@ -128,6 +128,7 @@ export type Retrieval = {
   features: number[];
   hits: Hit[] | null;
   reward?: number;
+  ms: number;
 };
 
 // Metrics is GET /metrics: how PAI performed over a range (pkg/server/metrics.go).
@@ -144,6 +145,7 @@ export type Metrics = {
   tools: { name: string; calls: number; failures: number; truncated: number; p50_ms: number; p95_ms: number }[];
   harness: { steps_per_message: number; compactions: number; failovers: number; recent_errors: { session: string; at: string; text: string }[] };
   stops: Record<string, number>;
+  limits?: Record<string, { at: string; status: string; windows: Record<string, { utilization: number; resets: string }> }>;
   memory?: {
     items: number;
     learnt: number;
@@ -155,6 +157,8 @@ export type Metrics = {
     skipped: number;
     reward?: number;
     used_rate: number;
+    recall_p50_ms: number;
+    recall_p95_ms: number;
     bandit: Arm[];
   };
 };

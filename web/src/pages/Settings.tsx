@@ -4,7 +4,8 @@ import { useLive } from "../live";
 
 type Join = { join: string; unix?: string; windows?: string };
 type LoginState = { state: string; error?: string; text?: string; url?: string; code?: string; paste?: boolean };
-type SettingsT = { version: { current: string; latest?: string } };
+type Build = { branch: string; commit: string; dirty: string; builder: string; built: string; go: string; platform: string };
+type SettingsT = { version: { current: string; latest?: string; build: Build } };
 
 export default function Settings() {
   return (
@@ -290,6 +291,24 @@ function Server() {
         PAI {s?.version.current ?? "…"}
         {s?.version.latest ? <span className="muted"> · latest {s.version.latest}</span> : null}
       </p>
+      {s && (
+        <dl className="kv">
+          <dt>Branch</dt>
+          <dd>{s.version.build.branch}</dd>
+          <dt>Commit</dt>
+          <dd>{s.version.build.commit}</dd>
+          <dt>Tree</dt>
+          <dd>{{ yes: "dirty (uncommitted changes)", no: "clean" }[s.version.build.dirty] ?? s.version.build.dirty}</dd>
+          <dt>Built by</dt>
+          <dd>{s.version.build.builder}</dd>
+          <dt>Built</dt>
+          <dd>{s.version.build.built}</dd>
+          <dt>Go</dt>
+          <dd>{s.version.build.go}</dd>
+          <dt>Platform</dt>
+          <dd>{s.version.build.platform}</dd>
+        </dl>
+      )}
       {newer && (
         <button
           className="primary small"

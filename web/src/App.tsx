@@ -160,6 +160,7 @@ function Shell({ onOut }: { onOut: () => void }) {
         {route.page === "performance" && <Performance />}
         {route.page === "settings" && <Settings />}
       </main>
+      <footer className="foot">Copyright © 2026 MTR</footer>
     </div>
   );
 }
