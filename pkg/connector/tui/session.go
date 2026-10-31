@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -48,6 +49,7 @@ type session struct {
 	list   *sessionList
 	id     string
 	info   harness.Info
+	model  string      // newest model read from the transcript's config records
 	asked  []*msgBlock // the messages, for /rollback and /goto
 	second int64       // the clock's second at the last tick, to redraw the times of running calls
 
@@ -86,6 +88,9 @@ type session struct {
 	running    []*callBlock          // calls with no result yet
 	workerSet  sync.Mutex            // one PUT of the workers at a time
 	workerSets atomic.Int64          // the toggles so far; only the newest is sent
+	askCall    *statefile.Record     // the newest ask call with no result yet
+	dlg        *asking               // the dialog that asks it
+	declined   string                // the ask call the person declined
 }
 
 func newSession(a *App, l *sessionList, id string) *session {
@@ -187,6 +192,14 @@ func (s *session) Size(a *App, w, h int) {
 	*s.status = *a.Status
 	if s.status.S == "" {
 		s.status.S, s.status.Style = cf.Model, a.Theme.muted()
+	}
+	if s.id != "" && s.info.ID == s.id {
+		if s.info.Parent != "" {
+			s.status.S += " · child of " + s.info.Parent
+		}
+		if children, stepping := s.list.children(s.id); children > 0 {
+			s.status.S += fmt.Sprintf(" · %d children (%d stepping)", children, stepping)
+		}
 	}
 	s.meta.Gs = nil
 	switch {
@@ -404,12 +417,21 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 		}
 	}
 	s.title(a)
+	s.syncAsk(a)
 }
 
 // show puts a record in the transcript, or a result in its call's block.
 func (s *session) show(r statefile.Record) {
 	switch r.Kind {
-	case statefile.Start, statefile.Config, statefile.Name, statefile.Thinking, statefile.Step:
+	case statefile.Start, statefile.Config:
+		var conf statefile.Conf
+		if json.Unmarshal(r.Body, &conf) == nil {
+			if s.model != "" && s.model != conf.Model {
+				s.transcript.Append(&textBlock{fmt.Sprintf("model: %s -> %s, from the next step", s.model, conf.Model)})
+			}
+			s.model = conf.Model
+		}
+	case statefile.Name, statefile.Thinking, statefile.Step:
 	case statefile.System:
 		if r.Source == "memory" {
 			body := string(r.Body)
@@ -430,9 +452,15 @@ func (s *session) show(r statefile.Record) {
 	case statefile.Call:
 		b := newCall(s, r)
 		s.calls[r.ID] = b
+		if b.name == "ask" {
+			s.askCall = &r
+		}
 		s.running = append(s.running, b)
 		s.transcript.Append(b)
 	case statefile.Result:
+		if s.askCall != nil && s.askCall.ID == r.For {
+			s.askCall = nil
+		}
 		b, ok := s.calls[r.For]
 		if !ok {
 			s.transcript.Append(&callBlock{s: s, res: &r})

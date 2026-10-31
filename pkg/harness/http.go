@@ -30,6 +30,7 @@ const MaxPost = 8 << 20
 //	GET  /sessions                    ?status= ?limit= ?after=<id>                 -> [Info], newest updated first
 //	POST /sessions                    Create body; ?via= required with a name      -> {"id"}
 //	GET  /sessions/{id}               -> Info
+//	GET  /sessions/{id}/models        -> [SessionModel], with eligibility and reasons
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
 //	POST /sessions/{id}/records       one body, or multipart; ?via= required,      -> {"n"}
 //	                                  who is posting. one message record per
@@ -40,6 +41,9 @@ const MaxPost = 8 << 20
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut a running step, write    -> 204; the records
 //	                                  it down; kill its environments and jobs        say what happened
+//	POST /sessions/{id}/answer        ?via= required. {"call","answers":[["label"]..]} -> 204; 409 when the
+//	                                  or {"call","declined":true}: what the person      call waits for no answer
+//	                                  chose for an ask call
 //	PUT  /sessions/{id}/workers       [{"name"}]; ?via= required. a config record  -> {"n"}
 //	                                  with these workers; the next step sees them
 //	PUT  /sessions/{id}/model         provider/model as text; ?via= required. a     -> {"n"}
@@ -166,9 +170,29 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	handle("POST /sessions/{id}/answer", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := via(r); err != nil {
+			fail(w, err)
+			return
+		}
+		var a Reply
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxPost)).Decode(&a); err != nil {
+			fail(w, err)
+			return
+		}
+		switch err := h.Answer(r.PathValue("id"), a); {
+		case errors.Is(err, ErrNoAsk):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case err != nil:
+			fail(w, err)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
 	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
 	handle("PUT /sessions/{id}/model", h.serveModel)
+	handle("GET /sessions/{id}/models", h.serveModels)
 	handle("PUT /sessions/{id}/name", h.serveName)
 	return mux
 }
@@ -195,7 +219,16 @@ func via(r *http.Request) (string, error) {
 	return "", errors.New("?via= names who is acting")
 }
 
-// serveWorkers makes a JSON list of {"name"} the session's workers.
+func (h *Harness) serveModels(w http.ResponseWriter, r *http.Request) {
+	models, err := h.Models(r.PathValue("id"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, models)
+}
+
+// serveModel moves the session from its next step on.
 func (h *Harness) serveModel(w http.ResponseWriter, r *http.Request) {
 	via, err := via(r)
 	if err != nil {
@@ -215,6 +248,7 @@ func (h *Harness) serveModel(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]int{"n": n})
 }
 
+// serveWorkers makes a JSON list of {"name"} the session's workers.
 func (h *Harness) serveWorkers(w http.ResponseWriter, r *http.Request) {
 	via, err := via(r)
 	if err != nil {

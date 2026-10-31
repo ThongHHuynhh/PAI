@@ -38,6 +38,8 @@ import (
 //	POST   /memory/{id}/feedback        {"up"} -> the item
 //	GET    /fallbacks                   -> {"provider": "the provider its sessions move to at its limit"}
 //	PUT    /fallbacks                   the same, whole: saved in the config and applied
+//	GET/PUT /balance                    {"mode":"off|auto","pool":["provider/model",...]}
+//	GET    /accounts                    account limits and observed utilization; unknown usage is null
 //	POST   /memory/consolidate          -> {"clusters"}: merge what memory says more than once, with the
 //	                                    model of the newest session
 //
@@ -79,6 +81,44 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 	mux.HandleFunc("POST /memory/{id}/restore", wa.restore)
 	mux.HandleFunc("POST /memory/{id}/feedback", wa.feedback)
 	mux.HandleFunc("POST /memory/consolidate", wa.consolidate)
+	mux.HandleFunc("GET /accounts", func(w http.ResponseWriter, r *http.Request) { reply(w, wa.h.Accounts()) })
+	mux.HandleFunc("GET /balance", func(w http.ResponseWriter, r *http.Request) {
+		c, err := loadConfig(wa.path)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if c.Balance.Mode == "" {
+			c.Balance.Mode = "off"
+		}
+		if c.Balance.Pool == nil {
+			c.Balance.Pool = []string{}
+		}
+		reply(w, c.Balance)
+	})
+	mux.HandleFunc("PUT /balance", func(w http.ResponseWriter, r *http.Request) {
+		var b harness.Balance
+		if err := json.NewDecoder(io.LimitReader(r.Body, maxMemoryBody)).Decode(&b); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := wa.h.ValidateBalance(b); err != nil {
+			fail(w, err)
+			return
+		}
+		keyMu.Lock()
+		defer keyMu.Unlock()
+		c, err := Load(wa.path)
+		if err == nil {
+			c.Balance = b
+			err = saveConfig(wa.path, c)
+		}
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /fallbacks", func(w http.ResponseWriter, r *http.Request) {
 		c, err := loadConfig(wa.path)
 		if err != nil {
@@ -99,6 +139,19 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 		for from, to := range fb {
 			if to == "" || to == from {
 				delete(fb, from)
+				continue
+			}
+			if strings.Contains(from, "/") {
+				fail(w, fmt.Errorf("fallback source must be a provider"))
+				return
+			}
+			if err := wa.h.ValidateTarget(from); err != nil {
+				fail(w, err)
+				return
+			}
+			if err := wa.h.ValidateTarget(to); err != nil {
+				fail(w, err)
+				return
 			}
 		}
 		keyMu.Lock()

@@ -57,9 +57,24 @@ export async function call<T>(method: string, path: string, body?: unknown, type
 
 export type Usage = { input: number; output: number; cache_read?: number; cache_write?: number };
 
+export type SessionModel = {
+  model: string;
+  name: string;
+  provider: string;
+  context_limit: number;
+  current: boolean;
+  ok: boolean;
+  reason: string;
+};
+
+export function sessionModels(id: string): Promise<SessionModel[]> {
+  return call("GET", `/sessions/${id}/models`);
+}
+
 export type Session = {
   id: string;
   name?: string;
+  parent?: string; // the orchestrator session that delegated this one
   status: "open" | "closed" | "interrupted" | "failed" | "stepping";
   config: { model: string; tools: string; workers: { name: string }[] | null; context_limit: number; preset?: string };
   created: string;
@@ -103,7 +118,7 @@ export type Item = {
   used: number;
 };
 
-export type Hit = { item: Item; score: number; lexical?: number; vector?: number; cosine: number; pinned?: boolean };
+export type Hit = { item: Item; score: number; lexical?: number; vector?: number; cosine: number; pinned?: boolean; used?: boolean };
 
 export type Stats = {
   items: number;
@@ -128,6 +143,7 @@ export type Retrieval = {
   features: number[];
   hits: Hit[] | null;
   reward?: number;
+  ms: number;
 };
 
 // Metrics is GET /metrics: how PAI performed over a range (pkg/server/metrics.go).
@@ -144,6 +160,7 @@ export type Metrics = {
   tools: { name: string; calls: number; failures: number; truncated: number; p50_ms: number; p95_ms: number }[];
   harness: { steps_per_message: number; compactions: number; failovers: number; recent_errors: { session: string; at: string; text: string }[] };
   stops: Record<string, number>;
+  limits?: Record<string, { at: string; status: string; windows: Record<string, { utilization: number; resets: string }> }>;
   memory?: {
     items: number;
     learnt: number;
@@ -155,6 +172,8 @@ export type Metrics = {
     skipped: number;
     reward?: number;
     used_rate: number;
+    recall_p50_ms: number;
+    recall_p95_ms: number;
     bandit: Arm[];
   };
 };
@@ -196,6 +215,10 @@ export type Rec = {
 
 export type Preset = { name: string; provider: string; model: string; tools: string; context_limit: number; input: string[]; params: Record<string, unknown> };
 export type Catalog = { providers: Record<string, { name: string; shape: string; url?: string; group?: string }>; presets: Record<string, Preset>; groups: Record<string, string[]> };
+// Account is what PAI knows of one account's usage; a null is not known yet.
+export type Account = { name: string; status: "ok" | "limited"; limited_until: string; util_five_hour: number | null; util_seven_day: number | null; updated: string };
+// Balance, in auto mode, spreads sessions over a pool of interchangeable provider/model entries.
+export type Balance = { mode: "off" | "auto"; pool: string[] };
 export type ProviderInfo = { name: string; shape: string; url?: string };
 
 // --- records: the state file's own bytes, a JSON header line, len bytes of

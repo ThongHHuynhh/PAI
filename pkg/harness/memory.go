@@ -117,7 +117,7 @@ func (h *Harness) recallTurn(ctx context.Context, s *session, id string, conf st
 	}
 	var asked []string
 	for _, r := range chain {
-		if r.N > seen && r.Kind == statefile.Message && r.Via != "job" && r.Via != "retry" && strings.HasPrefix(r.Type, "text/") {
+		if r.N > seen && r.Kind == statefile.Message && r.Via != "job" && r.Via != "retry" && !strings.HasPrefix(r.Via, "session:") && strings.HasPrefix(r.Type, "text/") {
 			asked = append(asked, string(r.Body))
 		}
 	}

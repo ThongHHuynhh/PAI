@@ -11,6 +11,7 @@ import (
 type MenuItem struct {
 	Label, Hint, Section string
 	On                   bool // checked, in a menu of checks
+	Disabled             bool // visible, with its hint, but cannot be picked
 	Pick                 func(a *App, it *MenuItem)
 }
 
@@ -118,7 +119,9 @@ func (m *Menu) Draw(a *App, c *Canvas, r Rect) {
 		}
 		it := m.Items[row.item]
 		st, hint := a.Theme.text(), muted
-		if m.top+y == m.sel {
+		if it.Disabled {
+			st = muted
+		} else if m.top+y == m.sel {
 			c.Fill(Rect{r.X - 1, ry, r.W + 2, 1}, a.Theme.Accent)
 			st = term.Style{FG: a.Theme.BG, BG: a.Theme.Accent}
 			hint = st
@@ -181,6 +184,9 @@ func (m *Menu) pick(a *App, row int) {
 		return
 	}
 	it := &m.Items[m.rows[row].item]
+	if it.Disabled {
+		return
+	}
 	switch {
 	case m.Single && it.Section != "":
 		for i := range m.Items {

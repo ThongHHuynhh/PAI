@@ -40,6 +40,7 @@ Tools:
 - The read tool returns a file as media (e.g. image, audio) when its type is in the session's input, up to 5 MiB. The "Session ... started" line names the input types. Every other file is returned as text, cut at the limits: an image outside the input comes back as raw bytes that fill context and cannot be seen
 - The edit tool matches old text byte for byte. Line endings matter: a file with CRLF line endings, common on Windows, matches only old text with CRLF
 - Put independent calls in one step. The harness still runs them serially, in order, each after the one before ends. A slow call delays every call after it
+- When a request is ambiguous or a choice is the user's, call ask with up to four multiple choice questions before you guess, instead of asking in prose. Put the option you recommend first. The user can always type another answer, and can decline; then decide yourself or say what you need
 - There may be other agents or users concurrently using a worker
 - Different worker machines have different interpreters, e.g. bash on linux and pwsh on windows. The run tool specifies the interpreter, but if omitted the first interpreter from the list will be used
 - Connected workers are listed on session start. You will be notified if the list changes
@@ -164,14 +165,23 @@ type Output struct {
 }
 
 // Tools is the tool set a config record names. Every worker tool takes a
-// worker; the memory tools run on the server. The read description names the
-// media types the session's input lists.
+// worker; memory and orchestration tools run on the server. The read
+// description names the media types the session's input lists.
 func Tools(name string, input []string) []provider.Tool {
 	read := provider.Tool{Name: "read", Description: "Read a file on a worker as text", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"}},"required":["worker","path"]}`)}
 	if len(input) > 0 {
 		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
 	}
-	return map[string][]provider.Tool{"default": {run, read, write, edit, recall, remember, forget}, "patch": {run, read, patch, recall, remember, forget}}[name]
+	defaults := []provider.Tool{run, read, write, edit, ask, recall, remember, forget}
+	switch name {
+	case "default":
+		return defaults
+	case "patch":
+		return []provider.Tool{run, read, patch, ask, recall, remember, forget}
+	case "orchestrator":
+		return append(defaults, delegate, tell, children, stopChild)
+	}
+	return nil
 }
 
 func schema(s string) json.RawMessage { return json.RawMessage(s) }

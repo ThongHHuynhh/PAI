@@ -1,8 +1,13 @@
+import { Ask, questionsOf } from "../components/Ask";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ago, call, records, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Session } from "../api";
+import { ago, call, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
 import { useLive } from "../live";
 import { go } from "../App";
+import { ItemActions, Nudge, RetrievalBar, useRetrievals, verdict } from "../components/Retrieval";
 import { splitModel } from "./Graph";
+
+// LIST is where this browser keeps whether the session list is shown.
+const LIST = "pai.sessions.list";
 
 export default function Sessions({ id }: { id?: string }) {
   const { graph, refresh } = useLive();
@@ -15,24 +20,63 @@ export default function Sessions({ id }: { id?: string }) {
         .filter((s) => !filter || `${sessionTitle(s)} ${s.config.model}`.toLowerCase().includes(filter.toLowerCase())),
     [graph, filter],
   );
+  // A child sits under its orchestrator. One whose orchestrator is not listed, deleted or filtered out, stands alone.
+  const tree = useMemo(() => {
+    const ids = new Set(list.map((s) => s.id));
+    const kids = new Map<string, Session[]>();
+    for (const s of list) if (s.parent && ids.has(s.parent)) kids.set(s.parent, [...(kids.get(s.parent) ?? []), s]);
+    const rows: { s: Session; depth: number; kids: Session[] }[] = [];
+    const add = (s: Session, depth: number) => {
+      rows.push({ s, depth, kids: kids.get(s.id) ?? [] });
+      for (const k of kids.get(s.id) ?? []) add(k, depth + 1);
+    };
+    for (const s of list) if (!s.parent || !ids.has(s.parent)) add(s, 0);
+    return rows;
+  }, [list]);
   const cur = list.find((s) => s.id === id) ?? (graph?.sessions ?? []).find((s) => s.id === id);
+  // The list stays beside an open session; a person folds it to a thin rail.
+  // Unset, it starts folded on a phone. With no session open it is the page.
+  const [open, setOpen] = useState(() => (localStorage.getItem(LIST) ?? (window.matchMedia("(max-width: 699px)").matches ? "0" : "1")) === "1");
+  const fold = () => {
+    localStorage.setItem(LIST, open ? "0" : "1");
+    setOpen(!open);
+  };
+  const shown = open || !cur;
   return (
-    <div className={`sessions-page ${cur ? "has-cur" : ""}`}>
+    <div className={`sessions-page ${cur ? "has-cur" : ""} ${shown ? "" : "folded"}`}>
       <aside className="session-list">
+        {!shown && (
+          <button className="icon-btn" onClick={fold} title="Show sessions" aria-label="Show sessions">
+            ›
+          </button>
+        )}
+        {shown && (
         <div className="row">
           <input placeholder="Filter sessions" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <button className="primary small" onClick={() => setCreating(true)}>
             New
           </button>
+          {cur && (
+            <button className="icon-btn" onClick={fold} title="Hide sessions" aria-label="Hide sessions">
+              ‹
+            </button>
+          )}
         </div>
-        {list.length === 0 && <p className="muted small pad">No sessions yet. Start one with New.</p>}
-        {list.map((s) => {
+        )}
+        {shown && list.length === 0 && <p className="muted small pad">No sessions yet. Start one with New.</p>}
+        {shown && tree.map(({ s, depth, kids }) => {
           const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
           return (
-            <a key={s.id} href={`#/sessions/${s.id}`} className={`session-row ${s.id === id ? "active" : ""}`}>
+            <a key={s.id} href={`#/sessions/${s.id}`} className={`session-row ${s.id === id ? "active" : ""} ${depth ? "child" : ""}`}>
               <div className="grow-row">
                 <span className={`pill ${s.status}`}>{s.status === "stepping" ? "working" : s.status}</span>
                 <b className="ellipsis">{sessionTitle(s)}</b>
+                {kids.length > 0 && (
+                  <span className="muted small nowrap" title="Sessions this one delegated to">
+                    {kids.length} child{kids.length > 1 ? "ren" : ""}
+                    {kids.some((k) => k.status === "stepping") ? ", working" : ""}
+                  </span>
+                )}
               </div>
               <div className="muted small ellipsis">
                 {splitModel(s.config.model)[1]} · {ago(s.updated)}
@@ -80,6 +124,7 @@ function Transcript({ s }: { s: Session }) {
   const [err, setErr] = useState("");
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [hidden, setHidden] = useState(""); // the ask call whose popup was dismissed
   const end = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
 
@@ -156,14 +201,14 @@ function Transcript({ s }: { s: Session }) {
   };
 
   const results = useMemo(() => Object.fromEntries(recs.filter((r) => r.kind === "result").map((r) => [r.for, r])), [recs]);
+  const asking = s.status === "stepping" ? recs.filter((r) => r.kind === "call" && !results[r.id] && questionsOf(r).length > 0).pop() : undefined;
+  const retrievals = useRetrievals(s.id);
+  const recalls = useMemo(() => Object.fromEntries(retrievals.map((r) => [r.id, r])), [retrievals]);
   const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
 
   return (
     <div className="transcript">
       <header className="transcript-head">
-        <a className="only-phone back" href="#/sessions" aria-label="All chats">
-          ‹
-        </a>
         <div className="grow" style={{ minWidth: 0 }}>
           <h2 className="ellipsis">{sessionTitle(s)}</h2>
           <div className="muted small ellipsis">
@@ -199,11 +244,21 @@ function Transcript({ s }: { s: Session }) {
         }}
       >
         {recs.map((r) => (
-          <Record key={r.n} r={r} result={r.kind === "call" ? results[r.id] : undefined} />
+          <Record key={r.n} r={r} result={r.kind === "call" ? results[r.id] : undefined} recalls={recalls} />
         ))}
         {s.status === "stepping" && <div className="thinking">PAI is working…</div>}
         <div ref={end} />
       </div>
+      {asking && (
+        hidden === asking.id ? (
+          <button className="banner ask-bar" onClick={() => setHidden("")}>
+            PAI is waiting for your answers. Open the questions.
+          </button>
+        ) : (
+          <Ask key={asking.id} session={s.id} call={asking} onDismiss={() => setHidden(asking.id)} />
+        )
+      )}
+      <RetrievalBar session={s.id} rs={retrievals} />
       {err && <div className="banner error">{err}</div>}
       <footer className="composer">
         <textarea
@@ -225,40 +280,67 @@ function Transcript({ s }: { s: Session }) {
   );
 }
 
-// ModelSwitch moves the session to another account or vendor from its next
-// step: the same model on a provider this server serves, or any
-// provider/model typed in.
+// ModelSwitch asks the server which models can take the session's context.
 function ModelSwitch({ s }: { s: Session }) {
-  const [ps, setPs] = useState<ProviderInfo[]>([]);
-  const [provider, model] = splitModel(s.config.model);
+  const { refresh } = useLive();
+  const [open, setOpen] = useState(false);
+  const [models, setModels] = useState<SessionModel[] | null>(null);
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
-    call<ProviderInfo[]>("GET", "/providers").then(setPs, () => {});
-  }, []);
+    if (!open) return;
+    let alive = true;
+    setModels(null);
+    setErr("");
+    sessionModels(s.id).then(
+      (rows) => { if (alive) setModels(rows); },
+      (e) => { if (alive) setErr(String(e.message ?? e)); },
+    );
+    return () => { alive = false; };
+  }, [open, s.id]);
   const change = async (to: string) => {
-    if (to === "__other") {
-      to = prompt("Model as provider/model", s.config.model) ?? "";
-      if (!to.trim()) return;
-    }
+    setSaving(true);
+    setErr("");
     try {
-      await call("PUT", `/sessions/${s.id}/model?via=web`, to.trim(), "text/plain");
+      await call("PUT", `/sessions/${s.id}/model?via=web`, to, "text/plain");
+      setOpen(false);
+      refresh();
     } catch (e: any) {
-      alert(String(e.message ?? e));
+      setErr(String(e.message ?? e));
+    } finally {
+      setSaving(false);
     }
   };
   return (
-    <select className="inline-select" value={s.config.model} onChange={(e) => change(e.target.value)} title="Move this chat to another account or model. History and memory come along.">
-      {ps.map((p) => (
-        <option key={p.name} value={`${p.name}/${model}`}>
-          {model} · {p.name}
-        </option>
-      ))}
-      {!ps.some((p) => p.name === provider) && <option value={s.config.model}>{s.config.model}</option>}
-      <option value="__other">Other model…</option>
-    </select>
+    <>
+      <button className="link" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Change model from the next step">
+        {s.config.model}
+      </button>
+      {open && (
+        <div className="modal-back" onClick={() => setOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
+          <div className="modal model-picker" role="dialog" aria-modal="true" aria-labelledby="model-title" onClick={(e) => e.stopPropagation()}>
+            <div className="grow-row">
+              <h3 id="model-title">Model for this session</h3>
+              <button className="ghost small" autoFocus onClick={() => setOpen(false)}>Close</button>
+            </div>
+            <p className="muted small">Changes apply from the next step. History and memory come along.</p>
+            {!models && !err && <p className="muted">Loading models…</p>}
+            {models?.map((m) => (
+              <button key={m.model} className="ghost model-choice" disabled={!m.ok || m.current || saving} title={m.reason || m.model} onClick={() => void change(m.model)}>
+                <span>{m.name}{m.current ? " · current" : ""}</span>
+                <span className="muted small">{m.provider} · {tokens(m.context_limit)} context</span>
+                {!m.ok && <span className="small">{m.reason}</span>}
+              </button>
+            ))}
+            {err && <p className="error" role="alert">{err}</p>}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
-function Record({ r, result }: { r: Rec; result?: Rec }) {
+function Record({ r, result, recalls }: { r: Rec; result?: Rec; recalls: { [id: string]: Retrieval } }) {
   const [open, setOpen] = useState(false);
   switch (r.kind) {
     case "message":
@@ -285,6 +367,7 @@ function Record({ r, result }: { r: Rec; result?: Rec }) {
         /* raw */
       }
       const memoryTool = ["recall", "remember", "forget"].includes(name);
+      if (name === "ask") args = { ...args, questions: undefined, asked: questionsOf(r).map((q) => q.question) };
       const head = args.worker ? `${name} on ${args.worker}` : name;
       const gist = args.code ?? args.path ?? args.query ?? args.text ?? args.id ?? "";
       return (
@@ -314,7 +397,7 @@ function Record({ r, result }: { r: Rec; result?: Rec }) {
           </div>
         );
       if (r.source !== "memory") return null;
-      return <MemoryCard r={r} />;
+      return <MemoryCard r={r} recalls={recalls} />;
     case "compaction":
       return (
         <div className="memcard compaction" onClick={() => setOpen(!open)}>
@@ -341,33 +424,48 @@ function Record({ r, result }: { r: Rec; result?: Rec }) {
   }
 }
 
-// MemoryCard is what memory recalled for a turn: each item links to the
-// knowledge view.
-function MemoryCard({ r }: { r: Rec }) {
+// MemoryCard is what memory recalled for a turn: each item is a line with its
+// kind, scope and score, and links to the knowledge view. The recall's own
+// record, when it is loaded, adds the scores and what came of it.
+function MemoryCard({ r, recalls }: { r: Rec; recalls: { [id: string]: Retrieval } }) {
   const [open, setOpen] = useState(false);
   const items = [...r.body.matchAll(/^- \[(m[0-9a-f]+)\] \(([^,]+), ([^)]+)\) (.*)$/gm)].map((m) => ({ id: m[1], kind: m[2], scope: m[3], text: m[4] }));
+  const rv = recalls[r.body.match(/\(retrieval (\w+)\)/)?.[1] ?? ""];
+  const hits = new Map((rv?.hits ?? []).map((h) => [h.item.id, h]));
   return (
-    <div className="memcard" onClick={() => setOpen(!open)}>
-      <div className="memhead">
+    <div className="memcard">
+      <div className="memhead" onClick={() => setOpen(!open)}>
         <span className="accent">◆</span> Recalled {items.length} {items.length === 1 ? "memory" : "memories"} for this turn
         <span className="muted small"> · {open ? "hide" : "show"}</span>
       </div>
       {open && (
-        <ul>
-          {items.map((it) => (
-            <li key={it.id}>
-              <span className={`kind k-${it.kind}`}>{it.kind}</span> {it.text}{" "}
-              <a
-                href={`#/knowledge/${it.id}`}
-                onClick={(e) => e.stopPropagation()}
-                className="small"
-              >
-                {it.id}
-              </a>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="recalls">
+            {items.map((it) => {
+              const h = hits.get(it.id);
+              return (
+                <li key={it.id}>
+                  <div>{it.text}</div>
+                  <div className="recall-meta small muted">
+                    <span className={`kind k-${it.kind}`}>{it.kind}</span>
+                    <span>{it.scope}</span>
+                    {h && <span title="How well it matched the message">{h.pinned ? "pinned" : `match ${h.score.toFixed(2)}`}</span>}
+                    {rv?.reward != null && h && <span className={h.used ? "used" : ""} title="Whether the model's reply carried this memory's words">{h.used ? "used" : "not used"}</span>}
+                    <a href={`#/knowledge/${it.id}`}>{it.id}</a>
+                    <ItemActions id={it.id} pinned={h?.item.pinned ?? false} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {rv && (
+            <div className="small muted">
+              {rv.k ? `PAI chose to recall ${rv.k}` : "PAI chose to skip"} · {verdict(rv).text}
+            </div>
+          )}
+        </>
       )}
+      {rv && <Nudge r={rv} />}
     </div>
   );
 }

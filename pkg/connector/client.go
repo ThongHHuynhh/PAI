@@ -249,6 +249,16 @@ func (c *Client) Stop(ctx context.Context, id, via string) error {
 	return c.Call(ctx, "POST", "/sessions/"+id+"/stop?via="+url.QueryEscape(via), "", nil, nil)
 }
 
+// Answer is what the person chose for the questions of ask call call: for
+// each question the labels picked or the text typed; none declines.
+func (c *Client) Answer(ctx context.Context, id, via, call string, answers [][]string) error {
+	b, err := json.Marshal(harness.Reply{Call: call, Answers: answers, Declined: answers == nil})
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "POST", "/sessions/"+id+"/answer?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), nil)
+}
+
 // Post appends text and files as one turn: a single text/plain body, or one
 // multipart part per piece, each typed by its extension. A file with no type
 // is refused, not guessed. Returns the last record's n.
@@ -329,6 +339,18 @@ func (c *Client) SetName(ctx context.Context, id, via, name string) error {
 // Delete removes the session for good.
 func (c *Client) Delete(ctx context.Context, id, via string) error {
 	return c.Call(ctx, "DELETE", "/sessions/"+id+"?via="+url.QueryEscape(via), "", nil, nil)
+}
+
+// Models lists the models this session can move to and reasons it cannot.
+func (c *Client) Models(ctx context.Context, id string) ([]harness.SessionModel, error) {
+	var models []harness.SessionModel
+	err := c.Call(ctx, "GET", "/sessions/"+id+"/models", "", nil, &models)
+	return models, err
+}
+
+// SetModel changes the session's model from its next step on.
+func (c *Client) SetModel(ctx context.Context, id, via, model string) error {
+	return c.Call(ctx, "PUT", "/sessions/"+id+"/model?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(model), nil)
 }
 
 // SetWorkers makes ws the session's workers from its next step on.

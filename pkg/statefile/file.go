@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,7 +45,7 @@ func scan(f *os.File) ([]Record, int64, error) {
 type File struct {
 	Path string
 	f    *os.File
-	n    int
+	n    atomic.Int64 // read by N from other goroutines while Append writes
 }
 
 // Create makes a new file whose first two records are start and config.
@@ -108,12 +109,14 @@ func Open(path string) (*File, error) {
 	if _, err := f.Seek(good, io.SeekStart); err != nil {
 		return nil, err
 	}
-	return &File{Path: path, f: f, n: len(recs)}, nil
+	sf := &File{Path: path, f: f}
+	sf.n.Store(int64(len(recs)))
+	return sf, nil
 }
 
 // Append writes one record and fills in n, id, time, and len.
 func (sf *File) Append(r Record) error {
-	r.N = sf.n + 1
+	r.N = int(sf.n.Load()) + 1
 	if r.ID == "" {
 		r.ID = NewID()
 	}
@@ -125,11 +128,11 @@ func (sf *File) Append(r Record) error {
 	if _, err := sf.f.Write(b); err != nil {
 		return err
 	}
-	sf.n = r.N
+	sf.n.Store(int64(r.N))
 	return nil
 }
 
 // N is the index of the last record written.
-func (sf *File) N() int { return sf.n }
+func (sf *File) N() int { return int(sf.n.Load()) }
 
 func (sf *File) Close() error { return sf.f.Close() }

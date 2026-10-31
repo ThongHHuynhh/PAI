@@ -42,18 +42,19 @@ const growthSteps = 60
 const recentErrors = 8
 
 type Metrics struct {
-	Range    string         `json:"range"`
-	Since    time.Time      `json:"since"`
-	Bucket   string         `json:"bucket"` // hour, day or week
-	Totals   Totals         `json:"totals"`
-	Series   []Point        `json:"series"`
-	Models   []ModelStats   `json:"models"`
-	Sessions []SessionStats `json:"sessions"`
-	Tools    []ToolStats    `json:"tools"`
-	Harness  HarnessStats   `json:"harness"`
-	Memory   *MemoryMetrics `json:"memory,omitempty"`
-	Priced   bool           `json:"priced"` // this build's catalog has prices
-	Stops    map[string]int `json:"stops"`
+	Range    string           `json:"range"`
+	Since    time.Time        `json:"since"`
+	Bucket   string           `json:"bucket"` // hour, day or week
+	Totals   Totals           `json:"totals"`
+	Series   []Point          `json:"series"`
+	Models   []ModelStats     `json:"models"`
+	Sessions []SessionStats   `json:"sessions"`
+	Tools    []ToolStats      `json:"tools"`
+	Harness  HarnessStats     `json:"harness"`
+	Memory   *MemoryMetrics   `json:"memory,omitempty"`
+	Limits   map[string]Limit `json:"limits,omitempty"` // by provider, once it has reported one
+	Priced   bool             `json:"priced"`           // this build's catalog has prices
+	Stops    map[string]int   `json:"stops"`
 }
 
 type Totals struct {
@@ -146,6 +147,8 @@ type MemoryMetrics struct {
 	Skipped   int               `json:"skipped"`
 	Reward    *float64          `json:"reward,omitempty"`
 	UsedRate  float64           `json:"used_rate"` // all time: memory keeps no per-recall use
+	RecallP50 int64             `json:"recall_p50_ms"`
+	RecallP95 int64             `json:"recall_p95_ms"`
 	Bandit    []memory.ArmStats `json:"bandit"`
 }
 
@@ -367,7 +370,35 @@ func (wa *webAPI) collect(ctx context.Context, name string, span, bucket time.Du
 			}
 		}
 	}
+	status := map[string]string{}
+	for _, a := range wa.h.Accounts() {
+		prov, _, _ := strings.Cut(a.Name, "/") // a pool lists provider/model
+		status[prov] = a.Status
+	}
+	for name, h := range wa.h.Health() {
+		l := Limit{At: h.Updated, Status: status[name], Windows: map[string]Window{}}
+		for k, u := range h.Util {
+			l.Windows[k] = Window{u, h.Resets[k]}
+		}
+		if m.Limits == nil {
+			m.Limits = map[string]Limit{}
+		}
+		m.Limits[name] = l
+	}
 	return m, nil
+}
+
+// Limit is a provider's usage windows as it last reported them.
+type Limit struct {
+	At      time.Time         `json:"at"`
+	Status  string            `json:"status"` // ok, or limited until it resets
+	Windows map[string]Window `json:"windows"`
+}
+
+// Window is the share of one usage window spent, 0 to 1, and when it resets.
+type Window struct {
+	Utilization float64   `json:"utilization"`
+	Resets      time.Time `json:"resets"`
 }
 
 func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(time.Time) *Point) (*MemoryMetrics, error) {
@@ -402,6 +433,7 @@ func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(ti
 	}
 	var sum float64
 	var n int
+	var lat []int64
 	for _, r := range rs {
 		if r.At.Before(since) {
 			continue
@@ -410,6 +442,7 @@ func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(ti
 			mm.Skipped++
 		} else {
 			mm.Recalls++
+			lat = append(lat, r.Ms)
 		}
 		if r.Reward != nil {
 			sum, n = sum+*r.Reward, n+1
@@ -421,6 +454,7 @@ func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(ti
 	if n > 0 {
 		mm.Reward = new(sum / float64(n))
 	}
+	mm.RecallP50, mm.RecallP95 = pct(lat, 50), pct(lat, 95)
 	st, err := wa.mem.Stats(ctx)
 	if err != nil {
 		return nil, err

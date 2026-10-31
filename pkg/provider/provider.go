@@ -136,16 +136,27 @@ type Envelope interface {
 var images = []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 type Provider struct {
-	URL      string // full endpoint, or the base an Endpoint builds it from
-	Key      string
-	Envelope Envelope
-	Headers  func(req *http.Request, key string)       // auth and version headers
-	Endpoint func(url, model string) string            // nil means URL as is
-	Token    func(ctx context.Context) (string, error) // the key of each request, for a login's key that expires; nil means Key
-	Session  string                                    // the header that carries Request.Key, where the vendor routes its cache on a header
+	// ObserveHealth installs the optional account-health sink. Implementations
+	// must allow registration while requests are running.
+	ObserveHealth func(func(Health))
+	URL           string // full endpoint, or the base an Endpoint builds it from
+	Key           string
+	Envelope      Envelope
+	Headers       func(req *http.Request, key string)       // auth and version headers
+	Endpoint      func(url, model string) string            // nil means URL as is
+	Token         func(ctx context.Context) (string, error) // the key of each request, for a login's key that expires; nil means Key
+	Session       string                                    // the header that carries Request.Key, where the vendor routes its cache on a header
 	// Run, if set, makes the step instead of an HTTP request: claude-code's
 	// process. It retries what it can itself.
 	Run func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error)
+}
+
+// Health is an account's observed usage, independent of its wire format.
+// Window names and utilization (0..1) belong to the reporting provider.
+type Health struct {
+	Util    map[string]float64
+	Resets  map[string]time.Time
+	Updated time.Time
 }
 
 // Retry numbers are opencode's. A failure before the first block is out is
@@ -178,9 +189,9 @@ func (e *httpError) Error() string { return fmt.Sprintf("%s: %s: %s", e.name, e.
 type configError struct{ error }
 
 // exhaustedWords are what vendors say when an account is out of its plan's
-// usage or rate limit, or out of credit: the step will not go through on this
+// usage, session, weekly or rate limit, or out of credit: the step will not go through on this
 // account for a while, whatever the retry.
-var exhaustedWords = []string{"usage limit", "rate limit", "rate_limit", "quota", "limit reached", "limit exceeded", "credit balance", "insufficient_quota", "overloaded", "too many requests"}
+var exhaustedWords = []string{"usage limit", "rate limit", "rate_limit", "quota", "limit reached", "limit exceeded", "credit balance", "insufficient_quota", "overloaded", "too many requests", "session limit", "weekly limit"}
 
 // Exhausted is whether err says the provider's account cannot serve now: a
 // 429 or 529 after the retries, or words that say a limit was hit. Another

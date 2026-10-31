@@ -108,8 +108,9 @@ type Part struct {
 // session once, so a text and an image reach the model as one turn. The
 // append is the acknowledgement: a closed session starts stepping on it, a
 // stepping one sees it at its next context build. Returns the last n. A post
-// with a key appends only the parts the file does not hold with that key, so
-// a connector that lost the reply posts again and the post ends whole, once.
+// with a key appends only parts the file does not hold from that via with
+// that key, so a connector that lost the reply posts again and the post ends
+// whole, once.
 func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (int, error) {
 	s := h.session(id)
 	n, err := func() (int, error) {
@@ -122,7 +123,7 @@ func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (
 				return 0, err
 			}
 			for _, r := range chain {
-				if r.Kind == statefile.Message && r.IdempotencyKey == key {
+				if r.Kind == statefile.Message && r.Via == via && r.IdempotencyKey == key {
 					done, n = done+1, r.N
 				}
 			}
@@ -158,7 +159,7 @@ func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (
 // step running keeps the config it started with; the next step lists the new
 // workers to the model as a change.
 func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, error) {
-	return h.setConf(id, via, func(c *statefile.Conf) error {
+	return h.setConf(id, via, func(c *statefile.Conf, _ []statefile.Record) error {
 		c.Workers = workers
 		if c.Workers == nil {
 			c.Workers = []statefile.Worker{}
@@ -171,18 +172,21 @@ func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, e
 // on: another account or another vendor takes over with the same history and
 // memory. The provider must be one this server serves.
 func (h *Harness) SetModel(id, via, model string) (int, error) {
-	if _, _, err := h.provider(model); err != nil {
-		return 0, err
-	}
-	return h.setConf(id, via, func(c *statefile.Conf) error {
-		c.Model = model
-		return nil
+	return h.setConf(id, via, func(c *statefile.Conf, chain []statefile.Record) error {
+		if reason := h.modelReason(*c, chain, model); reason != "" {
+			return fmt.Errorf("model %q: %s", model, reason)
+		}
+		next, err := h.moveConfig(*c, model)
+		if err == nil {
+			*c = next
+		}
+		return err
 	})
 }
 
 // setConf appends a config record that is the newest one changed by fn,
 // under the lock a post takes.
-func (h *Harness) setConf(id, via string, fn func(*statefile.Conf) error) (int, error) {
+func (h *Harness) setConf(id, via string, fn func(*statefile.Conf, []statefile.Record) error) (int, error) {
 	s := h.session(id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -194,7 +198,7 @@ func (h *Harness) setConf(id, via string, fn func(*statefile.Conf) error) (int, 
 	if err != nil {
 		return 0, err
 	}
-	if err := fn(&conf); err != nil {
+	if err := fn(&conf, chain); err != nil {
 		return 0, err
 	}
 	body, err := json.Marshal(conf)
@@ -410,7 +414,17 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 		}
 	}
 	h.killAll(ctx, id, chain)
-	return nil
+	infos, err := h.childInfos(id)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, child := range infos {
+		if child.Status == statefile.StatusStepping {
+			errs = append(errs, h.Stop(ctx, child.ID, via))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // note appends r whether or not a step holds the file, as a post does.

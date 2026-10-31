@@ -11,6 +11,7 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -142,9 +143,10 @@ CREATE TABLE IF NOT EXISTS extracted (session TEXT PRIMARY KEY, upto INTEGER NOT
 `
 
 // columns are added to stores made before them.
-var columns = map[string]string{
-	"topic":  `ALTER TABLE items ADD COLUMN topic TEXT NOT NULL DEFAULT ''`,
-	"merged": `ALTER TABLE items ADD COLUMN merged TEXT NOT NULL DEFAULT ''`,
+var columns = []struct{ table, name, alter string }{
+	{"items", "topic", `ALTER TABLE items ADD COLUMN topic TEXT NOT NULL DEFAULT ''`},
+	{"items", "merged", `ALTER TABLE items ADD COLUMN merged TEXT NOT NULL DEFAULT ''`},
+	{"retrievals", "ms", `ALTER TABLE retrievals ADD COLUMN ms INTEGER NOT NULL DEFAULT 0`},
 }
 
 // Open is the store in dir, made there the first time, with e to embed.
@@ -160,13 +162,13 @@ func Open(dir string, e Embedder) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("memory: %w", err)
 	}
-	for col, alter := range columns {
+	for _, c := range columns {
 		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name=?`, col).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, c.table, c.name).Scan(&n); err != nil {
 			return nil, err
 		}
 		if n == 0 {
-			if _, err := db.Exec(alter); err != nil {
+			if _, err := db.Exec(c.alter); err != nil {
 				return nil, fmt.Errorf("memory: %w", err)
 			}
 		}
@@ -183,7 +185,9 @@ func (s *Store) emit(e Event) {
 	}
 }
 
-func newID() string { return fmt.Sprintf("m%x", time.Now().UnixNano()&0xffffffffffff) }
+// A clock tick can contain several writes, especially on Windows. Random
+// IDs also keep new versions distinct across processes and restarts.
+func newID() string { return "m" + rand.Text() }
 
 // Remember stores it, unless an item of its scope already says the same:
 // then that one is refreshed and returned. The text is one self-contained

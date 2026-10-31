@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -35,7 +36,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
-	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "model": {2, 2}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1},
+	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "model": {2, 2}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1}, "fallback": {0, 2}, "balance": {0, -1}, "accounts": {0, 0},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -47,6 +48,12 @@ func cli(verb string, args []string) {
 	if !ok || len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
 		usage()
 	}
+	if verb == "fallback" && len(args) == 1 {
+		usage()
+	}
+	if verb == "balance" && len(args) > 0 && !(args[0] == "off" && len(args) == 1 || args[0] == "auto" && len(args) >= 3) {
+		usage()
+	}
 	c, err := login()
 	if errors.Is(err, fs.ErrNotExist) {
 		die(fmt.Errorf("not logged in: pai login <api key>"))
@@ -56,6 +63,50 @@ func cli(verb string, args []string) {
 	}
 	hv := c.version()
 	switch verb {
+	case "fallback":
+		var fb map[string]string
+		c.call("GET", "/fallbacks", "", nil, &fb)
+		if len(args) == 0 {
+			b, _ := json.MarshalIndent(fb, "", "  ")
+			fmt.Println(string(b))
+			break
+		}
+		if fb == nil {
+			fb = map[string]string{}
+		}
+		if args[1] == "-" {
+			delete(fb, args[0])
+		} else {
+			fb[args[0]] = args[1]
+		}
+		b, _ := json.Marshal(fb)
+		c.call("PUT", "/fallbacks", "application/json", bytes.NewReader(b), nil)
+	case "balance":
+		if len(args) == 0 {
+			c.raw("/balance")
+			break
+		}
+		b, _ := json.Marshal(harness.Balance{Mode: args[0], Pool: args[1:]})
+		c.call("PUT", "/balance", "application/json", bytes.NewReader(b), nil)
+	case "accounts":
+		var rows []harness.Account
+		c.call("GET", "/accounts", "", nil, &rows)
+		fmt.Printf("%-42s %-8s %-7s %-7s %-20s %s\n", "ACCOUNT", "STATE", "5H", "7D", "LIMITED UNTIL", "UPDATED")
+		percent := func(u *float64) string {
+			if u == nil {
+				return "?"
+			}
+			return fmt.Sprintf("%.0f%%", *u*100)
+		}
+		stamp := func(t time.Time) string {
+			if t.IsZero() {
+				return "-"
+			}
+			return t.Local().Format(time.DateTime)
+		}
+		for _, a := range rows {
+			fmt.Printf("%-42s %-8s %-7s %-7s %-20s %s\n", a.Name, a.Status, percent(a.UtilFiveHour), percent(a.UtilSevenDay), stamp(a.LimitedUntil), stamp(a.Updated))
+		}
 	case "new":
 		var out struct{ ID string }
 		c.call("POST", "/sessions?via="+via, "application/json", os.Stdin, &out)
@@ -90,8 +141,8 @@ func cli(verb string, args []string) {
 	case "sessions":
 		var infos []harness.Info
 		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
-		for _, i := range infos {
-			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
+		for _, i := range connector.SessionTree(infos) {
+			fmt.Printf("%s%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", strings.Repeat("  ", i.Depth), i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
 		}
 	case "name":
 		var out struct{ N int }
@@ -283,11 +334,20 @@ func (c client) chat(id string) {
 		fmt.Println("\n" + id)
 		os.Exit(0)
 	}()
+	var asking atomic.Pointer[asked] // the questions the session waits on: a line is an answer
 	go func() {
 		sc := bufio.NewScanner(os.Stdin)
 		sc.Buffer(make([]byte, 64<<10), harness.MaxPost)
 		for sc.Scan() {
-			if line := sc.Text(); line != "" {
+			line := sc.Text()
+			if a := asking.Load(); a != nil {
+				if send, answers := a.take(line); send {
+					asking.Store(nil)
+					if err := c.Answer(context.Background(), id, via, a.call, answers); err != nil {
+						fmt.Println(err)
+					}
+				}
+			} else if line != "" {
 				c.post(id, line, nil)
 			}
 		}
@@ -297,16 +357,94 @@ func (c client) chat(id string) {
 		quit <- os.Interrupt
 	}()
 	var chain []statefile.Record
+	var open *statefile.Record // the newest ask call with no result yet
 	for {
 		recs := c.records(id, len(chain), "30s")
 		for _, r := range recs {
 			render(r)
+			switch {
+			case r.Kind == statefile.Call && len(harness.Questions(r)) > 0:
+				open = &r
+			case r.Kind == statefile.Result && open != nil && open.ID == r.For:
+				open = nil
+				asking.Store(nil)
+			}
 		}
 		chain = append(chain, recs...)
-		if st := statefile.Derive(chain); len(recs) > 0 && (st == statefile.StatusClosed || st == statefile.StatusFailed) {
+		var stepping bool // the lock's word, which the records do not say
+		if open != nil {
+			info, err := c.Info(context.Background(), id)
+			if err != nil {
+				die(err)
+			}
+			stepping = info.Status == statefile.StatusStepping
+		}
+		switch st := statefile.Derive(chain); {
+		case open != nil && stepping:
+			if a := asking.Load(); a == nil || a.call != open.ID {
+				a = &asked{call: open.ID, qs: harness.Questions(*open)}
+				asking.Store(a)
+				a.prompt()
+			}
+		case len(recs) > 0 && (st == statefile.StatusClosed || st == statefile.StatusFailed):
 			fmt.Print("> ")
 		}
 	}
+}
+
+// asked is an ask call being answered on the terminal, one question at a time.
+type asked struct {
+	call string
+	qs   []harness.Question
+	got  [][]string
+}
+
+func (a *asked) prompt() {
+	q := a.qs[len(a.got)]
+	fmt.Printf("\n[%d/%d] %s: %s\n", len(a.got)+1, len(a.qs), q.Header, q.Question)
+	for i, o := range q.Options {
+		fmt.Printf("  %d. %s - %s\n", i+1, o.Label, o.Description)
+	}
+	hint := "a number"
+	if q.MultiSelect {
+		hint = "numbers with commas"
+	}
+	fmt.Printf("%s, or type your own answer; an empty line declines\n> ", hint)
+}
+
+// take is one line of answer. It reports whether the answers are complete,
+// or declined, which are none.
+func (a *asked) take(line string) (bool, [][]string) {
+	if line == "" {
+		return true, nil
+	}
+	q, ans := a.qs[len(a.got)], []string{line}
+	if picks := picked(line, q.Options); picks != nil {
+		ans = picks
+	}
+	if len(ans) > 1 && !q.MultiSelect {
+		fmt.Print("pick one\n> ")
+		return false, nil
+	}
+	if a.got = append(a.got, ans); len(a.got) < len(a.qs) {
+		a.prompt()
+		return false, nil
+	}
+	return true, a.got
+}
+
+// picked is the labels of the options a line of numbers names, none when the
+// line is not only such numbers.
+func picked(line string, opts []harness.Option) []string {
+	var out []string
+	for _, f := range strings.Split(line, ",") {
+		n, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil || n < 1 || n > len(opts) {
+			return nil
+		}
+		out = append(out, opts[n-1].Label)
+	}
+	return out
 }
 
 // render prints one record: number and kind, the header fields that matter
