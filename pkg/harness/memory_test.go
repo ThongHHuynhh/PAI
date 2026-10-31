@@ -104,7 +104,7 @@ func TestFallbackChain(t *testing.T) {
 	if got := h.fallback("api/claude-sonnet-5-5", []statefile.Record{msg, moved, moved2}); got != "" {
 		t.Fatalf("the chain came back round to a tried account: %q", got)
 	}
-	if !provider.Exhausted(errors.New("claude: You've hit your usage limit")) || provider.Exhausted(errors.New("bad request: unknown field")) {
+	if !provider.Exhausted(errors.New("claude: You've hit your usage limit")) || !provider.Exhausted(errors.New("claude-code: success: You've hit your session limit · resets 12:30am")) || provider.Exhausted(errors.New("bad request: unknown field")) {
 		t.Fatal("Exhausted misreads")
 	}
 }
