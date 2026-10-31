@@ -249,6 +249,16 @@ func (c *Client) Stop(ctx context.Context, id, via string) error {
 	return c.Call(ctx, "POST", "/sessions/"+id+"/stop?via="+url.QueryEscape(via), "", nil, nil)
 }
 
+// Answer is what the person chose for the questions of ask call call: for
+// each question the labels picked or the text typed; none declines.
+func (c *Client) Answer(ctx context.Context, id, via, call string, answers [][]string) error {
+	b, err := json.Marshal(harness.Reply{Call: call, Answers: answers, Declined: answers == nil})
+	if err != nil {
+		return err
+	}
+	return c.Call(ctx, "POST", "/sessions/"+id+"/answer?via="+url.QueryEscape(via), "application/json", bytes.NewReader(b), nil)
+}
+
 // Post appends text and files as one turn: a single text/plain body, or one
 // multipart part per piece, each typed by its extension. A file with no type
 // is refused, not guessed. Returns the last record's n.

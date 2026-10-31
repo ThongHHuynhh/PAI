@@ -65,6 +65,8 @@ type Harness struct {
 	index map[string]Info
 	dirty map[string]bool
 	gone  map[string]bool // deleted; ids are never reused
+
+	asks map[string]*pending // ask calls waiting for a person, by session/call; guarded by mu
 }
 
 // provider splits a config's provider/model string and finds the provider.
@@ -714,6 +716,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	}
 	if orchestratorTools[c.Name] {
 		return h.orchestratorCall(ctx, id, conf, call, c)
+	}
+	if c.Name == "ask" {
+		return h.ask(ctx, id, call, c)
 	}
 	if a.Worker == worker.Harness { // a model may take the mesh's name for the machine
 		return result(call.ID, "error: harness is the harness's address on the mesh, not a worker; the worker on the harness's machine is "+worker.Admin)

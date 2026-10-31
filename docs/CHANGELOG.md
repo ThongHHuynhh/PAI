@@ -15,6 +15,7 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 - Web app: a small footer, "Copyright © 2026 MTR".
 - Settings > Server shows where the binary came from: branch, commit, whether the tree was dirty, who built it and when, Go version and platform. `GET /settings` carries it as `version.build`. A field the build did not record reads "unknown". Release builds stamp branch, builder and time; for a local build add `-ldflags "-X pai/pkg/version.Branch=<branch> -X pai/pkg/version.Builder=<user@host> -X pai/pkg/version.Built=<UTC time>"`, and build inside the git checkout for the commit.
 - Memory records which recalled items the model used (`used` on each hit of `GET /memory/retrievals`), and `GET /metrics` reports recall latency and the Claude Code usage limits.
+- New `ask` tool: the agent can put one to four multiple choice questions to you (two to four options each, your own answer always allowed) and wait up to 30 minutes. A popup in the web app, a dialog in the TUI and a numbered prompt in `pai chat` take the answer; declining is allowed. Answers go to `POST /sessions/{id}/answer`. The tool list changes, so the prompt cache of a running session is rebuilt once.
 
 ## v0.2.0
 

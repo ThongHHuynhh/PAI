@@ -88,6 +88,9 @@ type session struct {
 	running    []*callBlock          // calls with no result yet
 	workerSet  sync.Mutex            // one PUT of the workers at a time
 	workerSets atomic.Int64          // the toggles so far; only the newest is sent
+	askCall    *statefile.Record     // the newest ask call with no result yet
+	dlg        *asking               // the dialog that asks it
+	declined   string                // the ask call the person declined
 }
 
 func newSession(a *App, l *sessionList, id string) *session {
@@ -414,6 +417,7 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 		}
 	}
 	s.title(a)
+	s.syncAsk(a)
 }
 
 // show puts a record in the transcript, or a result in its call's block.
@@ -448,9 +452,15 @@ func (s *session) show(r statefile.Record) {
 	case statefile.Call:
 		b := newCall(s, r)
 		s.calls[r.ID] = b
+		if b.name == "ask" {
+			s.askCall = &r
+		}
 		s.running = append(s.running, b)
 		s.transcript.Append(b)
 	case statefile.Result:
+		if s.askCall != nil && s.askCall.ID == r.For {
+			s.askCall = nil
+		}
 		b, ok := s.calls[r.For]
 		if !ok {
 			s.transcript.Append(&callBlock{s: s, res: &r})

@@ -1,3 +1,4 @@
+import { Ask, questionsOf } from "../components/Ask";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ago, call, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
 import { useLive } from "../live";
@@ -104,6 +105,7 @@ function Transcript({ s }: { s: Session }) {
   const [err, setErr] = useState("");
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [hidden, setHidden] = useState(""); // the ask call whose popup was dismissed
   const end = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
 
@@ -180,6 +182,7 @@ function Transcript({ s }: { s: Session }) {
   };
 
   const results = useMemo(() => Object.fromEntries(recs.filter((r) => r.kind === "result").map((r) => [r.for, r])), [recs]);
+  const asking = s.status === "stepping" ? recs.filter((r) => r.kind === "call" && !results[r.id] && questionsOf(r).length > 0).pop() : undefined;
   const retrievals = useRetrievals(s.id);
   const recalls = useMemo(() => Object.fromEntries(retrievals.map((r) => [r.id, r])), [retrievals]);
   const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
@@ -227,6 +230,15 @@ function Transcript({ s }: { s: Session }) {
         {s.status === "stepping" && <div className="thinking">PAI is working…</div>}
         <div ref={end} />
       </div>
+      {asking && (
+        hidden === asking.id ? (
+          <button className="banner ask-bar" onClick={() => setHidden("")}>
+            PAI is waiting for your answers. Open the questions.
+          </button>
+        ) : (
+          <Ask key={asking.id} session={s.id} call={asking} onDismiss={() => setHidden(asking.id)} />
+        )
+      )}
       <RetrievalBar session={s.id} rs={retrievals} />
       {err && <div className="banner error">{err}</div>}
       <footer className="composer">
@@ -336,6 +348,7 @@ function Record({ r, result, recalls }: { r: Rec; result?: Rec; recalls: { [id: 
         /* raw */
       }
       const memoryTool = ["recall", "remember", "forget"].includes(name);
+      if (name === "ask") args = { ...args, questions: undefined, asked: questionsOf(r).map((q) => q.question) };
       const head = args.worker ? `${name} on ${args.worker}` : name;
       const gist = args.code ?? args.path ?? args.query ?? args.text ?? args.id ?? "";
       return (
