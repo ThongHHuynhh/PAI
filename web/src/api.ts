@@ -74,6 +74,7 @@ export function sessionModels(id: string): Promise<SessionModel[]> {
 export type Session = {
   id: string;
   name?: string;
+  parent?: string; // the orchestrator session that delegated this one
   status: "open" | "closed" | "interrupted" | "failed" | "stepping";
   config: { model: string; tools: string; workers: { name: string }[] | null; context_limit: number; preset?: string };
   created: string;

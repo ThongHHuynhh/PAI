@@ -20,6 +20,19 @@ export default function Sessions({ id }: { id?: string }) {
         .filter((s) => !filter || `${sessionTitle(s)} ${s.config.model}`.toLowerCase().includes(filter.toLowerCase())),
     [graph, filter],
   );
+  // A child sits under its orchestrator. One whose orchestrator is not listed, deleted or filtered out, stands alone.
+  const tree = useMemo(() => {
+    const ids = new Set(list.map((s) => s.id));
+    const kids = new Map<string, Session[]>();
+    for (const s of list) if (s.parent && ids.has(s.parent)) kids.set(s.parent, [...(kids.get(s.parent) ?? []), s]);
+    const rows: { s: Session; depth: number; kids: Session[] }[] = [];
+    const add = (s: Session, depth: number) => {
+      rows.push({ s, depth, kids: kids.get(s.id) ?? [] });
+      for (const k of kids.get(s.id) ?? []) add(k, depth + 1);
+    };
+    for (const s of list) if (!s.parent || !ids.has(s.parent)) add(s, 0);
+    return rows;
+  }, [list]);
   const cur = list.find((s) => s.id === id) ?? (graph?.sessions ?? []).find((s) => s.id === id);
   // The list stays beside an open session; a person folds it to a thin rail.
   // Unset, it starts folded on a phone. With no session open it is the page.
@@ -51,13 +64,19 @@ export default function Sessions({ id }: { id?: string }) {
         </div>
         )}
         {shown && list.length === 0 && <p className="muted small pad">No sessions yet. Start one with New.</p>}
-        {shown && list.map((s) => {
+        {shown && tree.map(({ s, depth, kids }) => {
           const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
           return (
-            <a key={s.id} href={`#/sessions/${s.id}`} className={`session-row ${s.id === id ? "active" : ""}`}>
+            <a key={s.id} href={`#/sessions/${s.id}`} className={`session-row ${s.id === id ? "active" : ""} ${depth ? "child" : ""}`}>
               <div className="grow-row">
                 <span className={`pill ${s.status}`}>{s.status === "stepping" ? "working" : s.status}</span>
                 <b className="ellipsis">{sessionTitle(s)}</b>
+                {kids.length > 0 && (
+                  <span className="muted small nowrap" title="Sessions this one delegated to">
+                    {kids.length} child{kids.length > 1 ? "ren" : ""}
+                    {kids.some((k) => k.status === "stepping") ? ", working" : ""}
+                  </span>
+                )}
               </div>
               <div className="muted small ellipsis">
                 {splitModel(s.config.model)[1]} · {ago(s.updated)}

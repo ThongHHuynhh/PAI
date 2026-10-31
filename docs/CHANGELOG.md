@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- The web session list shows delegated sessions under their orchestrator, indented, with the orchestrator's child count and whether one is working. A child whose orchestrator is not listed stands alone.
+
 - Swap the model of an open session from the TUI (`/model`) and the web app (the model name in the chat header). Both list every served model, mark the current one, and grey out the ones that cannot take the session with the reason (context too large for its window, media it cannot read, provider not served). `GET /sessions/{id}/models` serves the list. The swap applies from the next step; the first step on the new model re-reads the context, because prompt caches are per account.
 
 - TUI paste works in a classic console window: Ctrl+V, Shift+Insert and a right click paste from the clipboard, and a paste the console types in key by key arrives as one paste, so its line breaks no longer send the message.
