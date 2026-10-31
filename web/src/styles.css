@@ -159,6 +159,8 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .react-flow__edge-path { stroke: var(--ring); stroke-width: 1.4; }
 .react-flow__edge.off .react-flow__edge-path { stroke-dasharray: 3 5; opacity: 0.5; }
 .react-flow__edge.hot .react-flow__edge-path { stroke: var(--accent); stroke-width: 2.2; }
+.react-flow__edge.team .react-flow__edge-path { stroke: var(--accent); stroke-dasharray: 6 4; }
+.team li { cursor: pointer; }
 .react-flow__handle { opacity: 0; }
 .gnode { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; width: 220px; transition: box-shadow 0.4s, border-color 0.4s; }
 .gnode.glow { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft), 0 0 24px var(--accent-soft); }
