@@ -35,7 +35,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
-	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "model": {2, 2}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1},
+	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "model": {2, 2}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1}, "fallback": {0, 2}, "balance": {0, -1}, "accounts": {0, 0},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -47,6 +47,12 @@ func cli(verb string, args []string) {
 	if !ok || len(args) < a[0] || a[1] >= 0 && len(args) > a[1] {
 		usage()
 	}
+	if verb == "fallback" && len(args) == 1 {
+		usage()
+	}
+	if verb == "balance" && len(args) > 0 && !(args[0] == "off" && len(args) == 1 || args[0] == "auto" && len(args) >= 3) {
+		usage()
+	}
 	c, err := login()
 	if errors.Is(err, fs.ErrNotExist) {
 		die(fmt.Errorf("not logged in: pai login <api key>"))
@@ -56,6 +62,50 @@ func cli(verb string, args []string) {
 	}
 	hv := c.version()
 	switch verb {
+	case "fallback":
+		var fb map[string]string
+		c.call("GET", "/fallbacks", "", nil, &fb)
+		if len(args) == 0 {
+			b, _ := json.MarshalIndent(fb, "", "  ")
+			fmt.Println(string(b))
+			break
+		}
+		if fb == nil {
+			fb = map[string]string{}
+		}
+		if args[1] == "-" {
+			delete(fb, args[0])
+		} else {
+			fb[args[0]] = args[1]
+		}
+		b, _ := json.Marshal(fb)
+		c.call("PUT", "/fallbacks", "application/json", bytes.NewReader(b), nil)
+	case "balance":
+		if len(args) == 0 {
+			c.raw("/balance")
+			break
+		}
+		b, _ := json.Marshal(harness.Balance{Mode: args[0], Pool: args[1:]})
+		c.call("PUT", "/balance", "application/json", bytes.NewReader(b), nil)
+	case "accounts":
+		var rows []harness.Account
+		c.call("GET", "/accounts", "", nil, &rows)
+		fmt.Printf("%-42s %-8s %-7s %-7s %-20s %s\n", "ACCOUNT", "STATE", "5H", "7D", "LIMITED UNTIL", "UPDATED")
+		percent := func(u *float64) string {
+			if u == nil {
+				return "?"
+			}
+			return fmt.Sprintf("%.0f%%", *u*100)
+		}
+		stamp := func(t time.Time) string {
+			if t.IsZero() {
+				return "-"
+			}
+			return t.Local().Format(time.DateTime)
+		}
+		for _, a := range rows {
+			fmt.Printf("%-42s %-8s %-7s %-7s %-20s %s\n", a.Name, a.Status, percent(a.UtilFiveHour), percent(a.UtilSevenDay), stamp(a.LimitedUntil), stamp(a.Updated))
+		}
 	case "new":
 		var out struct{ ID string }
 		c.call("POST", "/sessions?via="+via, "application/json", os.Stdin, &out)

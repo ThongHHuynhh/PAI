@@ -158,7 +158,7 @@ func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (
 // step running keeps the config it started with; the next step lists the new
 // workers to the model as a change.
 func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, error) {
-	return h.setConf(id, via, func(c *statefile.Conf) error {
+	return h.setConf(id, via, func(c *statefile.Conf, _ []statefile.Record) error {
 		c.Workers = workers
 		if c.Workers == nil {
 			c.Workers = []statefile.Worker{}
@@ -174,15 +174,21 @@ func (h *Harness) SetModel(id, via, model string) (int, error) {
 	if _, _, err := h.provider(model); err != nil {
 		return 0, err
 	}
-	return h.setConf(id, via, func(c *statefile.Conf) error {
-		c.Model = model
-		return nil
+	return h.setConf(id, via, func(c *statefile.Conf, chain []statefile.Record) error {
+		if !h.eligible(*c, chain, model) {
+			return fmt.Errorf("model %q cannot take this session's context or media", model)
+		}
+		next, err := h.moveConfig(*c, model)
+		if err == nil {
+			*c = next
+		}
+		return err
 	})
 }
 
 // setConf appends a config record that is the newest one changed by fn,
 // under the lock a post takes.
-func (h *Harness) setConf(id, via string, fn func(*statefile.Conf) error) (int, error) {
+func (h *Harness) setConf(id, via string, fn func(*statefile.Conf, []statefile.Record) error) (int, error) {
 	s := h.session(id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -194,7 +200,7 @@ func (h *Harness) setConf(id, via string, fn func(*statefile.Conf) error) (int, 
 	if err != nil {
 		return 0, err
 	}
-	if err := fn(&conf); err != nil {
+	if err := fn(&conf, chain); err != nil {
 		return 0, err
 	}
 	body, err := json.Marshal(conf)

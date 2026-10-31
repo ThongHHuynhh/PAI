@@ -26,7 +26,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"pai/pkg/statefile"
@@ -91,10 +90,21 @@ var claudeEnv = []string{
 const stopHook = `{"continue":false,"stopReason":"pai runs tools","hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"pai runs tools"}}`
 
 func ClaudeCode(dir string) Provider {
+	var mu sync.RWMutex
+	var sink func(Health)
+	report := func(v Health) {
+		mu.RLock()
+		f := sink
+		mu.RUnlock()
+		if f != nil {
+			f(v)
+		}
+	}
 	return Provider{
-		Envelope: claudeCode{},
+		ObserveHealth: func(f func(Health)) { mu.Lock(); sink = f; mu.Unlock() },
+		Envelope:      claudeCode{},
 		Run: func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error) {
-			return runClaude(ctx, dir, body, emit)
+			return runClaude(ctx, dir, body, emit, report)
 		},
 	}
 }
@@ -304,7 +314,7 @@ func keepTurn(dir string, req ccReq, recs []statefile.Record, end ccTurn, resume
 
 // runClaude is one step: claude installed, the inert MCP server and the hook
 // on a loopback port, the frames replayed, the stream read to its result.
-func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile.Record)) (_ statefile.Header, err error) {
+func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile.Record), health ...func(Health)) (_ statefile.Header, err error) {
 	var req ccReq
 	if err := json.Unmarshal(body, &req); err != nil {
 		return statefile.Header{}, err
@@ -383,7 +393,7 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	defer timer.Stop()
 	out := bufio.NewReader(idleReader{stdout, timer})
 	var recs []statefile.Record
-	h, end, err := replay(stdin, out, frames, func(r statefile.Record) { recs = append(recs, r); emit(r) })
+	h, end, err := replay(stdin, out, frames, func(r statefile.Record) { recs = append(recs, r); emit(r) }, health...)
 	if err != nil {
 		cancel(err)
 	}
@@ -403,7 +413,7 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 // replay sends the frames one by one, waiting for claude to take each
 // shouldQuery false frame before the next, or they merge into the query;
 // then it reads the step.
-func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func(statefile.Record)) (statefile.Header, ccTurn, error) {
+func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func(statefile.Record), health ...func(Health)) (statefile.Header, ccTurn, error) {
 	for _, f := range frames {
 		b, err := marshal(f)
 		if err != nil {
@@ -421,7 +431,10 @@ func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func
 				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: replay: %w", err)
 			}
 			var e ccEvent
-			if json.Unmarshal(line, &e) == nil && e.Type == "result" {
+			if json.Unmarshal(line, &e) == nil {
+				reportClaudeHealth(e, health)
+			}
+			if e.Type == "result" {
 				if e.IsError {
 					return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: replay: %s", line)
 				}
@@ -432,46 +445,65 @@ func replay(stdin io.WriteCloser, out *bufio.Reader, frames []ccFrame, emit func
 	if err := stdin.Close(); err != nil {
 		return statefile.Header{}, ccTurn{}, err
 	}
-	return claudeStream(out, emit)
+	return claudeStream(out, emit, health...)
 }
-
-// Limit is what claude last said of the account's usage windows, such as
-// five_hour and seven_day. It is only known after a request, so a server
-// that just started has none.
-type Limit struct {
-	At      time.Time         `json:"at"`
-	Status  string            `json:"status"`
-	Windows map[string]Window `json:"windows"`
-}
-
-// Window is the share of one usage window spent, and when it resets.
-type Window struct {
-	Utilization float64   `json:"utilization"` // 0 to 1
-	Resets      time.Time `json:"resets"`
-}
-
-var claudeLimit atomic.Pointer[Limit]
-
-// ClaudeLimit is the newest limit claude reported, or nil.
-func ClaudeLimit() *Limit { return claudeLimit.Load() }
 
 type ccEvent struct {
-	Type    string          `json:"type"`
-	Subtype string          `json:"subtype"`
-	UUID    string          `json:"uuid"`
-	Session string          `json:"session_id"`
-	IsError bool            `json:"is_error"`
-	Result  string          `json:"result"`
-	Stop    string          `json:"stop_reason"`
-	Usage   anthUsage       `json:"usage"`
-	Message json.RawMessage `json:"message"`
-	Limit   struct {
-		Status  string `json:"status"`
-		Windows map[string]struct {
-			Utilization float64 `json:"utilization"`
-			ResetsAt    int64   `json:"resetsAt"`
-		} `json:"unifiedWindows"`
-	} `json:"rate_limit_info"`
+	Type          string          `json:"type"`
+	Subtype       string          `json:"subtype"`
+	UUID          string          `json:"uuid"`
+	Session       string          `json:"session_id"`
+	IsError       bool            `json:"is_error"`
+	Result        string          `json:"result"`
+	Stop          string          `json:"stop_reason"`
+	Usage         anthUsage       `json:"usage"`
+	Message       json.RawMessage `json:"message"`
+	RateLimitInfo ccRateLimit     `json:"rate_limit_info"`
+}
+
+// ccRateLimit is translated here, so no vendor fields enter the harness.
+type ccRateLimit struct {
+	Status  string   `json:"status"`
+	Window  string   `json:"rateLimitType"`
+	Util    *float64 `json:"utilization"`
+	Reset   int64    `json:"resetsAt"`
+	Windows map[string]struct {
+		Util  *float64 `json:"utilization"`
+		Reset int64    `json:"resetsAt"`
+	} `json:"unifiedWindows"`
+}
+
+func reportClaudeHealth(e ccEvent, sinks []func(Health)) {
+	if e.Type != "rate_limit_event" {
+		return
+	}
+	v := Health{Util: map[string]float64{}, Resets: map[string]time.Time{}, Updated: time.Now().UTC()}
+	add := func(k string, u *float64, reset int64) {
+		if k == "" {
+			return
+		}
+		if u != nil {
+			v.Util[k] = *u
+		}
+		if reset > 0 {
+			v.Resets[k] = time.Unix(reset, 0).UTC()
+		}
+	}
+	info := e.RateLimitInfo
+	// A rejected event without utilization still tells us this window is full.
+	if info.Util == nil && info.Status == "rejected" {
+		full := 1.0
+		info.Util = &full
+	}
+	add(info.Window, info.Util, info.Reset)
+	for k, w := range info.Windows {
+		add(k, w.Util, w.Reset)
+	}
+	for _, f := range sinks {
+		if f != nil {
+			f(v)
+		}
+	}
 }
 
 // Stream reads claude's stream-json: an assistant event per finished block,
@@ -483,7 +515,7 @@ func (claudeCode) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 }
 
 // claudeStream is Stream and where the turn ends in claude's transcript.
-func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header, ccTurn, error) {
+func claudeStream(resp io.Reader, emit func(statefile.Record), health ...func(Health)) (statefile.Header, ccTurn, error) {
 	var end ccTurn
 	r := bufio.NewReader(resp)
 	for {
@@ -498,6 +530,7 @@ func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header
 		if err := json.Unmarshal(line, &e); err != nil {
 			return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %w: %.200s", err, line)
 		}
+		reportClaudeHealth(e, health)
 		switch e.Type {
 		case "assistant":
 			end.UUID = e.UUID
@@ -516,12 +549,6 @@ func claudeStream(resp io.Reader, emit func(statefile.Record)) (statefile.Header
 					emit(rec)
 				}
 			}
-		case "rate_limit_event":
-			l := &Limit{At: time.Now().UTC(), Status: e.Limit.Status, Windows: map[string]Window{}}
-			for name, w := range e.Limit.Windows {
-				l.Windows[name] = Window{w.Utilization, time.Unix(w.ResetsAt, 0).UTC()}
-			}
-			claudeLimit.Store(l)
 		case "result":
 			if e.IsError {
 				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %s: %s", e.Subtype, e.Result)

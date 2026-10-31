@@ -59,6 +59,7 @@ type Config struct {
 	// Fallbacks names, for a provider, the one its sessions move to when its
 	// account is out of usage, such as {"claude-code": "claude-code-2"}.
 	Fallbacks map[string]string `json:"fallbacks,omitempty"`
+	Balance   harness.Balance   `json:"balance,omitempty"`
 }
 
 // MemoryConfig names the embedder memory uses: an OpenAI compatible
@@ -263,15 +264,20 @@ func Harness(ctx context.Context, path string) error {
 	}
 	var fallbacks atomic.Pointer[map[string]string]
 	fallbacks.Store(&c.Fallbacks)
+	var balance atomic.Pointer[harness.Balance]
+	balance.Store(&c.Balance)
 	h := &harness.Harness{Sessions: statefile.Sessions{Dir: sessions}, Providers: ps, Workers: pool, Remove: coord.Remove, Rename: coord.Rename, Memory: mem,
 		Fallbacks: func() map[string]string { return *fallbacks.Load() },
+		Balance:   func() harness.Balance { return *balance.Load() },
 		OnRecord:  func(id string, r statefile.Record) { bus.Publish(recordEvent(id, r)) }}
+	h.SetProviders(ps)
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {
 			h.SetProviders(ps)
 			coord.Link(c.Links)
 			fallbacks.Store(&c.Fallbacks)
+			balance.Store(&c.Balance)
 		}
 		return err
 	})

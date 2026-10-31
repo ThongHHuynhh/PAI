@@ -11,6 +11,7 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -184,7 +185,9 @@ func (s *Store) emit(e Event) {
 	}
 }
 
-func newID() string { return fmt.Sprintf("m%x", time.Now().UnixNano()&0xffffffffffff) }
+// A clock tick can contain several writes, especially on Windows. Random
+// IDs also keep new versions distinct across processes and restarts.
+func newID() string { return "m" + rand.Text() }
 
 // Remember stores it, unless an item of its scope already says the same:
 // then that one is refreshed and returned. The text is one self-contained
