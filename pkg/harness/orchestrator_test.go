@@ -337,3 +337,25 @@ func TestOrchestratorBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestRoomFor(t *testing.T) {
+	h := orchestrationHarness(t, nil)
+	h.Providers["other"] = h.Providers["fake"]
+	spend := func(name string, util float64) {
+		h.health(name, provider.Health{Util: map[string]float64{"five_hour": util}, Resets: map[string]time.Time{"five_hour": time.Now().Add(time.Hour)}})
+	}
+	if err := h.roomFor("fake/m", largeNeed); err != nil {
+		t.Fatalf("an account that reports nothing must pass: %v", err)
+	}
+	spend("fake", 0.5) // 50% left
+	if err := h.roomFor("fake/m", smallNeed); err != nil {
+		t.Fatalf("small with 50%% left: %v", err)
+	}
+	if err := h.roomFor("fake/m", largeNeed); err == nil || !strings.Contains(err.Error(), "resets at") {
+		t.Fatalf("large with 50%% left, sharing the parent's reserve, must be refused with the reset time: %v", err)
+	}
+	spend("fake", 0.9) // 10% left: under the parent's own reserve
+	if err := h.roomFor("fake/m", smallNeed); err == nil {
+		t.Fatal("a child must leave the parent its reserve")
+	}
+}
