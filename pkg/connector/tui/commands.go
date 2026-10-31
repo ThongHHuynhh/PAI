@@ -52,6 +52,7 @@ func commands() []command {
 		{"config", nil, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model: swap this session, or choose for a new one", "", (*session).models},
+		{"usage", nil, "Usage of each account", "", (*session).usage},
 		{"providers", []string{"connect"}, "Connect a provider", "", (*session).providers},
 		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
 		{"fork", nil, "Fork into a new session", "", (*session).fork},

@@ -30,7 +30,7 @@ function saveMoved(m: Record<string, XYPosition>) {
 
 type CoreData = { version: string; url: string; machines: number; working: number; glow: boolean };
 type MachineData = { m: Machine; sessions: number; glow: boolean };
-type SessionData = { s: Session; glow: boolean };
+type SessionData = { s: Session; kids: Session[]; glow: boolean };
 type MemoryData = { st?: Stats; glow: boolean };
 
 function CoreNode({ data }: NodeProps<Node<CoreData>>) {
@@ -88,6 +88,12 @@ function SessionNode({ data }: NodeProps<Node<SessionData>>) {
       <div className="gsub muted">
         {tokens(s.context_used)} / {tokens(s.config.context_limit)} ctx · {ago(s.updated)}
       </div>
+      {data.kids.length > 0 && (
+        <div className="gsub">
+          <b>Manager</b> <span className="muted">· {data.kids.length} employee{data.kids.length > 1 ? "s" : ""}, {data.kids.filter((k) => k.status === "stepping").length} working</span>
+        </div>
+      )}
+      <Handle type="source" position={Position.Right} id="team" />
     </div>
   );
 }
@@ -155,20 +161,37 @@ export default function GraphPage() {
       edges.push({ id: `e:core-${m.name}`, source: "core", sourceHandle: "r", target: `m:${m.name}`, animated: m.connected, className: `${m.connected ? "" : "off"} ${glow(`m:${m.name}`) ? "hot" : ""}` });
     });
 
-    // sessions right of their first machine, or below the core
+    // A session whose manager is drawn sits to the right of it, joined by a
+    // team edge. The others go right of their first machine, or below the core.
+    const shown = new Set(sessions.map((s) => s.id));
+    const kidsOf = (id: string) => sessions.filter((s) => s.parent === id);
+    const at: Record<string, { x: number; y: number }> = {};
     const stack: Record<string, number> = {};
     sessions.forEach((s) => {
+      if (s.parent && shown.has(s.parent)) return;
       const first = s.config.workers?.find((w) => mpos[w.name])?.name;
       const key = first ?? "_";
       const k = (stack[key] = (stack[key] ?? 0) + 1) - 1;
       const base = first ? { x: mpos[first].x + 300, y: mpos[first].y - 40 } : { x: -110 + (k % 3) * 300, y: 170 + Math.floor(k / 3) * 150 };
       const p = first ? { x: base.x + (k % 2) * 40, y: base.y + k * 125 } : base;
+      at[s.id] = p;
       const g = glow(`s:${s.id}`);
-      nodes.push({ id: `s:${s.id}`, type: "session", position: p, data: { s, glow: g } });
+      nodes.push({ id: `s:${s.id}`, type: "session", position: p, data: { s, kids: kidsOf(s.id), glow: g } });
       const ws = (s.config.workers ?? []).filter((w) => mpos[w.name]);
       if (ws.length === 0) edges.push({ id: `e:core-s-${s.id}`, source: "core", sourceHandle: "b", target: `s:${s.id}`, targetHandle: "top", animated: s.status === "stepping" || g, className: g ? "hot" : "" });
       ws.forEach((w) => edges.push({ id: `e:${w.name}-${s.id}`, source: `m:${w.name}`, target: `s:${s.id}`, targetHandle: "left", animated: s.status === "stepping" || g, className: g ? "hot" : "" }));
     });
+    const team = (m: Session) => {
+      kidsOf(m.id).forEach((k, i) => {
+        const p = { x: at[m.id].x + 330, y: at[m.id].y + i * 130 };
+        at[k.id] = p;
+        const g = glow(`s:${k.id}`);
+        nodes.push({ id: `s:${k.id}`, type: "session", position: p, data: { s: k, kids: kidsOf(k.id), glow: g } });
+        edges.push({ id: `e:team-${k.id}`, source: `s:${m.id}`, sourceHandle: "team", target: `s:${k.id}`, targetHandle: "left", animated: k.status === "stepping" || g, className: `team ${g ? "hot" : ""}` });
+        team(k);
+      });
+    };
+    sessions.forEach((s) => at[s.id] && team(s));
     for (const n of nodes) if (moved[n.id]) n.position = moved[n.id];
     return { nodes, edges };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,6 +225,8 @@ export default function GraphPage() {
   };
 
   const selected = sel?.startsWith("s:") ? sessions.find((s) => `s:${s.id}` === sel) : undefined;
+  const selectedKids = selected ? sessions.filter((s) => s.parent === selected.id) : [];
+  const selectedManager = selected?.parent ? sessions.find((s) => s.id === selected.parent) : undefined;
   const selMachine = sel?.startsWith("m:") ? machines.find((m) => `m:${m.name}` === sel) : undefined;
 
   return (
@@ -267,6 +292,21 @@ export default function GraphPage() {
             <button className="primary small" onClick={() => go({ page: "sessions", arg: selected.id })}>
               Open session
             </button>
+          </section>
+        )}
+        {selected && (selectedKids.length > 0 || selectedManager) && (
+          <section className="card">
+            <h3>{selectedKids.length > 0 ? "Employees" : "Manager"}</h3>
+            <ul className="plain team">
+              {(selectedKids.length > 0 ? selectedKids : [selectedManager!]).map((k) => (
+                <li key={k.id} onClick={() => setSel(`s:${k.id}`)}>
+                  <span className={`pill ${k.status}`}>{k.status === "stepping" ? "working" : k.status}</span> <b className="ellipsis">{sessionTitle(k)}</b>
+                  <span className="muted small">
+                    {splitModel(k.config.model)[1]} · {tokens(k.context_used)} ctx · {ago(k.updated)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
         {selMachine && (
