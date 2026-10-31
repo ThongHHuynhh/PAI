@@ -172,12 +172,9 @@ func (h *Harness) SetWorkers(id, via string, workers []statefile.Worker) (int, e
 // on: another account or another vendor takes over with the same history and
 // memory. The provider must be one this server serves.
 func (h *Harness) SetModel(id, via, model string) (int, error) {
-	if _, _, err := h.provider(model); err != nil {
-		return 0, err
-	}
 	return h.setConf(id, via, func(c *statefile.Conf, chain []statefile.Record) error {
-		if !h.eligible(*c, chain, model) {
-			return fmt.Errorf("model %q cannot take this session's context or media", model)
+		if reason := h.modelReason(*c, chain, model); reason != "" {
+			return fmt.Errorf("model %q: %s", model, reason)
 		}
 		next, err := h.moveConfig(*c, model)
 		if err == nil {

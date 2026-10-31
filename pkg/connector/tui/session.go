@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -48,6 +49,7 @@ type session struct {
 	list   *sessionList
 	id     string
 	info   harness.Info
+	model  string      // newest model read from the transcript's config records
 	asked  []*msgBlock // the messages, for /rollback and /goto
 	second int64       // the clock's second at the last tick, to redraw the times of running calls
 
@@ -417,7 +419,15 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 // show puts a record in the transcript, or a result in its call's block.
 func (s *session) show(r statefile.Record) {
 	switch r.Kind {
-	case statefile.Start, statefile.Config, statefile.Name, statefile.Thinking, statefile.Step:
+	case statefile.Start, statefile.Config:
+		var conf statefile.Conf
+		if json.Unmarshal(r.Body, &conf) == nil {
+			if s.model != "" && s.model != conf.Model {
+				s.transcript.Append(&textBlock{fmt.Sprintf("model: %s -> %s, from the next step", s.model, conf.Model)})
+			}
+			s.model = conf.Model
+		}
+	case statefile.Name, statefile.Thinking, statefile.Step:
 	case statefile.System:
 		if r.Source == "memory" {
 			body := string(r.Body)

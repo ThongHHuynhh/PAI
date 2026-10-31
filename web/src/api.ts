@@ -57,6 +57,20 @@ export async function call<T>(method: string, path: string, body?: unknown, type
 
 export type Usage = { input: number; output: number; cache_read?: number; cache_write?: number };
 
+export type SessionModel = {
+  model: string;
+  name: string;
+  provider: string;
+  context_limit: number;
+  current: boolean;
+  ok: boolean;
+  reason: string;
+};
+
+export function sessionModels(id: string): Promise<SessionModel[]> {
+  return call("GET", `/sessions/${id}/models`);
+}
+
 export type Session = {
   id: string;
   name?: string;

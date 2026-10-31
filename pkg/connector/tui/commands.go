@@ -51,7 +51,7 @@ func commands() []command {
 		{"continue", []string{"compact"}, "Continue in a new session", "", (*session).carryOn},
 		{"config", nil, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
-		{"model", nil, "Model for a new session", "", (*session).models},
+		{"model", nil, "Model: swap this session, or choose for a new one", "", (*session).models},
 		{"providers", []string{"connect"}, "Connect a provider", "", (*session).providers},
 		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
 		{"fork", nil, "Fork into a new session", "", (*session).fork},
@@ -758,9 +758,17 @@ func (s *session) withProviders(a *App, then func(cat *catalog.Catalog, ps []har
 	})
 }
 
-// models is the menu of the catalog's models whose provider the harness
-// serves, by provider. Picking one makes the next session from its preset.
+// models changes an existing session from its next step, or chooses the
+// preset for a new session on the empty screen.
 func (s *session) models(a *App) {
+	if s.creating {
+		a.Say("The session is being made")
+		return
+	}
+	if s.id != "" {
+		s.sessionModels(a)
+		return
+	}
 	s.withProviders(a, func(cat *catalog.Catalog, ps []harness.ProviderInfo) {
 		m := &Menu{}
 		cur := s.base().Preset
@@ -777,6 +785,59 @@ func (s *session) models(a *App) {
 			return
 		}
 		a.OpenMenu("Model for a new session", m)
+	})
+}
+
+func (s *session) sessionModels(a *App) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(s.ctx, callTime)
+		defer cancel()
+		models, err := s.c.Models(ctx, s.id)
+		a.Post(func() {
+			if s.ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			m := &Menu{}
+			for _, model := range models {
+				hint := tokens(model.ContextLimit)
+				if !model.OK {
+					hint = model.Reason
+				}
+				if model.Current {
+					hint = "current · " + hint
+					m.Start = len(m.Items)
+				}
+				m.Items = append(m.Items, MenuItem{Label: model.Name, Hint: hint, Section: model.Provider, Disabled: !model.OK, Pick: func(a *App, _ *MenuItem) {
+					if !model.Current {
+						s.swapModel(a, model.Model)
+					}
+				}})
+			}
+			a.OpenMenu("Model for this session · from the next step", m)
+		})
+	})
+}
+
+func (s *session) swapModel(a *App, model string) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(s.ctx, callTime)
+		defer cancel()
+		err := s.c.SetModel(ctx, s.id, via, model)
+		a.Post(func() {
+			if s.ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			s.price = nil // use the new model's catalog price
+			// The config record arriving through follow owns the transcript note.
+		})
 	})
 }
 
