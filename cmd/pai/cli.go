@@ -140,8 +140,8 @@ func cli(verb string, args []string) {
 	case "sessions":
 		var infos []harness.Info
 		c.call("GET", "/sessions?status="+strings.Join(args, ""), "", nil, &infos)
-		for _, i := range infos {
-			fmt.Printf("%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
+		for _, i := range connector.SessionTree(infos) {
+			fmt.Printf("%s%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", strings.Repeat("  ", i.Depth), i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
 		}
 	case "name":
 		var out struct{ N int }

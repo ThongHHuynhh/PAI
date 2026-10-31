@@ -19,6 +19,8 @@ const (
 	sessionsMax   = 100
 	// sessionRows is one session in the sidebar: two rows and a gap.
 	sessionRows = 3
+	// childIndent leaves two cells before both lines of a child session.
+	childIndent = 2
 	// How far a session's panel goes toward the text color: the open one
 	// stands out more than the one under the mouse.
 	openShade  = 0.07
@@ -79,13 +81,17 @@ func (l *sessionList) update(a *App, infos []harness.Info, err error) {
 			l.seen[in.ID] = in.Updated
 		}
 	}
+	before := l.index(l.cur.id)
 	l.infos, l.loaded = infos, true
+	if before != l.index(l.cur.id) {
+		l.reveal = true
+	}
 	l.tick(a)
 }
 
-// info is the session at i, the open one as its screen last read it.
-func (l *sessionList) info(i int) harness.Info {
-	if in := l.infos[i]; in.ID != l.cur.id || l.cur.info.ID != in.ID {
+// info is the session, the open one as its screen last read it.
+func (l *sessionList) info(in harness.Info) harness.Info {
+	if in.ID != l.cur.id || l.cur.info.ID != in.ID {
 		return in
 	}
 	return l.cur.info
@@ -113,14 +119,14 @@ func (l *sessionList) leave() {
 // tick animates while any session steps.
 func (l *sessionList) tick(a *App) {
 	on := l.cur.stepping() || l.cur.blank && !a.Blurred
-	for i := range l.infos {
-		on = on || l.info(i).Status == statefile.StatusStepping
+	for _, in := range l.infos {
+		on = on || l.info(in).Status == statefile.StatusStepping
 	}
 	a.Ticking(on)
 }
 
 func (l *sessionList) index(id string) int {
-	for i, in := range l.infos {
+	for i, in := range connector.SessionTree(l.infos) {
 		if in.ID == id {
 			return i
 		}
@@ -141,7 +147,7 @@ func (l *sessionList) step(a *App, n int) {
 	default:
 		i = min(max(0, i+n), len(l.infos)-1)
 	}
-	l.open(a, l.infos[i].ID)
+	l.open(a, connector.SessionTree(l.infos)[i].ID)
 }
 
 func (l *sessionList) open(a *App, id string) {
@@ -170,7 +176,7 @@ func (l *sessionList) Mouse(a *App, m term.Mouse, r Rect) bool {
 		l.top = min(l.top+sessionRows, l.maxTop(r.H))
 	case m.Action == term.Press && m.Button == term.Left:
 		if i := l.row(m.Y, r); i >= 0 {
-			l.open(a, l.infos[i].ID)
+			l.open(a, connector.SessionTree(l.infos)[i].ID)
 		}
 	case m.Action == term.Motion && m.Button == term.NoButton:
 	default:
@@ -194,20 +200,21 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 	if r.Has(a.MouseX, a.MouseY) {
 		hover = l.row(a.MouseY, r)
 	}
-	x, w := r.X+2, r.W-4
-	line := func(y int, gs []Glyph) { (&Glyphs{gs}).Draw(a, c, Rect{x, y, w, 1}) }
 	mark := func(y int, fg term.Color, shade float64) {
 		c.Fill(Rect{r.X, y, r.W, sessionRows - 1}, a.Theme.Panel.Blend(a.Theme.Text, shade))
 		for i := range sessionRows - 1 {
 			c.Set(r.X, y+i, "┃", 1, term.Style{FG: fg})
 		}
 	}
-	for i := range l.infos {
+	for i, row := range connector.SessionTree(l.infos) {
 		y := r.Y - l.top + i*sessionRows
 		if y+sessionRows <= r.Y || y >= r.Y+r.H {
 			continue
 		}
-		in := l.info(i)
+		in := l.info(row.Info)
+		indent := row.Depth * childIndent
+		x, w := r.X+2+indent, max(0, r.W-4-indent)
+		line := func(y int, gs []Glyph) { (&Glyphs{gs}).Draw(a, c, Rect{x, y, w, 1}) }
 		switch {
 		case in.ID == l.cur.id:
 			mark(y, a.Theme.Accent, openShade)
@@ -234,9 +241,30 @@ func (l *sessionList) Draw(a *App, c *Canvas, r Rect) {
 		if lim := in.Config.ContextLimit; lim > 0 {
 			used += "/" + tokens(lim)
 		}
-		line(y, spread(run(title, term.Style{FG: a.Theme.Text, Attr: term.Bold}), state, w))
+		head := run(title, term.Style{FG: a.Theme.Text, Attr: term.Bold})
+		if children, _ := l.children(in.ID); children > 0 {
+			head = cat(run("◆ ", term.Style{FG: a.Theme.Accent}), head)
+		}
+		line(y, spread(head, state, w))
 		line(y+1, spread(run(meta, muted), run(used, muted), w))
 	}
+}
+
+// children counts the listed direct children and those still stepping. The
+// regular session refresh also picks up stops cascaded by the harness.
+func (l *sessionList) children(id string) (total, stepping int) {
+	if id == "" {
+		return
+	}
+	for _, in := range l.infos {
+		if in.Parent == id {
+			total++
+			if l.info(in).Status == statefile.StatusStepping {
+				stepping++
+			}
+		}
+	}
+	return
 }
 
 // age is how long ago, in its largest unit: now, 15m, 3h, 2d.

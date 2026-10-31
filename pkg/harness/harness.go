@@ -109,6 +109,7 @@ func (h *Harness) providers() map[string]provider.Provider {
 // whitelist, and a worker named before it dials in is a worker the session
 // waits for.
 type Create struct {
+	Parent       string                     `json:"parent,omitempty"`
 	From         string                     `json:"from,omitempty"`
 	N            int                        `json:"n,omitempty"`
 	Model        string                     `json:"model,omitempty"`
@@ -132,7 +133,7 @@ func system(source, body string) statefile.Record {
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewName(h.Sessions.Exists)
 	if c.From != "" {
-		if c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
+		if c.Parent != "" || c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
 		if err := h.cut(c.From, c.N); err != nil {
@@ -170,10 +171,22 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	if c.Tools == "" {
 		c.Tools = "default"
 	}
-	if Tools(c.Tools, nil) == nil {
-		return "", fmt.Errorf("unknown tools %q; sets: default, patch", c.Tools)
+	if c.Parent != "" {
+		if !statefile.ValidID(c.Parent) {
+			return "", fmt.Errorf("bad parent session id %q", c.Parent)
+		}
+		parent, err := h.Info(c.Parent)
+		if err != nil {
+			return "", fmt.Errorf("parent: %w", err)
+		}
+		if parent.Parent != "" || c.Tools == "orchestrator" {
+			return "", fmt.Errorf("children cannot orchestrate or spawn children")
+		}
 	}
-	conf := statefile.Conf{Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
+	if Tools(c.Tools, nil) == nil {
+		return "", fmt.Errorf("unknown tools %q; sets: default, patch, orchestrator", c.Tools)
+	}
+	conf := statefile.Conf{Parent: c.Parent, Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}
@@ -216,6 +229,11 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	}
 	if err := f.Append(system("workers", workersFirst+h.workers(conf.Workers))); err != nil {
 		return "", err
+	}
+	if c.Tools == "orchestrator" {
+		if err := f.Append(system("orchestrator", orchestratorSystem)); err != nil {
+			return "", err
+		}
 	}
 	if c.Name != "" {
 		if err := f.Append(name(via, c.Name)); err != nil {
@@ -615,6 +633,11 @@ func last(chain []statefile.Record, source string) string {
 func (h *Harness) Run(ctx context.Context, id string) (statefile.Status, error) {
 	for {
 		st, err := h.Step(ctx, id)
+		if err == nil && (st == statefile.StatusClosed || st == statefile.StatusFailed) {
+			if err := h.reportChild(context.WithoutCancel(ctx), id); err != nil {
+				log.Printf("session %s: report to parent: %v", id, err)
+			}
+		}
 		if err == nil && st == statefile.StatusClosed {
 			h.afterTurn(ctx, id)
 		}
@@ -688,6 +711,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	}
 	if memoryTools[c.Name] {
 		return h.memoryCall(ctx, id, call, c)
+	}
+	if orchestratorTools[c.Name] {
+		return h.orchestratorCall(ctx, id, conf, call, c)
 	}
 	if a.Worker == worker.Harness { // a model may take the mesh's name for the machine
 		return result(call.ID, "error: harness is the harness's address on the mesh, not a worker; the worker on the harness's machine is "+worker.Admin)

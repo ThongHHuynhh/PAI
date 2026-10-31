@@ -108,8 +108,9 @@ type Part struct {
 // session once, so a text and an image reach the model as one turn. The
 // append is the acknowledgement: a closed session starts stepping on it, a
 // stepping one sees it at its next context build. Returns the last n. A post
-// with a key appends only the parts the file does not hold with that key, so
-// a connector that lost the reply posts again and the post ends whole, once.
+// with a key appends only parts the file does not hold from that via with
+// that key, so a connector that lost the reply posts again and the post ends
+// whole, once.
 func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (int, error) {
 	s := h.session(id)
 	n, err := func() (int, error) {
@@ -122,7 +123,7 @@ func (h *Harness) Post(ctx context.Context, id, via, key string, parts []Part) (
 				return 0, err
 			}
 			for _, r := range chain {
-				if r.Kind == statefile.Message && r.IdempotencyKey == key {
+				if r.Kind == statefile.Message && r.Via == via && r.IdempotencyKey == key {
 					done, n = done+1, r.N
 				}
 			}
@@ -416,7 +417,17 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 		}
 	}
 	h.killAll(ctx, id, chain)
-	return nil
+	infos, err := h.childInfos(id)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, child := range infos {
+		if child.Status == statefile.StatusStepping {
+			errs = append(errs, h.Stop(ctx, child.ID, via))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // note appends r whether or not a step holds the file, as a post does.
