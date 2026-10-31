@@ -192,7 +192,7 @@ func TestDelegateRoutes(t *testing.T) {
 		return statefile.Header{Stop: "end_turn", Usage: &statefile.Usage{Input: int(input.Load())}}, nil
 	})
 	parent := orchestrationSession(t, h, "", "parent", "orchestrator")
-	if _, err := h.setConf(parent, "test", func(c *statefile.Conf) error {
+	if _, err := h.setConf(parent, "test", func(c *statefile.Conf, _ []statefile.Record) error {
 		c.Params = map[string]json.RawMessage{"max_tokens": json.RawMessage(`4096`)}
 		c.Input = []string{"image/png"}
 		return nil

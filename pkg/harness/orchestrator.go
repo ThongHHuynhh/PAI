@@ -201,8 +201,9 @@ func (h *Harness) dispatch(ctx context.Context, parent string, conf statefile.Co
 			}
 			task += fmt.Sprintf("\n\nRelated work already done by session %s (do not redo it):\n%s", d.handoff, reply)
 		}
-		// Keep provider parameters too: some models require an output limit.
-		d.id, err = h.Create(ctx, Create{Parent: parent, Model: conf.Model, Workers: conf.Workers, ContextLimit: conf.ContextLimit, Input: conf.Input, Params: conf.Params, Tools: "default", Name: a.Name}, via)
+		// A child starts on the freest account of the balance pool, when one is set. Keep
+		// provider parameters too: some models require an output limit.
+		d.id, err = h.Create(ctx, Create{Parent: parent, Model: h.Pick(conf.Model), Workers: conf.Workers, ContextLimit: conf.ContextLimit, Input: conf.Input, Params: conf.Params, Tools: "default", Name: a.Name}, via)
 		if err != nil {
 			return "", err
 		}
