@@ -13,7 +13,6 @@ import (
 
 	"pai/pkg/catalog"
 	"pai/pkg/memory"
-	"pai/pkg/provider"
 	"pai/pkg/statefile"
 )
 
@@ -43,19 +42,19 @@ const growthSteps = 60
 const recentErrors = 8
 
 type Metrics struct {
-	Range    string                    `json:"range"`
-	Since    time.Time                 `json:"since"`
-	Bucket   string                    `json:"bucket"` // hour, day or week
-	Totals   Totals                    `json:"totals"`
-	Series   []Point                   `json:"series"`
-	Models   []ModelStats              `json:"models"`
-	Sessions []SessionStats            `json:"sessions"`
-	Tools    []ToolStats               `json:"tools"`
-	Harness  HarnessStats              `json:"harness"`
-	Memory   *MemoryMetrics            `json:"memory,omitempty"`
-	Limits   map[string]provider.Limit `json:"limits,omitempty"` // by provider, once it has reported one
-	Priced   bool                      `json:"priced"`           // this build's catalog has prices
-	Stops    map[string]int            `json:"stops"`
+	Range    string           `json:"range"`
+	Since    time.Time        `json:"since"`
+	Bucket   string           `json:"bucket"` // hour, day or week
+	Totals   Totals           `json:"totals"`
+	Series   []Point          `json:"series"`
+	Models   []ModelStats     `json:"models"`
+	Sessions []SessionStats   `json:"sessions"`
+	Tools    []ToolStats      `json:"tools"`
+	Harness  HarnessStats     `json:"harness"`
+	Memory   *MemoryMetrics   `json:"memory,omitempty"`
+	Limits   map[string]Limit `json:"limits,omitempty"` // by provider, once it has reported one
+	Priced   bool             `json:"priced"`           // this build's catalog has prices
+	Stops    map[string]int   `json:"stops"`
 }
 
 type Totals struct {
@@ -371,10 +370,35 @@ func (wa *webAPI) collect(ctx context.Context, name string, span, bucket time.Du
 			}
 		}
 	}
-	if l := provider.ClaudeLimit(); l != nil {
-		m.Limits = map[string]provider.Limit{"claude-code": *l}
+	status := map[string]string{}
+	for _, a := range wa.h.Accounts() {
+		prov, _, _ := strings.Cut(a.Name, "/") // a pool lists provider/model
+		status[prov] = a.Status
+	}
+	for name, h := range wa.h.Health() {
+		l := Limit{At: h.Updated, Status: status[name], Windows: map[string]Window{}}
+		for k, u := range h.Util {
+			l.Windows[k] = Window{u, h.Resets[k]}
+		}
+		if m.Limits == nil {
+			m.Limits = map[string]Limit{}
+		}
+		m.Limits[name] = l
 	}
 	return m, nil
+}
+
+// Limit is a provider's usage windows as it last reported them.
+type Limit struct {
+	At      time.Time         `json:"at"`
+	Status  string            `json:"status"` // ok, or limited until it resets
+	Windows map[string]Window `json:"windows"`
+}
+
+// Window is the share of one usage window spent, 0 to 1, and when it resets.
+type Window struct {
+	Utilization float64   `json:"utilization"`
+	Resets      time.Time `json:"resets"`
 }
 
 func (wa *webAPI) memoryMetrics(ctx context.Context, since time.Time, at func(time.Time) *Point) (*MemoryMetrics, error) {

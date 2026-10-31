@@ -171,6 +171,10 @@ func (f onEnter) Key(a *App, k term.Key) bool {
 func (s *session) settingsMenu(a *App) {
 	a.Go(func() {
 		st, err := getSettings(s.c)
+		var accounts accountSettings
+		if err == nil {
+			accounts, err = getAccountSettings(s.c)
+		}
 		a.Post(func() {
 			if err != nil {
 				a.SayError(err)
@@ -183,6 +187,7 @@ func (s *session) settingsMenu(a *App) {
 				v.Pick = func(a *App, _ *MenuItem) { update(a, s.c, l) }
 			}
 			m.Items = []MenuItem{v, {Section: "Look", Label: "Theme", Hint: themeLabel(a.ThemeID), Pick: func(a *App, _ *MenuItem) { s.themeMenu(a) }}}
+			s.accountRows(m, accounts)
 			a.OpenMenu("Settings", m)
 		})
 	})

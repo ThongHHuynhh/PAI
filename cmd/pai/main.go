@@ -400,6 +400,9 @@ func usage() {
   worker     rename <name> <new>     PUT  /workers/{name}/name: same keys and address; links and sessions
                                      keep naming the old name
   providers                          GET  /providers: each one's name, shape and url
+  fallback   [<provider> <to|->]     GET/PUT /fallbacks: provider or provider/model target; - removes it
+  balance    [off|auto <provider/model>...]  GET/PUT /balance: automatic account selection (at least two models)
+  accounts                           GET /accounts: usage and reset times
   key        <provider> <key>        PUT  /providers/{provider}: the server saves the key, with the shape and url
                                      the catalog gives the provider, in its config, and serves it at once
   signin     <provider>              POST /providers/{provider}/login: sign in where a provider takes no key, such as

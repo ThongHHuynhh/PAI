@@ -43,10 +43,10 @@ type Harness struct {
 	Remove    func(name string) error      // the coordinator's: the worker leaves the mesh for good
 	Rename    func(old, name string) error // the coordinator's: the worker takes another name
 	Memory    *memory.Store                // what PAI knows across sessions; nil for none
-	// Fallbacks, when set, is the provider each provider hands its sessions
-	// to when its account is out of usage: a second account of the same
-	// subscription, or another vendor that serves the same model ids.
+	// Fallbacks maps providers to a provider or a complete provider/model
+	// target. Balance supplies the user's interchangeable models.
 	Fallbacks func() map[string]string
+	Balance   func() Balance
 	// OnRecord, when set, hears every record written, with its n. It must
 	// not block.
 	OnRecord func(id string, r statefile.Record)
@@ -55,9 +55,11 @@ type Harness struct {
 	consolidated  time.Time  // the last consolidation pass
 	consolidating bool
 
-	pmu sync.RWMutex
-	mu  sync.Mutex
-	s   map[string]*session
+	amu      sync.Mutex // guards account observations and exhaustion
+	accounts map[string]accountState
+	pmu      sync.RWMutex
+	mu       sync.Mutex
+	s        map[string]*session
 
 	imu   sync.Mutex
 	index map[string]Info
@@ -87,6 +89,11 @@ func (h *Harness) provider(model string) (provider.Provider, string, error) {
 func (h *Harness) SetProviders(ps map[string]provider.Provider) {
 	h.pmu.Lock()
 	defer h.pmu.Unlock()
+	for name, p := range ps {
+		if p.ObserveHealth != nil {
+			p.ObserveHealth(func(v provider.Health) { h.health(name, v) })
+		}
+	}
 	h.Providers = ps
 }
 
@@ -170,13 +177,36 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}
+	original := conf
+	balanced := false
+	if to := h.best(conf, nil, nil); to != "" && to != conf.Model {
+		conf, err = h.moveConfig(conf, to)
+		if err != nil {
+			return "", err
+		}
+		_, model, _ = strings.Cut(conf.Model, "/")
+		balanced = true
+	}
 	body, err := json.Marshal(conf)
 	if err != nil {
 		return "", err
 	}
-	f, err := h.Sessions.Start(id, body)
+	startBody := body
+	if balanced {
+		startBody, err = json.Marshal(original)
+		if err != nil {
+			return "", err
+		}
+	}
+	f, err := h.Sessions.Start(id, startBody)
 	if err != nil {
 		return "", err
+	}
+	if balanced {
+		if err := f.Append(statefile.Record{Header: statefile.Header{Kind: statefile.Config, Type: "application/json", Via: "balance"}, Body: body}); err != nil {
+			_ = f.Close()
+			return "", err
+		}
 	}
 	if err := f.Append(system("harness", System(model))); err != nil {
 		return "", err
@@ -297,6 +327,24 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	if err != nil {
 		return "", err
 	}
+	// A healthy session keeps its account and cache. Only pool sessions at
+	// their limit are moved before sending a request.
+	current, _, _ := strings.Cut(conf.Model, "/")
+	if h.balance().Mode == "auto" && limited(h.account(current), time.Now()) {
+		if to := h.best(conf, chain, triedProviders(conf.Model, chain)); to != "" {
+			if _, err := h.failover(s, conf, to, errors.New("account usage is near its limit")); err != nil {
+				return "", err
+			}
+			chain, err = h.Sessions.Load(id)
+			if err != nil {
+				return "", err
+			}
+			conf, err = config(chain)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
 	if compactable(chain) {
 		done, err := h.compact(ctx, s, id, conf, chain)
 		if err != nil {
@@ -342,11 +390,15 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	return h.step(ctx, s, id, conf, chain)
 }
 
-// fallback is the provider/model the session moves to when model's account
-// is out of usage: the next provider in the fallbacks chain that the server
-// serves and the session has not used since its last person's message, so a
-// chain of exhausted accounts ends instead of going round.
+// fallback prefers the auto pool, then walks the manual chain. Every
+// candidate goes through the same context and media eligibility check.
 func (h *Harness) fallback(model string, chain []statefile.Record) string {
+	conf, _ := config(chain)
+	conf.Model = model
+	tried := triedProviders(model, chain)
+	if to := h.best(conf, chain, tried); to != "" {
+		return to
+	}
 	if h.Fallbacks == nil {
 		return ""
 	}
@@ -354,23 +406,23 @@ func (h *Harness) fallback(model string, chain []statefile.Record) string {
 	if !ok {
 		return ""
 	}
-	tried := map[string]bool{name: true}
-	for _, r := range chain {
-		if r.Kind == statefile.Message && r.Via != "job" {
-			tried = map[string]bool{name: true}
+	fb := h.Fallbacks()
+	visited := map[string]bool{name: true}
+	for next := fb[name]; next != ""; next = fb[name] {
+		target := next
+		name = next
+		if n, model, full := strings.Cut(next, "/"); full {
+			name, m = n, model
+		} else {
+			target = name + "/" + m
 		}
-		if r.Kind == statefile.System && r.Source == "failover" {
-			if from, _, ok := strings.Cut(string(r.Body), " "); ok {
-				tried[from] = true
-			}
+		if visited[name] {
+			break
 		}
-	}
-	fb, ps := h.Fallbacks(), h.providers()
-	for next := fb[name]; next != "" && !tried[next]; next = fb[next] {
-		if _, ok := ps[next]; ok {
-			return next + "/" + m
+		visited[name] = true
+		if !tried[name] && h.eligible(conf, chain, target) {
+			return target
 		}
-		tried[next] = true
 	}
 	return ""
 }
@@ -379,7 +431,10 @@ func (h *Harness) fallback(model string, chain []statefile.Record) string {
 // model reads it, and a person sees it.
 func (h *Harness) failover(s *session, conf statefile.Conf, to string, why error) (int, error) {
 	from, _, _ := strings.Cut(conf.Model, "/")
-	conf.Model = to
+	conf, err := h.moveConfig(conf, to)
+	if err != nil {
+		return 0, err
+	}
 	body, err := json.Marshal(conf)
 	if err != nil {
 		return 0, err
@@ -453,6 +508,10 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	var calls []statefile.Record
 	var appendErr error
 	req := provider.Request{Model: model, Key: chain[0].ID, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params}
+	if p.ObserveHealth != nil {
+		name, _, _ := strings.Cut(conf.Model, "/")
+		p.ObserveHealth(func(v provider.Health) { h.health(name, v) })
+	}
 	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
 		r.Step = stepID
 		if r.ID == "" {
@@ -468,11 +527,16 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	if appendErr != nil {
 		return "", appendErr
 	}
+	if err != nil && s.stoppedBy() == "" && provider.Exhausted(err) {
+		name, _, _ := strings.Cut(conf.Model, "/")
+		h.exhausted(name, err)
+	}
 	if err != nil && s.stoppedBy() == "" && len(calls) == 0 && provider.Exhausted(err) {
 		if to := h.fallback(conf.Model, chain); to != "" {
-			if _, ferr := h.failover(s, conf, to, err); ferr == nil {
-				return statefile.StatusOpen, nil // the next step runs on the fallback
+			if _, ferr := h.failover(s, conf, to, err); ferr != nil {
+				return "", ferr
 			}
+			return statefile.StatusOpen, nil // the next step runs on the fallback
 		}
 	}
 	if err != nil {
