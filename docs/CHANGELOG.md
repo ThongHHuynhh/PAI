@@ -5,6 +5,7 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 ## Unreleased
 
 - TUI: `/usage` opens each account's usage: its state, the share of its 5 hour and 7 day windows spent, when a limit ends, and when it last reported.
+- The Overview graph draws a manager and its employees: a session that delegated others shows how many it has and how many are working, a dashed edge runs to each employee, and the side panel lists the employees (or the manager) with status, model, context and last activity; a click opens one.
 
 ## v0.2.1
 
