@@ -1,6 +1,7 @@
 name: release
-# A tag vX.Y.Z (or vX.Y.Z-rc.N) on main builds every binary, signs
-# SHA256SUMS with the release key, and publishes a GitHub release. Binaries
+# A tag vX.Y.Z on main (stable) or vX.Y.Z-beta.N on beta (prerelease) builds
+# every binary, signs SHA256SUMS with the release key, and publishes a GitHub
+# release. Binaries
 # update only to a release this key signed.
 #
 # Once: go run ./pkg/release/keygen, then in the repository settings add the
@@ -27,10 +28,12 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: tag is vX.Y.Z or vX.Y.Z-rc.N, on main
+      - name: tag is vX.Y.Z on main, or vX.Y.Z-beta.N on beta
         run: |
-          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "tag $TAG is not vX.Y.Z or vX.Y.Z-rc.N"; exit 1; }
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $TAG is not on main"; exit 1; }
+          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || { echo "tag $TAG is not vX.Y.Z or vX.Y.Z-beta.N"; exit 1; }
+          branch=main; [[ $TAG == *-beta.* ]] && branch=beta
+          git merge-base --is-ancestor "$GITHUB_SHA" "origin/$branch" || { echo "tag $TAG is not on $branch"; exit 1; }
+          echo "BRANCH=$branch" >> "$GITHUB_ENV"
       - name: notes from docs/CHANGELOG.md
         run: |
           awk -v h="## ${TAG%%-*}" '$0 == h {f = 1; next} /^## / {f = 0} f' docs/CHANGELOG.md > notes.md
@@ -42,7 +45,7 @@ jobs:
           PUB: ${{ vars.RELEASE_PUBLIC_KEY }}
         run: |
           [ -n "$PUB" ] || { echo "set the RELEASE_PUBLIC_KEY variable: go run ./pkg/release/keygen"; exit 1; }
-          ld="-s -w -X pai/pkg/version.V=$TAG -X pai/pkg/release.Repo=$GITHUB_REPOSITORY -X pai/pkg/release.Key=$PUB -X pai/pkg/version.Branch=main -X pai/pkg/version.Builder=$(whoami)@$(hostname) -X pai/pkg/version.Built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ld="-s -w -X pai/pkg/version.V=$TAG -X pai/pkg/release.Repo=$GITHUB_REPOSITORY -X pai/pkg/release.Key=$PUB -X pai/pkg/version.Branch=$BRANCH -X pai/pkg/version.Builder=$(whoami)@$(hostname) -X pai/pkg/version.Built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             os=${t%/*} arch=${t#*/} ext=
             [ "$os" = windows ] && ext=.exe
@@ -91,5 +94,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pre=; [[ $TAG == *-rc.* ]] && pre=--prerelease
+          pre=; [[ $TAG == *-beta.* ]] && pre=--prerelease
           gh release create "$TAG" dist/* --title "PAI $TAG" --notes-file notes.md $pre
