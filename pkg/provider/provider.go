@@ -178,9 +178,9 @@ func (e *httpError) Error() string { return fmt.Sprintf("%s: %s: %s", e.name, e.
 type configError struct{ error }
 
 // exhaustedWords are what vendors say when an account is out of its plan's
-// usage or rate limit, or out of credit: the step will not go through on this
+// usage, session, weekly or rate limit, or out of credit: the step will not go through on this
 // account for a while, whatever the retry.
-var exhaustedWords = []string{"usage limit", "rate limit", "rate_limit", "quota", "limit reached", "limit exceeded", "credit balance", "insufficient_quota", "overloaded", "too many requests"}
+var exhaustedWords = []string{"usage limit", "rate limit", "rate_limit", "quota", "limit reached", "limit exceeded", "credit balance", "insufficient_quota", "overloaded", "too many requests", "session limit", "weekly limit"}
 
 // Exhausted is whether err says the provider's account cannot serve now: a
 // 429 or 529 after the retries, or words that say a limit was hit. Another
