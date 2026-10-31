@@ -478,3 +478,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .arm-num { grid-column: 2; }
   .copy { flex-wrap: wrap; }
 }
+
+/* a delegated session sits under its orchestrator */
+.session-row.child { margin-left: 14px; border-left: 2px solid var(--line); }
+.nowrap { white-space: nowrap; }
