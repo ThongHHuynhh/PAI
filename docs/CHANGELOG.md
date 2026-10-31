@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- TUI: `/usage` opens each account's usage: its state, the share of its 5 hour and 7 day windows spent, when a limit ends, and when it last reported.
+
 ## v0.2.1
 
 - A session on an account that says "You've hit your session limit" or "weekly limit" now moves to the account set in Settings > When an account hits its limit. Before, only "usage limit" and similar wording counted, so Claude's own message left the session stuck.
