@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- A new session can be an orchestrator without the CLI: the TUI's `/config` has a Role section (Agent or Orchestrator), and the web New session dialog has an Orchestrator switch.
+
 ## v0.2.2
 
 - TUI: `/usage` opens each account's usage: its state, the share of its 5 hour and 7 day windows spent, when a limit ends, and when it last reported.

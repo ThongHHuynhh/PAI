@@ -1109,6 +1109,15 @@ func (s *session) config(a *App) {
 				}})
 			}
 		}
+		for _, r := range []struct{ label, tools string }{{"Agent", "default"}, {"Orchestrator: delegates to child sessions", "orchestrator"}} {
+			m.Items = append(m.Items, MenuItem{Label: r.label, Section: "Role", On: cf.Tools == r.tools, Pick: func(a *App, _ *MenuItem) {
+				cf.Tools = r.tools
+				if s.id != "" {
+					a.Pop(m.layer)
+				}
+				s.reconfig(a, cf, s.price)
+			}})
+		}
 		m.Items = append(m.Items, MenuItem{Label: "Edit full JSON", Pick: func(a *App, _ *MenuItem) { s.configJSON(a, cat, cf) }})
 		title := cf.Model
 		if ok {

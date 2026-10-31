@@ -490,6 +490,7 @@ function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: str
   const [limit, setLimit] = useState(200000);
   const [workers, setWorkers] = useState<string[]>([]);
   const [first, setFirst] = useState("");
+  const [orchestrator, setOrchestrator] = useState(false);
   const [err, setErr] = useState("");
   const machines = (graph?.machines ?? []).filter((m) => m.connected);
 
@@ -515,9 +516,10 @@ function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: str
     setErr("");
     try {
       const p = cat?.presets[preset];
+      const tools = orchestrator ? "orchestrator" : custom.trim() ? "default" : p!.tools;
       const body = custom.trim()
-        ? { model: custom.trim(), tools: "default", context_limit: limit, workers: workers.map((name) => ({ name })) }
-        : { model: `${p!.provider}/${p!.model}`, tools: p!.tools, context_limit: limit, input: p!.input, params: p!.params, preset, workers: workers.map((name) => ({ name })) };
+        ? { model: custom.trim(), tools, context_limit: limit, workers: workers.map((name) => ({ name })) }
+        : { model: `${p!.provider}/${p!.model}`, tools, context_limit: limit, input: p!.input, params: p!.params, preset, workers: workers.map((name) => ({ name })) };
       const { id } = await call<{ id: string }>("POST", "/sessions?via=web", body);
       if (first.trim()) await call("POST", `/sessions/${id}/records?via=web`, first.trim(), "text/plain; charset=utf-8");
       onMade(id);
@@ -570,6 +572,13 @@ function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: str
               </label>
             ))}
           </div>
+        </div>
+        <div className="field">
+          <span>Role</span>
+          <label className={`chip ${orchestrator ? "on" : ""}`}>
+            <input type="checkbox" checked={orchestrator} onChange={(e) => setOrchestrator(e.target.checked)} />
+            Orchestrator: delegates big work to child sessions and reports back
+          </label>
         </div>
         <label className="field">
           <span>First message (optional)</span>
