@@ -30,6 +30,7 @@ const MaxPost = 8 << 20
 //	GET  /sessions                    ?status= ?limit= ?after=<id>                 -> [Info], newest updated first
 //	POST /sessions                    Create body; ?via= required with a name      -> {"id"}
 //	GET  /sessions/{id}               -> Info
+//	GET  /sessions/{id}/models        -> [SessionModel], with eligibility and reasons
 //	GET  /sessions/{id}/records       ?after=N  ?wait=30s to long poll             -> records
 //	POST /sessions/{id}/records       one body, or multipart; ?via= required,      -> {"n"}
 //	                                  who is posting. one message record per
@@ -169,6 +170,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
 	handle("PUT /sessions/{id}/model", h.serveModel)
+	handle("GET /sessions/{id}/models", h.serveModels)
 	handle("PUT /sessions/{id}/name", h.serveName)
 	return mux
 }
@@ -195,7 +197,16 @@ func via(r *http.Request) (string, error) {
 	return "", errors.New("?via= names who is acting")
 }
 
-// serveWorkers makes a JSON list of {"name"} the session's workers.
+func (h *Harness) serveModels(w http.ResponseWriter, r *http.Request) {
+	models, err := h.Models(r.PathValue("id"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, models)
+}
+
+// serveModel moves the session from its next step on.
 func (h *Harness) serveModel(w http.ResponseWriter, r *http.Request) {
 	via, err := via(r)
 	if err != nil {
@@ -215,6 +226,7 @@ func (h *Harness) serveModel(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]int{"n": n})
 }
 
+// serveWorkers makes a JSON list of {"name"} the session's workers.
 func (h *Harness) serveWorkers(w http.ResponseWriter, r *http.Request) {
 	via, err := via(r)
 	if err != nil {

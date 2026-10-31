@@ -221,14 +221,19 @@ func (h *Harness) target(model string) (provider.Provider, catalog.Preset, error
 		return p, catalog.Preset{}, modelCatalogErr
 	}
 	name, _, _ := strings.Cut(model, "/")
-	if _, known := modelCatalog.Providers[name]; !known && p.Envelope != nil {
-		name = p.Envelope.Name()
-	}
+	name = catalogProvider(name, p)
 	pr, ok := modelCatalog.Presets[name+"/"+m]
 	if _, known := modelCatalog.Providers[name]; known && !ok {
 		return p, pr, fmt.Errorf("unknown model %q in catalog", model)
 	}
 	return p, pr, nil
+}
+
+func catalogProvider(name string, p provider.Provider) string {
+	if _, known := modelCatalog.Providers[name]; !known && p.Envelope != nil {
+		return p.Envelope.Name()
+	}
+	return name
 }
 
 // ValidateTarget also accepts a provider alone for a same-model fallback.
@@ -266,12 +271,26 @@ func (h *Harness) ValidateBalance(b Balance) error {
 // eligible is shared by automatic and manual failover. Check the built
 // context so compacted-away media does not prevent a later vendor switch.
 func (h *Harness) eligible(conf statefile.Conf, chain []statefile.Record, target string) bool {
+	return h.modelReason(conf, chain, target) == ""
+}
+
+func (h *Harness) modelReason(conf statefile.Conf, chain []statefile.Record, target string) string {
 	p, pr, err := h.target(target)
 	if err != nil {
-		return false
+		if p.Envelope == nil {
+			return "provider not served"
+		}
+		return err.Error()
 	}
-	if pr.ContextLimit > 0 && statefile.ContextUsed(chain) > int(float64(pr.ContextLimit)*moveContextFraction) {
-		return false
+	return eligibilityReason(conf, chain, p, pr)
+}
+
+// eligibilityReason is the shared, pure context/media rule. Keep the response
+// reserve used by failover when explaining why a manual move is unavailable.
+func eligibilityReason(conf statefile.Conf, chain []statefile.Record, p provider.Provider, pr catalog.Preset) string {
+	limit := int(float64(pr.ContextLimit) * moveContextFraction)
+	if used := statefile.ContextUsed(chain); pr.ContextLimit > 0 && used > limit {
+		return fmt.Sprintf("context %s does not fit %s (%.0f%% of %s context window)", contextTokens(used), contextTokens(limit), moveContextFraction*100, contextTokens(pr.ContextLimit))
 	}
 	var records []statefile.Record
 	if len(chain) > 0 {
@@ -279,10 +298,82 @@ func (h *Harness) eligible(conf statefile.Conf, chain []statefile.Record, target
 	}
 	for _, r := range records {
 		if slices.Contains(conf.Input, r.Type) && (p.Envelope == nil || !p.Envelope.Accepts(r.Type)) {
-			return false
+			media := r.Type
+			switch {
+			case strings.HasPrefix(media, "image/"):
+				media = "images"
+			case strings.HasPrefix(media, "audio/"):
+				media = "audio"
+			case strings.HasPrefix(media, "video/"):
+				media = "video"
+			}
+			return "session holds " + media + " the model cannot read"
 		}
 	}
-	return true
+	return ""
+}
+
+func contextTokens(n int) string {
+	if n >= 1000 {
+		return strconv.FormatFloat(float64(n)/1000, 'f', -1, 64) + "k"
+	}
+	return strconv.Itoa(n)
+}
+
+// SessionModel is a served model and whether it can take this session.
+type SessionModel struct {
+	Model        string `json:"model"`
+	Name         string `json:"name"`
+	Provider     string `json:"provider"`
+	ContextLimit int    `json:"context_limit"`
+	Current      bool   `json:"current"`
+	OK           bool   `json:"ok"`
+	Reason       string `json:"reason"`
+}
+
+// Models lists connected catalog models, including account aliases. Keep the
+// current model visible even if it is custom or its provider has disconnected.
+func (h *Harness) Models(id string) ([]SessionModel, error) {
+	s := h.session(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chain, err := h.Sessions.Load(id)
+	if err != nil {
+		return nil, err
+	}
+	conf, err := config(chain)
+	if err != nil {
+		return nil, err
+	}
+	if modelCatalogErr != nil {
+		return nil, modelCatalogErr
+	}
+	models := map[string]catalog.Preset{}
+	for name, p := range h.providers() {
+		for _, pr := range modelCatalog.Presets {
+			if pr.Provider == catalogProvider(name, p) {
+				// Preset variants can share a wire model. SetModel moves the
+				// model, keeping same-vendor params; list its canonical preset.
+				models[name+"/"+pr.Model] = modelCatalog.Presets[pr.Provider+"/"+pr.Model]
+			}
+		}
+	}
+	if _, ok := models[conf.Model]; !ok {
+		_, pr, _ := h.target(conf.Model)
+		models[conf.Model] = pr
+	}
+	rows := make([]SessionModel, 0, len(models))
+	for _, model := range slices.Sorted(maps.Keys(models)) {
+		pr := models[model]
+		name := pr.Name
+		if name == "" {
+			name = model
+		}
+		provider, _, _ := strings.Cut(model, "/")
+		reason := h.modelReason(conf, chain, model)
+		rows = append(rows, SessionModel{Model: model, Name: name, Provider: provider, ContextLimit: pr.ContextLimit, Current: model == conf.Model, OK: reason == "", Reason: reason})
+	}
+	return rows, nil
 }
 
 // moveConfig is the single config transition for SetModel and failover.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ago, call, records, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session } from "../api";
+import { ago, call, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
 import { useLive } from "../live";
 import { go } from "../App";
 import { ItemActions, Nudge, RetrievalBar, useRetrievals, verdict } from "../components/Retrieval";
@@ -249,36 +249,63 @@ function Transcript({ s }: { s: Session }) {
   );
 }
 
-// ModelSwitch moves the session to another account or vendor from its next
-// step: the same model on a provider this server serves, or any
-// provider/model typed in.
+// ModelSwitch asks the server which models can take the session's context.
 function ModelSwitch({ s }: { s: Session }) {
-  const [ps, setPs] = useState<ProviderInfo[]>([]);
-  const [provider, model] = splitModel(s.config.model);
+  const { refresh } = useLive();
+  const [open, setOpen] = useState(false);
+  const [models, setModels] = useState<SessionModel[] | null>(null);
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
-    call<ProviderInfo[]>("GET", "/providers").then(setPs, () => {});
-  }, []);
+    if (!open) return;
+    let alive = true;
+    setModels(null);
+    setErr("");
+    sessionModels(s.id).then(
+      (rows) => { if (alive) setModels(rows); },
+      (e) => { if (alive) setErr(String(e.message ?? e)); },
+    );
+    return () => { alive = false; };
+  }, [open, s.id]);
   const change = async (to: string) => {
-    if (to === "__other") {
-      to = prompt("Model as provider/model", s.config.model) ?? "";
-      if (!to.trim()) return;
-    }
+    setSaving(true);
+    setErr("");
     try {
-      await call("PUT", `/sessions/${s.id}/model?via=web`, to.trim(), "text/plain");
+      await call("PUT", `/sessions/${s.id}/model?via=web`, to, "text/plain");
+      setOpen(false);
+      refresh();
     } catch (e: any) {
-      alert(String(e.message ?? e));
+      setErr(String(e.message ?? e));
+    } finally {
+      setSaving(false);
     }
   };
   return (
-    <select className="inline-select" value={s.config.model} onChange={(e) => change(e.target.value)} title="Move this chat to another account or model. History and memory come along.">
-      {ps.map((p) => (
-        <option key={p.name} value={`${p.name}/${model}`}>
-          {model} · {p.name}
-        </option>
-      ))}
-      {!ps.some((p) => p.name === provider) && <option value={s.config.model}>{s.config.model}</option>}
-      <option value="__other">Other model…</option>
-    </select>
+    <>
+      <button className="link" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Change model from the next step">
+        {s.config.model}
+      </button>
+      {open && (
+        <div className="modal-back" onClick={() => setOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
+          <div className="modal model-picker" role="dialog" aria-modal="true" aria-labelledby="model-title" onClick={(e) => e.stopPropagation()}>
+            <div className="grow-row">
+              <h3 id="model-title">Model for this session</h3>
+              <button className="ghost small" autoFocus onClick={() => setOpen(false)}>Close</button>
+            </div>
+            <p className="muted small">Changes apply from the next step. History and memory come along.</p>
+            {!models && !err && <p className="muted">Loading models…</p>}
+            {models?.map((m) => (
+              <button key={m.model} className="ghost model-choice" disabled={!m.ok || m.current || saving} title={m.reason || m.model} onClick={() => void change(m.model)}>
+                <span>{m.name}{m.current ? " · current" : ""}</span>
+                <span className="muted small">{m.provider} · {tokens(m.context_limit)} context</span>
+                {!m.ok && <span className="small">{m.reason}</span>}
+              </button>
+            ))}
+            {err && <p className="error" role="alert">{err}</p>}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
