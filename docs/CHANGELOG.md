@@ -4,6 +4,13 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.2.1
+
+- A session on an account that says "You've hit your session limit" or "weekly limit" now moves to the account set in Settings > When an account hits its limit. Before, only "usage limit" and similar wording counted, so Claude's own message left the session stuck.
+- Choose the account a session falls back to (`pai fallback`, TUI and web Settings): a provider, or a full provider/model of any vendor. Auto mode (`pai balance auto <provider/model>...`, TUI and web Settings) spreads sessions over a pool of interchangeable models: a session on a spent account moves to the member with the most room, and a new session starts there. A healthy session never moves for more room, so its prompt cache stays. A target is skipped if it is not served, its context window is too small, or it cannot read the media the session holds. `GET /accounts` and `pai accounts` show each account's usage; `GET /metrics` limits are per provider. Memory ids are random, which fixes duplicate-id test failures on Windows.
+- One orchestrator session can delegate to child sessions: the `orchestrator` tool set adds `delegate`, `tell`, `children` and `stop_child`. `delegate` queues onto a related child that is working, resumes an idle one, or spawns a new one with a handoff, and starts it on the account with the most room. It takes a size (small, medium, large) and refuses when the account has too little room for it, with the reset time. A finished child reports to its parent by itself, and stopping the parent stops its children. The TUI sidebar and `pai sessions` show children under their parent.
+- Branches: work lands on `beta`, `-beta.N` tags are prereleases cut from it, and `main` holds stable releases only.
+
 - Settings in the web app: each account shows its 5 hour and 7 day usage and when it is out of usage until, and a new card turns balance across accounts on or off and picks its pool of interchangeable models (the same as `pai balance` and the TUI).
 
 - The web session list shows delegated sessions under their orchestrator, indented, with the orchestrator's child count and whether one is working. A child whose orchestrator is not listed stands alone.
