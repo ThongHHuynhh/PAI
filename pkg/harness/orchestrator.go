@@ -55,7 +55,7 @@ type orchestratorArgs struct {
 // ownership and depth are enforced here even if a model invents a tool call.
 func (h *Harness) orchestratorCall(ctx context.Context, id string, conf statefile.Conf, call statefile.Record, c provider.Call) statefile.Record {
 	fail := func(err error) statefile.Record { return result(call.ID, "error: "+err.Error()) }
-	if conf.Tools != "orchestrator" || conf.Parent != "" {
+	if !Orchestrates(conf.Tools) || conf.Parent != "" {
 		return fail(fmt.Errorf("only a top-level orchestrator can use %s", c.Name))
 	}
 	var a orchestratorArgs
@@ -219,7 +219,7 @@ func (h *Harness) dispatch(ctx context.Context, parent string, conf statefile.Co
 		}
 		// A child starts on the freest account of the balance pool, when one is set. Keep
 		// provider parameters too: some models require an output limit.
-		d.id, err = h.Create(ctx, Create{Parent: parent, Model: h.Pick(conf.Model), Workers: conf.Workers, ContextLimit: conf.ContextLimit, Input: conf.Input, Params: conf.Params, Tools: "default", Name: a.Name}, via)
+		d.id, err = h.Create(ctx, Create{Parent: parent, Model: h.Pick(conf.Model), Workers: conf.Workers, ContextLimit: conf.ContextLimit, Input: conf.Input, Params: conf.Params, Tools: RoleTools(conf.Tools, false), Name: a.Name}, via)
 		if err != nil {
 			return "", err
 		}
