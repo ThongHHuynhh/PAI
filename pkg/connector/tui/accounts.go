@@ -106,22 +106,49 @@ func (s *session) accountRows(m *Menu, v accountSettings) {
 	if len(v.balance.Pool) > 0 {
 		m.Items = append(m.Items, MenuItem{Section: "Balance", Label: "Pool", Hint: strings.Join(v.balance.Pool, ", "), Pick: func(a *App, _ *MenuItem) { s.balancePool(a, v) }})
 	}
+	for _, ac := range v.accounts {
+		m.Items = append(m.Items, MenuItem{Section: "Accounts (read only)", Label: ac.Name, Hint: usageHint(ac)})
+	}
+}
+
+// usageHint is one account's state and the share of its 5 hour and 7 day
+// windows it has spent, as it last reported them.
+func usageHint(ac harness.Account) string {
 	percent := func(u *float64) string {
 		if u == nil {
 			return "?"
 		}
 		return fmt.Sprintf("%.0f%%", *u*100)
 	}
-	for _, ac := range v.accounts {
-		hint := fmt.Sprintf("%s · 5h %s · 7d %s", ac.Status, percent(ac.UtilFiveHour), percent(ac.UtilSevenDay))
-		if !ac.LimitedUntil.IsZero() {
-			hint += " · until " + ac.LimitedUntil.Local().Format(time.DateTime)
-		}
-		if !ac.Updated.IsZero() {
-			hint += " · seen " + ac.Updated.Local().Format(time.DateTime)
-		}
-		m.Items = append(m.Items, MenuItem{Section: "Accounts (read only)", Label: ac.Name, Hint: hint})
+	hint := fmt.Sprintf("%s · 5h %s · 7d %s", ac.Status, percent(ac.UtilFiveHour), percent(ac.UtilSevenDay))
+	if !ac.LimitedUntil.IsZero() {
+		hint += " · until " + ac.LimitedUntil.Local().Format(time.DateTime)
 	}
+	if !ac.Updated.IsZero() {
+		hint += " · seen " + ac.Updated.Local().Format(time.DateTime)
+	}
+	return hint
+}
+
+// usage is the menu of each account's usage.
+func (s *session) usage(a *App) {
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callTime)
+		defer cancel()
+		var accounts []harness.Account
+		err := s.c.Call(ctx, "GET", "/accounts", "", nil, &accounts)
+		a.Post(func() {
+			if err != nil {
+				a.SayError(err)
+				return
+			}
+			m := &Menu{}
+			for _, ac := range accounts {
+				m.Items = append(m.Items, MenuItem{Label: ac.Name, Hint: usageHint(ac)})
+			}
+			a.OpenMenu("Usage", m)
+		})
+	})
 }
 
 func (s *session) balancePool(a *App, v accountSettings) {
