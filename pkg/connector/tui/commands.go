@@ -280,6 +280,7 @@ func (s *session) palette(a *App) {
 // switchTo leaves this session for to: its polls and posts end.
 func (s *session) switchTo(a *App, to *session) {
 	s.cancel()
+	s.closeAsk(a)
 	s.list.leave()
 	s.list.cur = to
 	a.T.Progress(false)

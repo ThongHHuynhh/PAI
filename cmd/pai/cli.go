@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -333,11 +334,20 @@ func (c client) chat(id string) {
 		fmt.Println("\n" + id)
 		os.Exit(0)
 	}()
+	var asking atomic.Pointer[asked] // the questions the session waits on: a line is an answer
 	go func() {
 		sc := bufio.NewScanner(os.Stdin)
 		sc.Buffer(make([]byte, 64<<10), harness.MaxPost)
 		for sc.Scan() {
-			if line := sc.Text(); line != "" {
+			line := sc.Text()
+			if a := asking.Load(); a != nil {
+				if send, answers := a.take(line); send {
+					asking.Store(nil)
+					if err := c.Answer(context.Background(), id, via, a.call, answers); err != nil {
+						fmt.Println(err)
+					}
+				}
+			} else if line != "" {
 				c.post(id, line, nil)
 			}
 		}
@@ -347,16 +357,94 @@ func (c client) chat(id string) {
 		quit <- os.Interrupt
 	}()
 	var chain []statefile.Record
+	var open *statefile.Record // the newest ask call with no result yet
 	for {
 		recs := c.records(id, len(chain), "30s")
 		for _, r := range recs {
 			render(r)
+			switch {
+			case r.Kind == statefile.Call && len(harness.Questions(r)) > 0:
+				open = &r
+			case r.Kind == statefile.Result && open != nil && open.ID == r.For:
+				open = nil
+				asking.Store(nil)
+			}
 		}
 		chain = append(chain, recs...)
-		if st := statefile.Derive(chain); len(recs) > 0 && (st == statefile.StatusClosed || st == statefile.StatusFailed) {
+		var stepping bool // the lock's word, which the records do not say
+		if open != nil {
+			info, err := c.Info(context.Background(), id)
+			if err != nil {
+				die(err)
+			}
+			stepping = info.Status == statefile.StatusStepping
+		}
+		switch st := statefile.Derive(chain); {
+		case open != nil && stepping:
+			if a := asking.Load(); a == nil || a.call != open.ID {
+				a = &asked{call: open.ID, qs: harness.Questions(*open)}
+				asking.Store(a)
+				a.prompt()
+			}
+		case len(recs) > 0 && (st == statefile.StatusClosed || st == statefile.StatusFailed):
 			fmt.Print("> ")
 		}
 	}
+}
+
+// asked is an ask call being answered on the terminal, one question at a time.
+type asked struct {
+	call string
+	qs   []harness.Question
+	got  [][]string
+}
+
+func (a *asked) prompt() {
+	q := a.qs[len(a.got)]
+	fmt.Printf("\n[%d/%d] %s: %s\n", len(a.got)+1, len(a.qs), q.Header, q.Question)
+	for i, o := range q.Options {
+		fmt.Printf("  %d. %s - %s\n", i+1, o.Label, o.Description)
+	}
+	hint := "a number"
+	if q.MultiSelect {
+		hint = "numbers with commas"
+	}
+	fmt.Printf("%s, or type your own answer; an empty line declines\n> ", hint)
+}
+
+// take is one line of answer. It reports whether the answers are complete,
+// or declined, which are none.
+func (a *asked) take(line string) (bool, [][]string) {
+	if line == "" {
+		return true, nil
+	}
+	q, ans := a.qs[len(a.got)], []string{line}
+	if picks := picked(line, q.Options); picks != nil {
+		ans = picks
+	}
+	if len(ans) > 1 && !q.MultiSelect {
+		fmt.Print("pick one\n> ")
+		return false, nil
+	}
+	if a.got = append(a.got, ans); len(a.got) < len(a.qs) {
+		a.prompt()
+		return false, nil
+	}
+	return true, a.got
+}
+
+// picked is the labels of the options a line of numbers names, none when the
+// line is not only such numbers.
+func picked(line string, opts []harness.Option) []string {
+	var out []string
+	for _, f := range strings.Split(line, ",") {
+		n, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil || n < 1 || n > len(opts) {
+			return nil
+		}
+		out = append(out, opts[n-1].Label)
+	}
+	return out
 }
 
 // render prints one record: number and kind, the header fields that matter

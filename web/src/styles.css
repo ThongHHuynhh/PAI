@@ -254,6 +254,16 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .chip { font-size: 12.5px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); background: transparent; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
 .chip.on { background: var(--accent-soft); border-color: var(--accent); }
 .chip input { display: none; }
+.ask { width: min(620px, 100%); }
+.ask-q { border: 0; border-top: 1px solid var(--line); margin: 0; padding: 12px 0; min-width: 0; }
+.ask-q p { margin: 4px 0 8px; font-weight: 600; }
+.ask-head { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.ask-opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
+.ask-opt.on { border-color: var(--accent); background: var(--accent-soft); }
+.ask-opt span { display: flex; flex-direction: column; gap: 2px; }
+.ask-opt input { margin-top: 3px; }
+.ask-other { width: 100%; margin-top: 2px; }
+.ask-bar { display: block; width: 100%; text-align: left; cursor: pointer; margin: 0; border-radius: 0; border-width: 1px 0; }
 
 /* knowledge: a notebook. Rows keep one height and their slots stay put,
    so hovering, opening or switching tabs moves nothing. */

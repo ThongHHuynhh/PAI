@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"pai/pkg/connector/tui/term"
+	"pai/pkg/harness"
 	"pai/pkg/statefile"
 )
 
@@ -574,6 +575,12 @@ func (b *callBlock) summary() string {
 			}
 		}
 		return ""
+	case "ask":
+		var hs []string
+		for _, q := range harness.Questions(b.call) {
+			hs = append(hs, q.Question)
+		}
+		return strings.Join(hs, " / ")
 	case "patch":
 		var ps []string
 		for _, m := range patchFile.FindAllStringSubmatch(b.arg("input"), -1) {

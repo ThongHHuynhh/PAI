@@ -41,6 +41,9 @@ const MaxPost = 8 << 20
 //	POST /sessions/{id}/retry         step from the tip, whatever it is            -> {"status"}
 //	POST /sessions/{id}/stop          ?via= required. cut a running step, write    -> 204; the records
 //	                                  it down; kill its environments and jobs        say what happened
+//	POST /sessions/{id}/answer        ?via= required. {"call","answers":[["label"]..]} -> 204; 409 when the
+//	                                  or {"call","declined":true}: what the person      call waits for no answer
+//	                                  chose for an ask call
 //	PUT  /sessions/{id}/workers       [{"name"}]; ?via= required. a config record  -> {"n"}
 //	                                  with these workers; the next step sees them
 //	PUT  /sessions/{id}/model         provider/model as text; ?via= required. a     -> {"n"}
@@ -166,6 +169,25 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	handle("POST /sessions/{id}/answer", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := via(r); err != nil {
+			fail(w, err)
+			return
+		}
+		var a Reply
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxPost)).Decode(&a); err != nil {
+			fail(w, err)
+			return
+		}
+		switch err := h.Answer(r.PathValue("id"), a); {
+		case errors.Is(err, ErrNoAsk):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case err != nil:
+			fail(w, err)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
 	})
 	handle("DELETE /sessions/{id}", h.serveDelete)
 	handle("PUT /sessions/{id}/workers", h.serveWorkers)
