@@ -2,6 +2,10 @@
 
 One section per release, newest first. A `-beta` tag, cut from the beta branch, ships the section of the release it is a candidate for.
 
+## Unreleased
+
+- Web Performance page on any screen: a section's tiles share one full row (two across on a phone, an odd last one spans both), charts sit three across (one on a phone), pairs sit two across only on a wide screen with the errors box as tall as its neighbour, and a table's first column stays put while it scrolls sideways. Nothing overflows sideways from 320 px up.
+
 ## v0.2.4
 
 - Web on iPhone: the app follows the part of the screen the keyboard leaves, so the message box no longer jumps, the question popup keeps Decline and Send answers above the keyboard, the tab bar hides while typing, and fields use 16px text so Safari does not zoom in. A phone opens on Chat, shows one pane at a time with a back button, and Enter makes a new line there; Send sends.

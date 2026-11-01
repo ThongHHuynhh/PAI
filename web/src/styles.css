@@ -359,7 +359,7 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .perf-sec h2 { font-size: 15px; margin: 0 0 8px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; height: 80px; cursor: help; min-width: 0; line-height: 1.35; }
-.tile-k { font-size: 12px; color: var(--muted); }
+.tile-k { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-v { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-d { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bad { color: var(--error); }
@@ -384,14 +384,14 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .perf-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .perf-table tr:last-child td { border-bottom: 0; }
 .perf-table .num { text-align: right; }
-.perf-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; margin-top: 8px; align-items: start; }
+.perf-two { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
 .perf-two > .perf-table { margin-top: 0; }
 .perf-errors { padding: 10px 12px; height: 220px; display: flex; flex-direction: column; }
 .perf-errors h3 { font-size: 13px; margin: 0 0 6px; }
 .perf-errors ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; }
 .perf-errors li { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 4px 0; cursor: pointer; border-bottom: 1px solid var(--line); }
 .hbars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.hbars li { display: grid; grid-template-columns: 130px 1fr 90px; gap: 8px; align-items: center; font-size: 12.5px; }
+.hbars li { display: grid; grid-template-columns: minmax(0, min(130px, 40%)) minmax(24px, 1fr) auto; gap: 8px; align-items: center; font-size: 12.5px; }
 .hb-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hb-t { height: 8px; background: var(--panel-2); border-radius: 99px; overflow: hidden; }
 .hb-t i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
@@ -404,10 +404,27 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .fill .meter { width: 70px; }
 .spark { display: block; margin-left: auto; }
 .spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-@media (max-width: 720px) {
-  .perf-page { padding: 16px 16px 40px; }
-  .seg button { width: 58px; }
-  .hbars li { grid-template-columns: 100px 1fr 80px; }
+/* One grid for the page: a section's tiles share its full width in one row,
+   charts sit three across, and pairs two across on a wide screen. Every box
+   lines up with the edges above and below it, at any width. */
+.perf-page .tiles { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); grid-template-columns: none; }
+.perf-page .charts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.perf-table td:first-child, .perf-table th:first-child { position: sticky; left: 0; background: var(--panel); z-index: 1; }
+.perf-table th:first-child { z-index: 2; }
+@media (min-width: 1100px) {
+  .perf-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* the errors box takes its row's height from its neighbour, not its list */
+  .perf-two > .perf-errors { height: auto; min-height: 220px; contain: size; }
+}
+@media (max-width: 699px) {
+  .perf-page { padding: 16px 12px 32px; }
+  .perf-page .nb-head { height: auto; flex-wrap: wrap; row-gap: 10px; }
+  .perf-page .seg { flex: 1 1 100%; }
+  .seg button { flex: 1; width: auto; }
+  .perf-page .tiles { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .perf-page .tiles > .tile:last-child:nth-child(odd) { grid-column: span 2; }
+  .perf-page .charts { grid-template-columns: minmax(0, 1fr); }
+  .perf-table.scroll { height: 240px; }
 }
 
 /* settings */
