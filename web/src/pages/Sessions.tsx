@@ -1,5 +1,5 @@
 import { Ask, questionsOf } from "../components/Ask";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { ago, call, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
 import { useLive } from "../live";
 import { go } from "../App";
@@ -8,6 +8,11 @@ import { splitModel } from "./Graph";
 
 // LIST is where this browser keeps whether the session list is shown.
 const LIST = "pai.sessions.list";
+// SHOWN is how many of the newest records a transcript draws at first: a
+// long session drawn whole is too heavy for a phone.
+const SHOWN = 150;
+// A touch keyboard has no Shift+Enter: there Enter is a new line and Send sends.
+const touch = window.matchMedia("(pointer: coarse)").matches;
 
 export default function Sessions({ id }: { id?: string }) {
   const { graph, refresh } = useLive();
@@ -125,8 +130,9 @@ function Transcript({ s }: { s: Session }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hidden, setHidden] = useState(""); // the ask call whose popup was dismissed
-  const end = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
+  const [shown, setShown] = useState(SHOWN);
 
   // New records are read when the event stream says the session has them,
   // not by a long poll: a request held open per chat tab would use up the
@@ -182,7 +188,8 @@ function Transcript({ s }: { s: Session }) {
   }, [live]);
 
   useEffect(() => {
-    if (stuck.current) end.current?.scrollIntoView({ block: "end" });
+    const el = box.current;
+    if (el && stuck.current) el.scrollTop = el.scrollHeight;
   }, [recs]);
 
   const send = async () => {
@@ -201,6 +208,18 @@ function Transcript({ s }: { s: Session }) {
   };
 
   const results = useMemo(() => Object.fromEntries(recs.filter((r) => r.kind === "result").map((r) => [r.for, r])), [recs]);
+  // Tool calls and step lines in a row fold into one line that opens on a tap,
+  // so a long run of commands does not bury the conversation.
+  const groups = useMemo(() => {
+    const out: (Rec | Rec[])[] = [];
+    for (const r of recs.slice(-shown)) {
+      if (r.kind === "result" || r.kind === "thinking") continue;
+      if (r.kind !== "call" && r.kind !== "step") out.push(r);
+      else if (Array.isArray(out[out.length - 1])) (out[out.length - 1] as Rec[]).push(r);
+      else out.push([r]);
+    }
+    return out;
+  }, [recs, shown]);
   const asking = s.status === "stepping" ? recs.filter((r) => r.kind === "call" && !results[r.id] && questionsOf(r).length > 0).pop() : undefined;
   const retrievals = useRetrievals(s.id);
   const recalls = useMemo(() => Object.fromEntries(retrievals.map((r) => [r.id, r])), [retrievals]);
@@ -209,6 +228,9 @@ function Transcript({ s }: { s: Session }) {
   return (
     <div className="transcript">
       <header className="transcript-head">
+        <button className="icon-btn back" onClick={() => go({ page: "sessions" })} title="All sessions" aria-label="All sessions">
+          ‹
+        </button>
         <div className="grow" style={{ minWidth: 0 }}>
           <h2 className="ellipsis">{sessionTitle(s)}</h2>
           <div className="muted small ellipsis">
@@ -238,16 +260,25 @@ function Transcript({ s }: { s: Session }) {
       </header>
       <div
         className="records"
+        ref={box}
         onScroll={(e) => {
           const el = e.currentTarget;
           stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        {recs.map((r) => (
-          <Record key={r.n} r={r} result={r.kind === "call" ? results[r.id] : undefined} recalls={recalls} />
-        ))}
+        {recs.length > shown && (
+          <button className="ghost small earlier" onClick={() => setShown(shown + SHOWN)}>
+            Show earlier ({recs.length - shown} more)
+          </button>
+        )}
+        {groups.map((g) =>
+          Array.isArray(g) ? (
+            <Calls key={g[0].n} rs={g} results={results} recalls={recalls} />
+          ) : (
+            <Record key={g.n} r={g} recalls={recalls} />
+          ),
+        )}
         {s.status === "stepping" && <div className="thinking">PAI is working…</div>}
-        <div ref={end} />
       </div>
       {asking && (
         hidden === asking.id ? (
@@ -263,10 +294,10 @@ function Transcript({ s }: { s: Session }) {
       <footer className="composer">
         <textarea
           value={text}
-          placeholder="Message PAI. Enter sends, Shift+Enter is a new line."
+          placeholder={touch ? "Message PAI" : "Message PAI. Enter sends, Shift+Enter is a new line."}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !touch) {
               e.preventDefault();
               void send();
             }
@@ -340,7 +371,8 @@ function ModelSwitch({ s }: { s: Session }) {
   );
 }
 
-function Record({ r, result, recalls }: { r: Rec; result?: Rec; recalls: { [id: string]: Retrieval } }) {
+// Record is drawn again only when its own props change, not on every new record.
+const Record = memo(function Record({ r, result, recalls }: { r: Rec; result?: Rec; recalls: { [id: string]: Retrieval } }) {
   const [open, setOpen] = useState(false);
   switch (r.kind) {
     case "message":
@@ -357,25 +389,13 @@ function Record({ r, result, recalls }: { r: Rec; result?: Rec; recalls: { [id: 
         </div>
       );
     case "call": {
-      let name = "call",
-        args: any = {};
-      try {
-        const c = JSON.parse(r.body);
-        name = c.name;
-        args = c.arguments;
-      } catch {
-        /* raw */
-      }
-      const memoryTool = ["recall", "remember", "forget"].includes(name);
-      if (name === "ask") args = { ...args, questions: undefined, asked: questionsOf(r).map((q) => q.question) };
-      const head = args.worker ? `${name} on ${args.worker}` : name;
-      const gist = args.code ?? args.path ?? args.query ?? args.text ?? args.id ?? "";
+      const { args, head, gist, memoryTool } = parseCall(r);
       return (
         <div className={`callrow ${memoryTool ? "mem" : ""}`} onClick={() => setOpen(!open)}>
           <div className="call-head">
             <span className="ficon">{memoryTool ? "◆" : "⚙"}</span>
             <b>{head}</b>
-            <span className="muted ellipsis mono">{String(gist).split("\n")[0]}</span>
+            <span className="muted ellipsis mono">{gist}</span>
             {result && <span className={`exit ${result.exit ? "bad" : ""}`}>{result.exit !== undefined ? `exit ${result.exit}` : "done"}</span>}
           </div>
           {open && (
@@ -422,6 +442,48 @@ function Record({ r, result, recalls }: { r: Rec; result?: Rec; recalls: { [id: 
     default:
       return null;
   }
+});
+
+// Calls is a run of tool calls, folded to one line: how many, how many
+// failed, and the latest. Open, it shows each call as before.
+function Calls({ rs, results, recalls }: { rs: Rec[]; results: { [id: string]: Rec }; recalls: { [id: string]: Retrieval } }) {
+  const [open, setOpen] = useState(false);
+  const calls = rs.filter((r) => r.kind === "call");
+  if (!calls.length) return <>{rs.map((r) => <Record key={r.n} r={r} recalls={recalls} />)}</>;
+  const failed = calls.filter((c) => results[c.id]?.exit).length;
+  const last = parseCall(calls[calls.length - 1]);
+  return (
+    <div className="calls">
+      <button className="calls-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="ficon">{open ? "▾" : "▸"}</span>
+        <b className="nowrap">
+          {calls.length} tool call{calls.length > 1 ? "s" : ""}
+        </b>
+        {failed > 0 && <span className="exit bad nowrap">{failed} failed</span>}
+        {!open && <span className="muted ellipsis mono">{last.head}: {last.gist}</span>}
+      </button>
+      {open && rs.map((r) => <Record key={r.n} r={r} result={r.kind === "call" ? results[r.id] : undefined} recalls={recalls} />)}
+    </div>
+  );
+}
+
+function parseCall(r: Rec) {
+  let name = "call",
+    args: any = {};
+  try {
+    const c = JSON.parse(r.body);
+    name = c.name;
+    args = c.arguments;
+  } catch {
+    /* raw */
+  }
+  if (name === "ask") args = { ...args, questions: undefined, asked: questionsOf(r).map((q) => q.question) };
+  return {
+    args,
+    head: args.worker ? `${name} on ${args.worker}` : name,
+    gist: String(args.code ?? args.path ?? args.query ?? args.text ?? args.id ?? args.asked?.[0] ?? "").split("\n")[0],
+    memoryTool: ["recall", "remember", "forget"].includes(name),
+  };
 }
 
 // MemoryCard is what memory recalled for a turn: each item is a line with its
