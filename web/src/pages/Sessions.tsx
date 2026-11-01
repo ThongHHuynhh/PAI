@@ -1,10 +1,11 @@
 import { Ask, questionsOf } from "../components/Ask";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { ago, call, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
-import { useLive } from "../live";
+import { ago, call, labelled, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
+import { ModelName, ProviderName, useLive } from "../live";
 import { go } from "../App";
 import { ItemActions, Nudge, RetrievalBar, useRetrievals, verdict } from "../components/Retrieval";
 import { splitModel } from "./Graph";
+import { VoiceButtons, canListen, hint, useDictation, useVoiceMode } from "../components/Voice";
 
 // LIST is where this browser keeps whether the session list is shown.
 const LIST = "pai.sessions.list";
@@ -192,14 +193,17 @@ function Transcript({ s }: { s: Session }) {
     if (el && stuck.current) el.scrollTop = el.scrollHeight;
   }, [recs]);
 
+  const post = async (t: string) => {
+    await call("POST", `/sessions/${s.id}/records?via=web`, t, "text/plain; charset=utf-8");
+    stuck.current = true;
+  };
   const send = async () => {
     const t = text.trim();
     if (!t) return;
     setSending(true);
     try {
-      await call("POST", `/sessions/${s.id}/records?via=web`, t, "text/plain; charset=utf-8");
+      await post(t);
       setText("");
-      stuck.current = true;
     } catch (e: any) {
       setErr(String(e.message ?? e));
     } finally {
@@ -224,6 +228,8 @@ function Transcript({ s }: { s: Session }) {
   const retrievals = useRetrievals(s.id);
   const recalls = useMemo(() => Object.fromEntries(retrievals.map((r) => [r.id, r])), [retrievals]);
   const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
+  const dictate = useDictation((t) => setText((x) => (x.trim() ? `${x.trimEnd()} ${t}` : t)));
+  const voice = useVoiceMode(post, recs, s.status === "stepping", setErr);
 
   return (
     <div className="transcript">
@@ -256,6 +262,7 @@ function Transcript({ s }: { s: Session }) {
               Retry
             </button>
           ) : null}
+          {s.status !== "stepping" && <DeleteSession s={s} />}
         </div>
       </header>
       <div
@@ -293,21 +300,43 @@ function Transcript({ s }: { s: Session }) {
       {err && <div className="banner error">{err}</div>}
       <footer className="composer">
         <textarea
-          value={text}
-          placeholder={touch ? "Message PAI" : "Message PAI. Enter sends, Shift+Enter is a new line."}
+          value={voice.on ? voice.heard : dictate.interim ? `${text}${text && " "}${dictate.interim}` : text}
+          readOnly={voice.on || dictate.on}
+          placeholder={voice.on ? hint(voice.state) : touch ? "Message PAI" : "Message PAI. Enter sends, Shift+Enter is a new line."}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !touch) {
+            if (e.key === "Enter" && !e.shiftKey && !touch && !voice.on) {
               e.preventDefault();
               void send();
             }
           }}
         />
-        <button className="primary" disabled={sending || !text.trim()} onClick={send}>
+        {canListen && <VoiceButtons dictate={dictate} voice={voice} />}
+        <button className="primary" disabled={sending || voice.on || !text.trim()} onClick={send}>
           Send
         </button>
       </footer>
     </div>
+  );
+}
+
+// DeleteSession removes the session's file for good, after the person says so.
+function DeleteSession({ s }: { s: Session }) {
+  const { refresh } = useLive();
+  const del = async () => {
+    if (!confirm(`Delete "${sessionTitle(s)}" for good? Its history is removed; what PAI learnt from it stays in memory.`)) return;
+    try {
+      await call("DELETE", `/sessions/${s.id}?via=web`);
+      refresh();
+      go({ page: "sessions" });
+    } catch (e: any) {
+      alert(String(e.message ?? e));
+    }
+  };
+  return (
+    <button className="ghost small danger" onClick={del} title="Delete this session">
+      Delete
+    </button>
   );
 }
 
@@ -345,7 +374,7 @@ function ModelSwitch({ s }: { s: Session }) {
   return (
     <>
       <button className="link" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Change model from the next step">
-        {s.config.model}
+        <ModelName model={s.config.model} />
       </button>
       {open && (
         <div className="modal-back" onClick={() => setOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
@@ -359,7 +388,7 @@ function ModelSwitch({ s }: { s: Session }) {
             {models?.map((m) => (
               <button key={m.model} className="ghost model-choice" disabled={!m.ok || m.current || saving} title={m.reason || m.model} onClick={() => void change(m.model)}>
                 <span>{m.name}{m.current ? " · current" : ""}</span>
-                <span className="muted small">{m.provider} · {tokens(m.context_limit)} context</span>
+                <span className="muted small"><ProviderName id={m.provider} /> · {tokens(m.context_limit)} context</span>
                 {!m.ok && <span className="small">{m.reason}</span>}
               </button>
             ))}
@@ -544,7 +573,7 @@ export function Text({ s }: { s: string }) {
 }
 
 function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: string) => void }) {
-  const { graph } = useLive();
+  const { graph, labels } = useLive();
   const [cat, setCat] = useState<Catalog | null>(null);
   const [served, setServed] = useState<ProviderInfo[]>([]);
   const [preset, setPreset] = useState("");
@@ -612,7 +641,7 @@ function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: str
           >
             {presets.map((id) => (
               <option key={id} value={id}>
-                {cat!.presets[id].name} — {cat!.providers[cat!.presets[id].provider]?.name ?? cat!.presets[id].provider}
+                {cat!.presets[id].name} — {labelled(labels, cat!.presets[id].provider, cat!.providers[cat!.presets[id].provider]?.name ?? cat!.presets[id].provider)}
               </option>
             ))}
           </select>

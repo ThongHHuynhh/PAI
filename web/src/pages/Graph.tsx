@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Background, ControlButton, Controls, Handle, Position, ReactFlow, applyNodeChanges, type Edge, type Node, type NodeChange, type NodeProps, type XYPosition } from "@xyflow/react";
 import { ago, sessionTitle, tokens, type Machine, type Session, type Stats } from "../api";
-import { describe, useLive } from "../live";
+import { describe, ModelName, ProviderName, useLive } from "../live";
 import { go } from "../App";
 import { Orbit } from "../components/Orbit";
 
@@ -80,7 +80,7 @@ function SessionNode({ data }: NodeProps<Node<SessionData>>) {
         <span className="gtitle ellipsis">{sessionTitle(s)}</span>
       </div>
       <div className="gsub">
-        <b>{model}</b> <span className="muted">via {provider}</span>
+        <b>{model}</b> <span className="muted">via <ProviderName id={provider} /></span>
       </div>
       <div className="meter" title={`context ${tokens(s.context_used)} of ${tokens(s.config.context_limit)}`}>
         <i style={{ width: `${fill * 100}%` }} className={fill > 0.7 ? "hot" : ""} />
@@ -272,7 +272,9 @@ export default function GraphPage() {
             <h3>{sessionTitle(selected)}</h3>
             <dl className="kv">
               <dt>Model</dt>
-              <dd>{selected.config.model}</dd>
+              <dd>
+                <ModelName model={selected.config.model} />
+              </dd>
               <dt>Status</dt>
               <dd>
                 <span className={`pill ${selected.status}`}>{selected.status}</span>

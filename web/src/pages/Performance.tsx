@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ago, call, sessionTitle, tokens, type Metrics, type MetricsRange, type Session, type Usage } from "../api";
-import { useLive } from "../live";
+import { ModelName, useLive } from "../live";
 import { go } from "../App";
 
 // Performance is how PAI is doing over a range: the models it steps, the
@@ -101,7 +101,9 @@ function Body({ m }: { m: Metrics }) {
           tips={[, , "Median time to the full reply", , "Prompt tokens, cached ones included", , "Share of the prompt served from cache", NO_PRICES]}
           empty="No model calls in this range."
           rows={m.models.map((x) => [
-            <b key="m">{x.model}</b>,
+            <b key="m">
+              <ModelName model={x.model} />
+            </b>,
             x.steps,
             ms(x.p50_ms),
             ms(x.p95_ms),

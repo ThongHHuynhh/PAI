@@ -147,7 +147,6 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .nav .icon { width: 18px; text-align: center; }
 .nav-status { padding: 10px; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-.nav-tools { display: flex; gap: 4px; padding: 0 4px; }
 .main { overflow: auto; min-width: 0; }
 .foot { grid-column: 2; padding: 3px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); text-align: center; }
 
@@ -250,6 +249,13 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .nudge-text { overflow-wrap: anywhere; }
 .composer { display: flex; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); align-items: flex-end; }
 .composer textarea { min-height: 48px; max-height: 220px; }
+/* every composer button is as tall as the empty message box */
+.composer > button { height: 48px; flex: none; }
+.voice-btn { width: 48px; padding: 0; display: grid; place-items: center; color: var(--muted); }
+.voice-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.voice-btn.on, .voice-btn.wake, .voice-btn.sending, .voice-btn.speaking { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.voice-btn.hearing { color: #fff; border-color: var(--accent); background: var(--accent); }
+.voice-btn.on, .voice-btn.sending, .voice-btn.speaking { animation: breathe 1.6s ease-in-out infinite; }
 .modal-back { position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); background: rgba(0, 0, 0, 0.5); display: grid; place-items: center; padding: 16px; z-index: 10; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; width: min(560px, 100%); max-height: 90vh; overflow: auto; }
 .modal select { width: 100%; }
@@ -359,7 +365,7 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .perf-sec h2 { font-size: 15px; margin: 0 0 8px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; height: 80px; cursor: help; min-width: 0; line-height: 1.35; }
-.tile-k { font-size: 12px; color: var(--muted); }
+.tile-k { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-v { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-d { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bad { color: var(--error); }
@@ -384,14 +390,14 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .perf-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .perf-table tr:last-child td { border-bottom: 0; }
 .perf-table .num { text-align: right; }
-.perf-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; margin-top: 8px; align-items: start; }
+.perf-two { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
 .perf-two > .perf-table { margin-top: 0; }
 .perf-errors { padding: 10px 12px; height: 220px; display: flex; flex-direction: column; }
 .perf-errors h3 { font-size: 13px; margin: 0 0 6px; }
 .perf-errors ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; }
 .perf-errors li { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 4px 0; cursor: pointer; border-bottom: 1px solid var(--line); }
 .hbars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.hbars li { display: grid; grid-template-columns: 130px 1fr 90px; gap: 8px; align-items: center; font-size: 12.5px; }
+.hbars li { display: grid; grid-template-columns: minmax(0, min(130px, 40%)) minmax(24px, 1fr) auto; gap: 8px; align-items: center; font-size: 12.5px; }
 .hb-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hb-t { height: 8px; background: var(--panel-2); border-radius: 99px; overflow: hidden; }
 .hb-t i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
@@ -404,16 +410,37 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .fill .meter { width: 70px; }
 .spark { display: block; margin-left: auto; }
 .spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-@media (max-width: 720px) {
-  .perf-page { padding: 16px 16px 40px; }
-  .seg button { width: 58px; }
-  .hbars li { grid-template-columns: 100px 1fr 80px; }
+/* One grid for the page: a section's tiles share its full width in one row,
+   charts sit three across, and pairs two across on a wide screen. Every box
+   lines up with the edges above and below it, at any width. */
+.perf-page .tiles { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); grid-template-columns: none; }
+.perf-page .charts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.perf-table td:first-child, .perf-table th:first-child { position: sticky; left: 0; background: var(--panel); z-index: 1; }
+.perf-table th:first-child { z-index: 2; }
+@media (min-width: 1100px) {
+  .perf-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* the errors box takes its row's height from its neighbour, not its list */
+  .perf-two > .perf-errors { height: auto; min-height: 220px; contain: size; }
+}
+@media (max-width: 699px) {
+  .perf-page { padding: 16px 12px 32px; }
+  .perf-page .nb-head { height: auto; flex-wrap: wrap; row-gap: 10px; }
+  .perf-page .seg { flex: 1 1 100%; }
+  .seg button { flex: 1; width: auto; }
+  .perf-page .tiles { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .perf-page .tiles > .tile:last-child:nth-child(odd) { grid-column: span 2; }
+  .perf-page .charts { grid-template-columns: minmax(0, 1fr); }
+  .perf-table.scroll { height: 240px; }
 }
 
 /* settings */
 .settings-page .card { margin-bottom: 14px; }
 .plain { list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
 .plain li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* a provider's display name is edited in place: the box never changes size */
+.plain li.provider-row { display: grid; grid-template-columns: 8px minmax(0, 16rem) minmax(0, 1fr); }
+.label-edit { width: 100%; padding: 5px 10px; background: transparent; font-weight: 600; }
+.label-edit:hover { background: var(--panel-2); }
 .copy { display: flex; gap: 8px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 6px 6px 10px; margin: 4px 0 10px; }
 .copy code { background: none; padding: 0; flex: 1; overflow-x: auto; white-space: nowrap; }
 
@@ -439,7 +466,6 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .nav a { justify-content: center; padding: 10px; }
   .nav .icon { font-size: 17px; }
   .nav-status { padding: 8px 0; justify-content: center; }
-  .nav-tools { flex-direction: column; }
   .graph-page { grid-template-columns: 1fr; grid-template-rows: minmax(420px, 62vh) auto; height: auto; }
   .graph-side { border-left: 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
   .sessions-page { grid-template-columns: 260px 1fr; }
@@ -461,7 +487,6 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .nav a { flex-direction: column; gap: 2px; padding: 6px 4px; font-size: 11px; flex: 1; }
   .nav .label { display: block; }
   .nav a.active { background: none; }
-  .nav-tools { flex-direction: row; align-items: center; height: 48px; }
   .graph-page { grid-template-rows: 58vh auto; }
   .graph-side { grid-template-columns: 1fr; }
   /* one pane at a time: the list, or the open session with a back button */
@@ -474,7 +499,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .session-list { border-right: 0; }
   .transcript-head { padding: 10px 12px; }
   .records { padding: 12px; }
-  .composer { padding: 8px 12px; }
+  .composer { padding: 8px 12px; gap: 8px; }
   .retrieval-bar { padding: 4px 12px; }
   .retrieval-panel { padding: 8px 12px; }
   .msg { max-width: 100%; }
@@ -489,6 +514,8 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .arm { grid-template-columns: 70px 1fr; }
   .arm-num { grid-column: 2; }
   .copy { flex-wrap: wrap; }
+  .plain li.provider-row { grid-template-columns: 8px minmax(0, 1fr); row-gap: 2px; }
+  .provider-row .muted { grid-column: 2; padding-left: 11px; }
 }
 
 /* a delegated session sits under its orchestrator */
@@ -504,3 +531,5 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
 .calls-head { display: flex; gap: 8px; align-items: center; min-width: 0; padding: 4px 10px; font-size: 13px; text-align: left; background: none; border: 1px dashed var(--line); }
 .calls-head:hover { background: var(--panel-2); }
 .calls-head .exit { margin-left: 0; }
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ago, call, type Arm, type Hit, type Metrics, type Retrieval, type Stats } from "../api";
+import { ago, call, labelled, type Arm, type Hit, type Metrics, type Retrieval, type Stats } from "../api";
 import { useLive } from "../live";
 
 // A recall counts as helped above this reward, the same line the Memory page's
@@ -99,7 +99,7 @@ export function Nudge({ r }: { r: Retrieval }) {
 // RetrievalBar is the note above the input: one line about this chat's
 // recalls that opens, upward, into how retrieval performed.
 export function RetrievalBar({ session, rs }: { session: string; rs: Retrieval[] }) {
-  const { memoryTick } = useLive();
+  const { memoryTick, labels } = useLive();
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState("");
   const [stats, setStats] = useState<{ stats: Stats; bandit: Arm[] } | null>(null);
@@ -151,7 +151,7 @@ export function RetrievalBar({ session, rs }: { session: string; rs: Retrieval[]
               <Tile k="Provider limit" v="—" d="shown after a reply" tip="The provider reports its usage windows with a reply, so there is nothing until one has come since the server started" />
             ) : (
               lim.map((l) => (
-                <Tile key={l.prov + l.w} warn={l.utilization >= LIMIT_WARN} k={WINDOWS[l.w] ?? l.w} v={`${pc(1 - l.utilization)} left`} d={`resets in ${until(l.resets)}`} tip={`${l.prov}: ${pc(l.utilization)} spent, status ${l.status}`} />
+                <Tile key={l.prov + l.w} warn={l.utilization >= LIMIT_WARN} k={WINDOWS[l.w] ?? l.w} v={`${pc(1 - l.utilization)} left`} d={`resets in ${until(l.resets)}`} tip={`${labelled(labels, l.prov)}: ${pc(l.utilization)} spent, status ${l.status}`} />
               ))
             )}
           </div>
