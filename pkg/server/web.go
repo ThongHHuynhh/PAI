@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"pai/pkg/coordinator"
 	"pai/pkg/events"
@@ -40,6 +41,8 @@ import (
 //	PUT    /fallbacks                   the same, whole: saved in the config and applied
 //	GET/PUT /balance                    {"mode":"off|auto","pool":["provider/model",...]}
 //	GET    /accounts                    account limits and observed utilization; unknown usage is null
+//	PUT    /providers/{name}/label      text: the name a person reads for the provider, saved in the
+//	                                    config and applied; empty clears it
 //	POST   /memory/consolidate          -> {"clusters"}: merge what memory says more than once, with the
 //	                                    model of the newest session
 //
@@ -160,6 +163,21 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 		if err == nil {
 			c.Fallbacks = fb
 			err = saveConfig(wa.path, c)
+		}
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("PUT /providers/{name}/label", func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(io.LimitReader(r.Body, harness.MaxName+1))
+		label := strings.TrimSpace(string(b))
+		if err == nil && (len(label) > harness.MaxName || !utf8.ValidString(label) || strings.ContainsAny(label, "\r\n")) {
+			err = fmt.Errorf("a label is one line of at most %d bytes of UTF-8", harness.MaxName)
+		}
+		if err == nil {
+			err = setLabel(wa.path, r.PathValue("name"), label, wa.h.SetProviders)
 		}
 		if err != nil {
 			fail(w, err)

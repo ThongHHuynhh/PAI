@@ -38,5 +38,5 @@ Every route but `/app/`, `/id` and `/join` takes `Authorization: Bearer <api key
 | `GET /events` | Server-Sent Events: records, workers, memory |
 | `GET /graph` | the server, machines, sessions and memory stats |
 | `GET /memory`, `POST /memory`, `PATCH /memory/{id}`, `/invalidate`, `/restore`, `/feedback`, `POST /memory/consolidate`, `GET /memory/retrievals`, `GET /memory/stats` | memory |
-| `GET /providers`, `PUT /providers/{name}`, `/providers/{name}/login`, `GET/PUT /fallbacks`, `GET /catalog` | models and accounts |
+| `GET /providers`, `PUT /providers/{name}`, `PUT /providers/{name}/label`, `/providers/{name}/login`, `GET/PUT /fallbacks`, `GET /catalog` | models and accounts |
 | `GET /workers`, `GET /join`, `POST /keys`, `GET/POST /settings` | machines, keys, updates |

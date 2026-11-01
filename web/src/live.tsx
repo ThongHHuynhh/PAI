@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { call, streamEvents, type Graph, type PaiEvent } from "./api";
+import { call, streamEvents, type Graph, type PaiEvent, type ProviderInfo } from "./api";
 
 // Live is the server's state as every page shares it: the graph snapshot,
 // refreshed when machines or sessions change, the activity feed, and when
@@ -10,6 +10,7 @@ type Live = {
   feed: PaiEvent[];
   pulse: Record<string, number>; // node id -> time of its last activity
   memoryTick: number; // grows on every memory event
+  labels: Record<string, string>; // provider id -> the label a person gave it
   refresh: () => void;
   subscribe: (fn: (e: PaiEvent) => void) => () => void; // every event, until the returned function is called
   error: string;
@@ -31,6 +32,7 @@ export function LiveProvider({ children, onAuthFail }: { children: ReactNode; on
   const [feed, setFeed] = useState<PaiEvent[]>([]);
   const [pulse, setPulse] = useState<Record<string, number>>({});
   const [memoryTick, setMemoryTick] = useState(0);
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const timer = useRef<number | undefined>(undefined);
   const listeners = useRef(new Set<(e: PaiEvent) => void>());
@@ -51,6 +53,7 @@ export function LiveProvider({ children, onAuthFail }: { children: ReactNode; on
         if (e.status === 401 || e.status === 403) onAuthFail();
         else setError(String(e.message ?? e));
       });
+    call<ProviderInfo[]>("GET", "/providers").then((ps) => setLabels(Object.fromEntries(ps.flatMap((p) => (p.label ? [[p.name, p.label]] : []))))).catch(() => {});
   }, [onAuthFail]);
 
   // a burst of events refreshes the snapshot once
@@ -90,7 +93,20 @@ export function LiveProvider({ children, onAuthFail }: { children: ReactNode; on
     };
   }, [refresh, soon]);
 
-  return <Ctx.Provider value={{ graph, live, feed, pulse, memoryTick, refresh, subscribe, error }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ graph, live, feed, pulse, memoryTick, labels, refresh, subscribe, error }}>{children}</Ctx.Provider>;
+}
+
+// ProviderName is a provider id as a person reads it: its label, if it has
+// one, with the id in the tooltip.
+export function ProviderName({ id }: { id: string }) {
+  const label = useLive().labels[id];
+  return label ? <span title={id}>{label}</span> : <>{id}</>;
+}
+
+// ModelName is a provider/model, its provider read as ProviderName.
+export function ModelName({ model }: { model: string }) {
+  const i = model.indexOf("/");
+  return i < 0 ? <>{model}</> : <><ProviderName id={model.slice(0, i)} />{model.slice(i)}</>;
 }
 
 // describe is an event in a few words, for the activity feed.

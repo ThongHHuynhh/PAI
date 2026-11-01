@@ -115,6 +115,7 @@ type Provider struct {
 	URL     string `json:"url,omitempty"`     // the base url its SDK takes; none is the vendor's own
 	Region  string `json:"region,omitempty"`  // for a shape whose endpoint names one
 	Session string `json:"session,omitempty"` // the header the session's routing key goes in, for a server that routes its cache on one
+	Label   string `json:"label,omitempty"`   // the name a person reads in place of its own
 }
 
 // providerDir is the directory of provider name's own state, such as a
@@ -176,6 +177,7 @@ func providers(dir string, cfg map[string]Provider) (map[string]provider.Provide
 		}
 		pp := build(provider.Config{Key: os.ExpandEnv(p.Key), URL: os.ExpandEnv(p.URL), Region: os.ExpandEnv(p.Region), Dir: providerDir(dir, name)})
 		pp.Session = cmp.Or(p.Session, pp.Session)
+		pp.Label = p.Label
 		out[name] = pp
 	}
 	return out, nil
@@ -466,6 +468,30 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 		}
 	}
 	c.Providers[name] = p
+	return serveConfig(path, c, serve)
+}
+
+// setLabel makes label the label of provider name in the config at path, an
+// empty one none, and serves the providers.
+func setLabel(path, name, label string, serve func(map[string]provider.Provider)) error {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	p, ok := c.Providers[name]
+	if !ok {
+		return fmt.Errorf("unknown provider %q", name)
+	}
+	p.Label = label
+	c.Providers[name] = p
+	return serveConfig(path, c, serve)
+}
+
+// serveConfig writes c over the config at path and serves its providers.
+// The caller holds keyMu.
+func serveConfig(path string, c Config, serve func(map[string]provider.Provider)) error {
 	ps, err := providers(filepath.Dir(path), c.Providers)
 	if err != nil {
 		return err

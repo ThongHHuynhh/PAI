@@ -59,7 +59,7 @@ const MaxPost = 8 << 20
 //	                                  device code still joins new machines
 //	PUT  /workers/{name}/name         the new name as text. links, drives and      -> 204
 //	                                  sessions keep naming the old one
-//	GET  /providers                   -> [{"name","shape","url"}]: what this harness
+//	GET  /providers                   -> [{"name","shape","url","label"}]: what this harness
 //	                                     serves as name/model; no secrets
 //
 // ctx outlives every request: it is what steps run under.
@@ -97,7 +97,7 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 				return
 			}
 			u.User, u.RawQuery = nil, "" // where a URL may carry a secret
-			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String()})
+			out = append(out, ProviderInfo{name, ps[name].Envelope.Name(), u.String(), ps[name].Label})
 		}
 		reply(w, out)
 	})
@@ -204,6 +204,7 @@ type ProviderInfo struct {
 	Name  string `json:"name"`
 	Shape string `json:"shape"`
 	URL   string `json:"url"`
+	Label string `json:"label,omitempty"` // the name a person gave it, shown in place of Name
 }
 
 func reply(w http.ResponseWriter, v any) {
