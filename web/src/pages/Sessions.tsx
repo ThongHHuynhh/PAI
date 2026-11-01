@@ -5,6 +5,7 @@ import { useLive } from "../live";
 import { go } from "../App";
 import { ItemActions, Nudge, RetrievalBar, useRetrievals, verdict } from "../components/Retrieval";
 import { splitModel } from "./Graph";
+import { VoiceButtons, canListen, hint, useDictation, useVoiceMode } from "../components/Voice";
 
 // LIST is where this browser keeps whether the session list is shown.
 const LIST = "pai.sessions.list";
@@ -192,14 +193,17 @@ function Transcript({ s }: { s: Session }) {
     if (el && stuck.current) el.scrollTop = el.scrollHeight;
   }, [recs]);
 
+  const post = async (t: string) => {
+    await call("POST", `/sessions/${s.id}/records?via=web`, t, "text/plain; charset=utf-8");
+    stuck.current = true;
+  };
   const send = async () => {
     const t = text.trim();
     if (!t) return;
     setSending(true);
     try {
-      await call("POST", `/sessions/${s.id}/records?via=web`, t, "text/plain; charset=utf-8");
+      await post(t);
       setText("");
-      stuck.current = true;
     } catch (e: any) {
       setErr(String(e.message ?? e));
     } finally {
@@ -224,6 +228,8 @@ function Transcript({ s }: { s: Session }) {
   const retrievals = useRetrievals(s.id);
   const recalls = useMemo(() => Object.fromEntries(retrievals.map((r) => [r.id, r])), [retrievals]);
   const fill = s.config.context_limit ? s.context_used / s.config.context_limit : 0;
+  const dictate = useDictation((t) => setText((x) => (x.trim() ? `${x.trimEnd()} ${t}` : t)));
+  const voice = useVoiceMode(post, recs, s.status === "stepping", setErr);
 
   return (
     <div className="transcript">
@@ -294,17 +300,19 @@ function Transcript({ s }: { s: Session }) {
       {err && <div className="banner error">{err}</div>}
       <footer className="composer">
         <textarea
-          value={text}
-          placeholder={touch ? "Message PAI" : "Message PAI. Enter sends, Shift+Enter is a new line."}
+          value={voice.on ? voice.heard : dictate.interim ? `${text}${text && " "}${dictate.interim}` : text}
+          readOnly={voice.on || dictate.on}
+          placeholder={voice.on ? hint(voice.state) : touch ? "Message PAI" : "Message PAI. Enter sends, Shift+Enter is a new line."}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !touch) {
+            if (e.key === "Enter" && !e.shiftKey && !touch && !voice.on) {
               e.preventDefault();
               void send();
             }
           }}
         />
-        <button className="primary" disabled={sending || !text.trim()} onClick={send}>
+        {canListen && <VoiceButtons dictate={dictate} voice={voice} />}
+        <button className="primary" disabled={sending || voice.on || !text.trim()} onClick={send}>
           Send
         </button>
       </footer>

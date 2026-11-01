@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ago, call, type Account, type Balance as BalanceT, type Catalog, type ProviderInfo } from "../api";
 import { useLive } from "../live";
 import { useTheme } from "../App";
+import { READ } from "../components/Voice";
 
 type Join = { join: string; unix?: string; windows?: string };
 type LoginState = { state: string; error?: string; text?: string; url?: string; code?: string; paste?: boolean };
@@ -20,6 +21,7 @@ export default function Settings({ onOut }: { onOut: () => void }) {
       <Balance />
       <Machines />
       <Keys />
+      <Voice />
       <Server />
     </div>
   );
@@ -369,6 +371,29 @@ function Keys() {
         </>
       )}
       {err && <p className="error">{err}</p>}
+    </section>
+  );
+}
+
+function Voice() {
+  const [read, setRead] = useState(localStorage.getItem(READ) === "1");
+  return (
+    <section className="card">
+      <h2>Voice</h2>
+      <p className="muted small">
+        In a chat, the mic button dictates into the message box. The wave button turns on voice mode: say “Hey PAI” and your message, and it is sent after a short pause. Voice mode works only while the page is open and the screen is on. This choice is kept in this browser.
+      </p>
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={read}
+          onChange={(e) => {
+            localStorage.setItem(READ, e.target.checked ? "1" : "0");
+            setRead(e.target.checked);
+          }}
+        />{" "}
+        Read replies aloud in voice mode
+      </label>
     </section>
   );
 }
