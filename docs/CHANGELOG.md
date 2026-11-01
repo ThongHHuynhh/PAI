@@ -2,10 +2,9 @@
 
 One section per release, newest first. A `-beta` tag, cut from the beta branch, ships the section of the release it is a candidate for.
 
-## Unreleased
+## v0.2.5
 
 - Web Performance page on any screen: a section's tiles share one full row (two across on a phone, an odd last one spans both), charts sit three across (one on a phone), pairs sit two across only on a wide screen with the errors box as tall as its neighbour, and a table's first column stays put while it scrolls sideways. Nothing overflows sideways from 320 px up.
-
 - Web: a session can be deleted from its header (Delete, after a confirm; what PAI learnt from it stays in memory). The dark theme switch and Sign out moved from the side and tab bar into Settings > This browser, and Sign out asks first.
 - Web voice input: a mic button in the chat dictates into the message box, and voice mode listens for "Hey PAI" and sends what follows after a short pause. Settings > Voice can read replies aloud. It uses the browser's own speech, works while the page is open and the screen on, and is hidden where the browser cannot listen.
 - A provider can have a display name: rename it in place in Settings, and the web app and the TUI's account settings show it, with the provider id in the tooltip or beside it. The id stays in the config, models, fallbacks and the balance pool. The route is `PUT /providers/{name}/label` with a text body; an empty body clears it.
