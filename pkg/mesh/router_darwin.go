@@ -6,10 +6,17 @@ import (
 	"net/netip"
 	"os/exec"
 	"strings"
+
+	"tailscale.com/net/netns"
 )
 
 // macOS names every TUN itself: utun and the next free number.
 const tunName = "utun"
+
+// Sockets follow the routing table, not always the default route's
+// interface, so a harness on the user's tailnet is reached through
+// Tailscale. The mesh routes only its /48, so no socket loops through it.
+func init() { netns.SetDisableBindConnToInterface(log.Printf, true) }
 
 func (r *osRouter) Up() error { return run("ifconfig", r.tun, "up") }
 
