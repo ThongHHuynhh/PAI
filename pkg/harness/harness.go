@@ -502,7 +502,7 @@ func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []sta
 	}
 	records, _ := statefile.Build(chain[:last.Upto])
 	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
-	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: chain[0].ID, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params})
+	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: chain[0].ID, Tools: sessionTools(conf), Context: records, Params: conf.Params})
 	if err != nil || fmt.Sprintf("sha256:%x", sha256.Sum256(body)) == last.Request {
 		return ""
 	}
@@ -527,7 +527,7 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	stepID := statefile.NewID()
 	var calls []statefile.Record
 	var appendErr error
-	req := provider.Request{Model: model, Key: chain[0].ID, Tools: Tools(conf.Tools, conf.Input), Context: records, Params: conf.Params}
+	req := provider.Request{Model: model, Key: chain[0].ID, Tools: sessionTools(conf), Context: records, Params: conf.Params}
 	if p.ObserveHealth != nil {
 		name, _, _ := strings.Cut(conf.Model, "/")
 		p.ObserveHealth(func(v provider.Health) { h.health(name, v) })
@@ -718,6 +718,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 		return h.orchestratorCall(ctx, id, conf, call, c)
 	}
 	if c.Name == "ask" {
+		if conf.Parent != "" {
+			return result(call.ID, "error: a child session cannot ask, as nobody watches it; decide yourself and name the choice under Open in your report")
+		}
 		return h.ask(ctx, id, call, c)
 	}
 	if a.Worker == worker.Harness { // a model may take the mesh's name for the machine

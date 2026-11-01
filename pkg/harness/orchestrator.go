@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -34,7 +35,7 @@ Prefer a child session over an outside agent while the accounts have room. Give 
 Reuse before spawning: delegate routes to a related child, queueing behind its current work or resuming its context. Use tell for a specific child's follow-up; children lists your children; stop_child stops one.
 Use one git branch or worktree per child. Never let children share a working tree. Review actual diffs and run checks, not just the child's claims.
 Keep at most 3 children working at a time. Children must never spawn other sessions.
-Children report automatically via session:<child>; a report wakes you. After delegating, tell the user what is running and end your turn instead of polling.
+Children report automatically via session:<child> in a fixed form (Result, Changes, Checks, Open); a report wakes you. Children cannot ask the user, so put every decision they need in the task. After delegating, tell the user what is running and end your turn instead of polling.
 Worker tools require a worker argument; delegate, tell, children and stop_child run on the server and require none.`
 )
 
@@ -293,7 +294,24 @@ func (h *Harness) postChild(ctx context.Context, parent, child, key, text string
 }
 
 func childBrief(parent, task string) string {
-	return fmt.Sprintf("You are a child agent. Your parent session is %s; it only reads your final reply.\nTask:\n%s\n\nRules: stay inside this task; work on your own git branch or worktree if you change code; do not start other sessions; do not push to main. When done, end with a short report: what you did, files and branch, test results, anything open or risky.", parent, task)
+	return fmt.Sprintf("You are a child agent. Your parent session is %s; it only reads your final reply.\nTask:\n%s\n\nRules: stay inside this task; work on your own git branch or worktree if you change code; do not start other sessions; do not push to main. Nobody watches this session, so you cannot ask the user: decide yourself and name the choice under Open.\nEnd your final reply with this report, each part short:\n%s", parent, task, childReport)
+}
+
+// childReport is the form of a child's final reply, so the parent reads every
+// report the same way and sees what was checked, not only what was claimed.
+const childReport = `Result: done, partial or failed, in one line
+Changes: branch or worktree, files changed, one line each
+Checks: each command run and its outcome
+Open: decisions you made, risks, and anything left undone`
+
+// sessionTools is the tool set a session's model sees. A child has no ask:
+// nobody watches it, so a question would hold it, and its parent, for askTime.
+func sessionTools(conf statefile.Conf) []provider.Tool {
+	tools := Tools(conf.Tools, conf.Input)
+	if conf.Parent != "" {
+		tools = slices.DeleteFunc(tools, func(t provider.Tool) bool { return t.Name == "ask" })
+	}
+	return tools
 }
 
 // lastReply is the text after the last message or result, plus a terminal

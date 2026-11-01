@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- A child session no longer has the `ask` tool, and a child's ask is refused: nobody watches a child, so its question held it and its orchestrator for up to 30 minutes. A child's final report now has a fixed form: Result, Changes, Checks, Open.
+
 ## v0.2.3
 
 - A new session can be an orchestrator without the CLI: the TUI's `/config` has a Role section (Agent or Orchestrator), and the web New session dialog has an Orchestrator switch. The role keeps the file tools of the model's preset: a model trained on patches orchestrates with `patch` (new tool set `patch-orchestrator`), the rest with `write` and `edit`. A delegated child gets its parent's file tools instead of always `default`.
