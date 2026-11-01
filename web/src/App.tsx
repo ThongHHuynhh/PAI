@@ -118,7 +118,7 @@ export function useTheme(): ["light" | "dark", () => void] {
 function Shell({ onOut }: { onOut: () => void }) {
   const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
   const { live, graph, error } = useLive();
-  const [theme, toggle] = useTheme();
+  useTheme(); // the stored theme applies from the start; Settings switches it
   useEffect(() => {
     const on = () => setRoute(parse(window.location.hash));
     window.addEventListener("hashchange", on);
@@ -144,14 +144,6 @@ function Shell({ onOut }: { onOut: () => void }) {
           <span className={`dot ${live ? "on" : ""}`} />
           <span className="label">{live ? `${online} machine${online === 1 ? "" : "s"} · ${stepping} working` : "Reconnecting…"}</span>
         </div>
-        <div className="nav-tools">
-          <button className="icon-btn" onClick={toggle} title={theme === "light" ? "Dark theme" : "Light theme"} aria-label="Switch theme">
-            {theme === "light" ? "☾" : "☀"}
-          </button>
-          <button className="icon-btn" onClick={() => confirm("Sign out of PAI in this browser?") && onOut()} title="Sign out" aria-label="Sign out">
-            ⎋
-          </button>
-        </div>
       </nav>
       <main className="main">
         {error && <div className="banner error">{error}</div>}
@@ -159,7 +151,7 @@ function Shell({ onOut }: { onOut: () => void }) {
         {route.page === "sessions" && <Sessions id={route.arg} />}
         {route.page === "knowledge" && <Knowledge focus={route.arg} />}
         {route.page === "performance" && <Performance />}
-        {route.page === "settings" && <Settings />}
+        {route.page === "settings" && <Settings onOut={onOut} />}
       </main>
       <footer className="foot">Copyright © 2026 MTR</footer>
     </div>

@@ -256,6 +256,7 @@ function Transcript({ s }: { s: Session }) {
               Retry
             </button>
           ) : null}
+          {s.status !== "stepping" && <DeleteSession s={s} />}
         </div>
       </header>
       <div
@@ -308,6 +309,26 @@ function Transcript({ s }: { s: Session }) {
         </button>
       </footer>
     </div>
+  );
+}
+
+// DeleteSession removes the session's file for good, after the person says so.
+function DeleteSession({ s }: { s: Session }) {
+  const { refresh } = useLive();
+  const del = async () => {
+    if (!confirm(`Delete "${sessionTitle(s)}" for good? Its history is removed; what PAI learnt from it stays in memory.`)) return;
+    try {
+      await call("DELETE", `/sessions/${s.id}?via=web`);
+      refresh();
+      go({ page: "sessions" });
+    } catch (e: any) {
+      alert(String(e.message ?? e));
+    }
+  };
+  return (
+    <button className="ghost small danger" onClick={del} title="Delete this session">
+      Delete
+    </button>
   );
 }
 

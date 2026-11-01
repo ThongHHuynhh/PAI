@@ -147,7 +147,6 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .nav .icon { width: 18px; text-align: center; }
 .nav-status { padding: 10px; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-.nav-tools { display: flex; gap: 4px; padding: 0 4px; }
 .main { overflow: auto; min-width: 0; }
 .foot { grid-column: 2; padding: 3px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); text-align: center; }
 
@@ -456,7 +455,6 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .nav a { justify-content: center; padding: 10px; }
   .nav .icon { font-size: 17px; }
   .nav-status { padding: 8px 0; justify-content: center; }
-  .nav-tools { flex-direction: column; }
   .graph-page { grid-template-columns: 1fr; grid-template-rows: minmax(420px, 62vh) auto; height: auto; }
   .graph-side { border-left: 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
   .sessions-page { grid-template-columns: 260px 1fr; }
@@ -478,7 +476,6 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .nav a { flex-direction: column; gap: 2px; padding: 6px 4px; font-size: 11px; flex: 1; }
   .nav .label { display: block; }
   .nav a.active { background: none; }
-  .nav-tools { flex-direction: row; align-items: center; height: 48px; }
   .graph-page { grid-template-rows: 58vh auto; }
   .graph-side { grid-template-columns: 1fr; }
   /* one pane at a time: the list, or the open session with a back button */
@@ -521,3 +518,5 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
 .calls-head { display: flex; gap: 8px; align-items: center; min-width: 0; padding: 4px 10px; font-size: 13px; text-align: left; background: none; border: 1px dashed var(--line); }
 .calls-head:hover { background: var(--panel-2); }
 .calls-head .exit { margin-left: 0; }
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }

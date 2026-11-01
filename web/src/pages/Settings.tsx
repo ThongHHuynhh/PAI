@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import { ago, call, type Account, type Balance as BalanceT, type Catalog, type ProviderInfo } from "../api";
 import { useLive } from "../live";
+import { useTheme } from "../App";
 
 type Join = { join: string; unix?: string; windows?: string };
 type LoginState = { state: string; error?: string; text?: string; url?: string; code?: string; paste?: boolean };
 type Build = { branch: string; commit: string; dirty: string; builder: string; built: string; go: string; platform: string };
 type SettingsT = { version: { current: string; latest?: string; build: Build } };
 
-export default function Settings() {
+export default function Settings({ onOut }: { onOut: () => void }) {
   return (
     <div className="settings-page">
       <header className="page-head">
         <h1>Settings</h1>
       </header>
+      <Browser onOut={onOut} />
       <Providers />
       <Failover />
       <Balance />
@@ -20,6 +22,29 @@ export default function Settings() {
       <Keys />
       <Server />
     </div>
+  );
+}
+
+// Browser is what this browser keeps: its theme and its sign-in.
+function Browser({ onOut }: { onOut: () => void }) {
+  const [theme, toggle] = useTheme();
+  return (
+    <section className="card">
+      <h2>This browser</h2>
+      <ul className="plain">
+        <li>
+          <label className="switch">
+            <input type="checkbox" checked={theme === "dark"} onChange={toggle} />
+            Dark theme
+          </label>
+        </li>
+        <li>
+          <button className="ghost small danger" onClick={() => confirm("Sign out of PAI in this browser? You will need the API key to sign in again.") && onOut()}>
+            Sign out
+          </button>
+        </li>
+      </ul>
+    </section>
   );
 }
 
