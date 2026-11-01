@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"pai/pkg/auth"
 	"pai/pkg/mesh"
 	"pai/pkg/release"
 )
@@ -27,15 +28,27 @@ func leave(m *mesh.Mesh) {
 }
 
 // rejoin drops the mesh keys of a node the harness removed, which it refuses
-// for good, so the install joins as a new node, under its own name.
-func rejoin() error {
+// for good, or of a node of another harness, which knows none of them, so
+// the install joins token's harness as a new node, under its own name.
+func rejoin(token string) error {
 	dir := filepath.Join(stateDir, "mesh")
-	if _, err := os.Stat(filepath.Join(dir, mesh.Removed)); errors.Is(err, fs.ErrNotExist) {
-		return nil
-	} else if err != nil {
+	if _, err := os.Stat(filepath.Join(dir, mesh.Removed)); err == nil || !sameHarness(token) {
+		return os.RemoveAll(dir)
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	return os.RemoveAll(dir)
+	return nil
+}
+
+// sameHarness is whether the installed join token is for token's harness.
+func sameHarness(token string) bool {
+	b, err := os.ReadFile(filepath.Join(stateDir, "join"))
+	if err != nil {
+		return false
+	}
+	old, _, _, err := auth.Parse(auth.Join, string(b))
+	key, _, _, err2 := auth.Parse(auth.Join, token)
+	return err == nil && err2 == nil && old == key
 }
 
 // place copies this binary to bin, the path the service runs, through a new

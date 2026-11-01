@@ -1,12 +1,14 @@
 package mesh
 
 import (
+	"log"
 	"net/netip"
 
 	"github.com/tailscale/wireguard-go/tun"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+	"tailscale.com/net/netns"
 	"tailscale.com/net/tstun"
 )
 
@@ -30,9 +32,12 @@ const (
 // to one network profile for the mesh.
 var guid = windows.GUID{Data1: 0xc6c3abb4, Data2: 0xad0a, Data3: 0x4f1b, Data4: [8]byte{0x9b, 0xcd, 0x90, 0x3d, 0x3a, 0x19, 0xac, 0x58}}
 
+// Sockets bind to the interface of their route, not always the default
+// route's, so a harness on the user's tailnet is reached through Tailscale.
 func init() {
 	tun.WintunTunnelType = tunName
 	tun.WintunStaticRequestedGUID = &guid
+	netns.SetBindToInterfaceByRoute(log.Printf, true)
 }
 
 // alone has nothing to check: a second worker's adapter of the same GUID

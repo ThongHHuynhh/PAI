@@ -27,7 +27,6 @@
   --k-summary: #5f6878;
   --radius: 12px;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --tabbar: 0px;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
@@ -58,6 +57,9 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* the page itself never scrolls: each pane scrolls inside */
+html, body { overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+#root { height: var(--app-h, 100dvh); }
 body {
   background: var(--bg);
   color: var(--text);
@@ -200,6 +202,7 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .transcript { display: flex; flex-direction: column; height: 100%; }
 .transcript-head { display: flex; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .transcript-head h2 { margin: 0; }
+.transcript-head .back { display: none; }
 .head-right { display: flex; gap: 12px; align-items: center; }
 .ctx { display: flex; flex-direction: column; gap: 3px; width: 170px; }
 .records { flex: 1; overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
@@ -247,9 +250,11 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .nudge-text { overflow-wrap: anywhere; }
 .composer { display: flex; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); align-items: flex-end; }
 .composer textarea { min-height: 48px; max-height: 220px; }
-.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.modal-back { position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); background: rgba(0, 0, 0, 0.5); display: grid; place-items: center; padding: 16px; z-index: 10; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; width: min(560px, 100%); max-height: 90vh; overflow: auto; }
 .modal select { width: 100%; }
+/* a dialog's buttons stay in sight however long it is, and above a keyboard */
+.modal > .row.end { position: sticky; bottom: -22px; margin: 12px -22px -22px; padding: 12px 22px calc(12px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--line); }
 .model-picker { white-space: normal; }
 .model-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; margin-top: 6px; text-align: left; overflow-wrap: anywhere; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -440,16 +445,18 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .sessions-page { grid-template-columns: 260px 1fr; }
 }
 @media (max-width: 699px) {
-  :root { --tabbar: calc(60px + env(safe-area-inset-bottom)); }
   .only-phone-block { display: block; }
   .graph-page { grid-template-rows: 46vh auto; }
-  .shell { grid-template-columns: 1fr; height: 100%; }
-  .foot { grid-column: 1; margin-bottom: var(--tabbar); }
+  .shell { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
+  .foot { display: none; }
+  .main { grid-row: 1; }
   .nav {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: var(--tabbar);
-    flex-direction: row; justify-content: space-around; align-items: flex-start;
+    grid-row: 2; flex-direction: row; justify-content: space-around; align-items: flex-start;
     padding: 6px 4px env(safe-area-inset-bottom); border-right: 0; border-top: 1px solid var(--line);
   }
+  /* the keyboard takes the bottom: the composer sits right on it */
+  :root.kb .nav { display: none; }
+  .transcript-head .ctx { width: 56px; }
   .brand, .nav .grow, .nav-status { display: none; }
   .nav a { flex-direction: column; gap: 2px; padding: 6px 4px; font-size: 11px; flex: 1; }
   .nav .label { display: block; }
@@ -457,9 +464,13 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .nav-tools { flex-direction: row; align-items: center; height: 48px; }
   .graph-page { grid-template-rows: 58vh auto; }
   .graph-side { grid-template-columns: 1fr; }
-  .sessions-page { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; }
-  .sessions-page.has-cur:not(.folded) .session-view { display: none; }
+  /* one pane at a time: the list, or the open session with a back button */
+  .sessions-page, .sessions-page.folded { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); height: 100%; }
+  .sessions-page.has-cur .session-list { display: none; }
   .sessions-page:not(.has-cur) .session-view { display: none; }
+  .transcript-head .back { display: block; font-size: 24px; padding: 0 8px 2px 0; }
+  .transcript-head .ctx span { display: none; }
+  .composer textarea { resize: none; }
   .session-list { border-right: 0; }
   .transcript-head { padding: 10px 12px; }
   .records { padding: 12px; }
@@ -467,13 +478,12 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .retrieval-bar { padding: 4px 12px; }
   .retrieval-panel { padding: 8px 12px; }
   .msg { max-width: 100%; }
-  .ctx { width: 120px; }
   .knowledge-page, .settings-page { padding: 16px 14px 32px; }
   h1 { font-size: 21px; }
   .items { grid-template-columns: 1fr; }
   .toolbar .search { flex-basis: 100%; }
   .modal-back { padding: 0; }
-  .modal { width: 100%; height: 100%; max-height: none; border-radius: 0; }
+  .modal { width: 100%; height: 100%; max-height: none; border-radius: 0; padding-top: calc(22px + env(safe-area-inset-top)); }
   .login { grid-template-columns: 1fr; }
   .login-art { display: none; }
   .arm { grid-template-columns: 70px 1fr; }
@@ -484,3 +494,13 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
 /* a delegated session sits under its orchestrator */
 .session-row.child { margin-left: 14px; border-left: 2px solid var(--line); }
 .nowrap { white-space: nowrap; }
+
+/* iOS zooms into any field under 16px when it gets focus, and the page jumps */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}
+.earlier { align-self: center; }
+.calls { display: flex; flex-direction: column; gap: 6px; max-width: 860px; min-width: 0; }
+.calls-head { display: flex; gap: 8px; align-items: center; min-width: 0; padding: 4px 10px; font-size: 13px; text-align: left; background: none; border: 1px dashed var(--line); }
+.calls-head:hover { background: var(--panel-2); }
+.calls-head .exit { margin-left: 0; }

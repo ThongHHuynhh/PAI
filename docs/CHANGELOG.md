@@ -2,7 +2,14 @@
 
 One section per release, newest first. A `-beta` tag, cut from the beta branch, ships the section of the release it is a candidate for.
 
-## Unreleased
+## v0.2.4
+
+- Web on iPhone: the app follows the part of the screen the keyboard leaves, so the message box no longer jumps, the question popup keeps Decline and Send answers above the keyboard, the tab bar hides while typing, and fields use 16px text so Safari does not zoom in. A phone opens on Chat, shows one pane at a time with a back button, and Enter makes a new line there; Send sends.
+- Web chat: tool calls in a row fold into one line (how many, how many failed, the latest) that opens on a tap. A long chat draws its newest 150 records with "Show earlier", and a record is drawn again only when it changes, so long sessions stay smooth on a phone.
+- Web: Sign out asks first.
+- A child session no longer has the `ask` tool, and a child's ask is refused: nobody watches a child, so its question held it and its orchestrator for up to 30 minutes. A child's final report now has a fixed form: Result, Changes, Checks, Open.
+- A Windows or macOS worker reaches a harness on the user's tailnet: its sockets follow the routing table instead of always the default route's interface, and on Windows only PAI's own adapter counts as its own, not the user's Tailscale adapter. Before, a worker joining a harness served with `tailscale serve` timed out on its first request and never joined.
+- `pai install` with a join token for another harness drops the old mesh keys, so a machine that was a worker or the admin worker of an old server joins the new one. Before, it logged in with the old keys and looped on "no harness in the mesh map yet".
 
 ## v0.2.3
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -376,5 +377,20 @@ func TestRoleToolsKeepFileTools(t *testing.T) {
 	}
 	if !names["patch"] || names["edit"] || !names["delegate"] || !Orchestrates("patch-orchestrator") {
 		t.Fatalf("patch-orchestrator tools: %v", names)
+	}
+}
+
+func TestChildHasNoAsk(t *testing.T) {
+	has := func(c statefile.Conf) bool {
+		return slices.ContainsFunc(sessionTools(c), func(tl provider.Tool) bool { return tl.Name == "ask" })
+	}
+	if !has(statefile.Conf{Tools: "default"}) || !has(statefile.Conf{Tools: "orchestrator"}) {
+		t.Fatal("a top-level session lost ask")
+	}
+	if has(statefile.Conf{Tools: "default", Parent: "p"}) || has(statefile.Conf{Tools: "patch", Parent: "p"}) {
+		t.Fatal("a child session has ask")
+	}
+	if !strings.Contains(childBrief("p", "do x"), childReport) {
+		t.Fatal("the brief lacks the report form")
 	}
 }
