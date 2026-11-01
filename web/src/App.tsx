@@ -13,7 +13,8 @@ export type Route = { page: "graph" | "sessions" | "knowledge" | "performance" |
 function parse(hash: string): Route {
   const [page, arg] = hash.replace(/^#\/?/, "").split("/");
   if (page === "sessions" || page === "knowledge" || page === "performance" || page === "settings") return { page, arg: arg ? decodeURIComponent(arg) : undefined };
-  return { page: "graph" };
+  // a phone opens on the chat: the live graph is heavy and small there
+  return { page: page !== "graph" && window.matchMedia("(max-width: 699px)").matches ? "sessions" : "graph" };
 }
 
 export function go(r: Route) {
@@ -147,7 +148,7 @@ function Shell({ onOut }: { onOut: () => void }) {
           <button className="icon-btn" onClick={toggle} title={theme === "light" ? "Dark theme" : "Light theme"} aria-label="Switch theme">
             {theme === "light" ? "☾" : "☀"}
           </button>
-          <button className="icon-btn" onClick={onOut} title="Sign out" aria-label="Sign out">
+          <button className="icon-btn" onClick={() => confirm("Sign out of PAI in this browser?") && onOut()} title="Sign out" aria-label="Sign out">
             ⎋
           </button>
         </div>
