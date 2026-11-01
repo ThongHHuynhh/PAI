@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { ago, call, type Account, type Balance as BalanceT, type Catalog, type ProviderInfo } from "../api";
-import { useLive } from "../live";
+import { ago, call, labelled, type Account, type Balance as BalanceT, type Catalog, type ProviderInfo } from "../api";
+import { ModelName, ProviderName, useLive } from "../live";
 import { useTheme } from "../App";
 import { READ } from "../components/Voice";
 
@@ -59,7 +59,23 @@ function Providers() {
   const [login, setLogin] = useState<{ name: string; st: LoginState } | null>(null);
   const [paste, setPaste] = useState("");
   const [err, setErr] = useState("");
+  const { refresh } = useLive();
   const load = () => call<ProviderInfo[]>("GET", "/providers").then(setServed, () => {});
+  // rename saves the input's text as the provider's label, or puts back the
+  // one saved when it fails
+  const rename = (s: ProviderInfo, input: HTMLInputElement) => {
+    const label = input.value.trim();
+    input.value = label;
+    if (label === (s.label ?? "")) return;
+    setErr("");
+    call("PUT", `/providers/${s.name}/label`, label, "text/plain; charset=utf-8").then(
+      () => (void load(), refresh()),
+      (e) => {
+        input.value = s.label ?? "";
+        setErr(String(e.message ?? e));
+      },
+    );
+  };
   useEffect(() => {
     call<Catalog>("GET", "/catalog").then(setCat, () => {});
     void load();
@@ -108,8 +124,24 @@ function Providers() {
       <ul className="plain">
         {served.length === 0 && <li className="muted">None connected yet.</li>}
         {served.map((s) => (
-          <li key={s.name}>
-            <span className="dot on" /> <b>{cat?.providers[s.name]?.name ?? s.name}</b> <span className="muted small">{s.shape}</span>
+          <li key={s.name} className="provider-row">
+            <span className="dot on" />
+            <input
+              className="label-edit"
+              defaultValue={s.label}
+              placeholder={cat?.providers[s.name]?.name ?? s.name}
+              maxLength={100}
+              aria-label={`Display name of ${s.name}`}
+              title="Rename: Enter saves, Esc cancels, empty resets"
+              onBlur={(e) => rename(s, e.currentTarget)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") e.currentTarget.value = s.label ?? "";
+                if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+              }}
+            />
+            <span className="muted small ellipsis" title={`${s.name} · ${s.shape}`}>
+              {s.name} · {s.shape}
+            </span>
           </li>
         ))}
       </ul>
@@ -188,6 +220,7 @@ function Failover() {
   const [fb, setFb] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState("");
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const { labels } = useLive();
   useEffect(() => {
     call<ProviderInfo[]>("GET", "/providers").then(setServed, () => {});
     call<Record<string, string>>("GET", "/fallbacks").then(setFb, () => {});
@@ -208,7 +241,9 @@ function Failover() {
       <ul className="plain">
         {served.map((p) => (
           <li key={p.name}>
-            <b>{p.name}</b>
+            <b>
+              <ProviderName id={p.name} />
+            </b>
             <Usage a={accounts.find((a) => a.name === p.name || a.name.startsWith(p.name + "/"))} />
             <span className="muted small">continue on</span>
             <select value={fb[p.name] ?? ""} onChange={(e) => set(p.name, e.target.value)}>
@@ -217,7 +252,7 @@ function Failover() {
                 .filter((o) => o.name !== p.name)
                 .map((o) => (
                   <option key={o.name} value={o.name}>
-                    {o.name}
+                    {labelled(labels, o.name)}
                   </option>
                 ))}
             </select>
@@ -285,7 +320,7 @@ function Balance() {
         {[...models].sort().map((m) => (
           <li key={m}>
             <label>
-              <input type="checkbox" checked={b.pool.includes(m)} onChange={() => toggle(m)} /> {m}
+              <input type="checkbox" checked={b.pool.includes(m)} onChange={() => toggle(m)} /> <ModelName model={m} />
             </label>
           </li>
         ))}

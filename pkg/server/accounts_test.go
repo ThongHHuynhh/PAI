@@ -59,4 +59,14 @@ func TestAccountSettingsRoutes(t *testing.T) {
 	if rows[1].Name != "claude-code-2" {
 		t.Fatalf("off accounts: %+v", rows)
 	}
+	call("PUT", "/providers/missing/label", "x", 400)
+	call("PUT", "/providers/claude-code-2/label", "a\nb", 400)
+	call("PUT", "/providers/claude-code-2/label", " Claude personal ", 204)
+	if c, _ := Load(path); c.Providers["claude-code-2"].Label != "Claude personal" || h.Providers["claude-code-2"].Label != "Claude personal" {
+		t.Fatalf("label not saved and served: %+v", c.Providers)
+	}
+	call("PUT", "/providers/claude-code-2/label", "", 204)
+	if c, _ := Load(path); c.Providers["claude-code-2"].Label != "" {
+		t.Fatalf("label not cleared: %+v", c.Providers)
+	}
 }

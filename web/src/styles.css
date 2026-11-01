@@ -437,6 +437,10 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .settings-page .card { margin-bottom: 14px; }
 .plain { list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
 .plain li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* a provider's display name is edited in place: the box never changes size */
+.plain li.provider-row { display: grid; grid-template-columns: 8px minmax(0, 16rem) minmax(0, 1fr); }
+.label-edit { width: 100%; padding: 5px 10px; background: transparent; font-weight: 600; }
+.label-edit:hover { background: var(--panel-2); }
 .copy { display: flex; gap: 8px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 6px 6px 10px; margin: 4px 0 10px; }
 .copy code { background: none; padding: 0; flex: 1; overflow-x: auto; white-space: nowrap; }
 
@@ -510,6 +514,8 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; ma
   .arm { grid-template-columns: 70px 1fr; }
   .arm-num { grid-column: 2; }
   .copy { flex-wrap: wrap; }
+  .plain li.provider-row { grid-template-columns: 8px minmax(0, 1fr); row-gap: 2px; }
+  .provider-row .muted { grid-column: 2; padding-left: 11px; }
 }
 
 /* a delegated session sits under its orchestrator */

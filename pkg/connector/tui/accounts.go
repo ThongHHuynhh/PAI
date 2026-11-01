@@ -70,7 +70,7 @@ func (s *session) accountRows(m *Menu, v accountSettings) {
 		if to == "" {
 			to = "None"
 		}
-		m.Items = append(m.Items, MenuItem{Section: "At usage limit", Label: p.Name, Hint: to, Pick: func(a *App, _ *MenuItem) {
+		m.Items = append(m.Items, MenuItem{Section: "At usage limit", Label: labelled(p), Hint: to, Pick: func(a *App, _ *MenuItem) {
 			next := &Menu{}
 			set := func(to string) func(*App, *MenuItem) {
 				return func(a *App, _ *MenuItem) {
@@ -86,13 +86,13 @@ func (s *session) accountRows(m *Menu, v accountSettings) {
 			next.Items = append(next.Items, MenuItem{Label: "None", Pick: set("")})
 			for _, target := range v.providers {
 				if target.Name != p.Name {
-					next.Items = append(next.Items, MenuItem{Label: target.Name, Pick: set(target.Name)})
+					next.Items = append(next.Items, MenuItem{Label: labelled(target), Pick: set(target.Name)})
 				}
 			}
 			next.Items = append(next.Items, MenuItem{Label: "Provider/model…", Pick: func(a *App, _ *MenuItem) {
 				ask(a, "Fallback for "+p.Name, "provider/model", func(a *App, text string) { set(text)(a, nil) })
 			}})
-			a.OpenMenu("At limit: "+p.Name, next)
+			a.OpenMenu("At limit: "+labelled(p), next)
 		}})
 	}
 	m.Items = append(m.Items, MenuItem{Section: "Balance", Label: "Mode", Hint: v.balance.Mode, Pick: func(a *App, _ *MenuItem) {
@@ -109,6 +109,14 @@ func (s *session) accountRows(m *Menu, v accountSettings) {
 	for _, ac := range v.accounts {
 		m.Items = append(m.Items, MenuItem{Section: "Accounts (read only)", Label: ac.Name, Hint: usageHint(ac)})
 	}
+}
+
+// labelled is a provider as a person reads it: its label, if it has one, then its name.
+func labelled(p harness.ProviderInfo) string {
+	if p.Label == "" {
+		return p.Name
+	}
+	return p.Label + " (" + p.Name + ")"
 }
 
 // usageHint is one account's state and the share of its 5 hour and 7 day

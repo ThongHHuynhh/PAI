@@ -146,6 +146,7 @@ type Provider struct {
 	Endpoint      func(url, model string) string            // nil means URL as is
 	Token         func(ctx context.Context) (string, error) // the key of each request, for a login's key that expires; nil means Key
 	Session       string                                    // the header that carries Request.Key, where the vendor routes its cache on a header
+	Label         string                                    // the name a person reads in place of the provider's own
 	// Run, if set, makes the step instead of an HTTP request: claude-code's
 	// process. It retries what it can itself.
 	Run func(ctx context.Context, body []byte, emit func(statefile.Record)) (statefile.Header, error)

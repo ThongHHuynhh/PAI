@@ -219,7 +219,9 @@ export type Catalog = { providers: Record<string, { name: string; shape: string;
 export type Account = { name: string; status: "ok" | "limited"; limited_until: string; util_five_hour: number | null; util_seven_day: number | null; updated: string };
 // Balance, in auto mode, spreads sessions over a pool of interchangeable provider/model entries.
 export type Balance = { mode: "off" | "auto"; pool: string[] };
-export type ProviderInfo = { name: string; shape: string; url?: string };
+export type ProviderInfo = { name: string; shape: string; url?: string; label?: string };
+// labelled is a provider id as plain text: its label and the id, if it has a label, else fallback.
+export const labelled = (labels: Record<string, string>, id: string, fallback = id) => (labels[id] ? `${labels[id]} (${id})` : fallback);
 
 // --- records: the state file's own bytes, a JSON header line, len bytes of
 // body, and a newline each ---

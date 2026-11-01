@@ -1,7 +1,7 @@
 import { Ask, questionsOf } from "../components/Ask";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { ago, call, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
-import { useLive } from "../live";
+import { ago, call, labelled, records, sessionModels, sessionTitle, tokens, type Catalog, type ProviderInfo, type Rec, type Retrieval, type Session, type SessionModel } from "../api";
+import { ModelName, ProviderName, useLive } from "../live";
 import { go } from "../App";
 import { ItemActions, Nudge, RetrievalBar, useRetrievals, verdict } from "../components/Retrieval";
 import { splitModel } from "./Graph";
@@ -374,7 +374,7 @@ function ModelSwitch({ s }: { s: Session }) {
   return (
     <>
       <button className="link" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Change model from the next step">
-        {s.config.model}
+        <ModelName model={s.config.model} />
       </button>
       {open && (
         <div className="modal-back" onClick={() => setOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
@@ -388,7 +388,7 @@ function ModelSwitch({ s }: { s: Session }) {
             {models?.map((m) => (
               <button key={m.model} className="ghost model-choice" disabled={!m.ok || m.current || saving} title={m.reason || m.model} onClick={() => void change(m.model)}>
                 <span>{m.name}{m.current ? " · current" : ""}</span>
-                <span className="muted small">{m.provider} · {tokens(m.context_limit)} context</span>
+                <span className="muted small"><ProviderName id={m.provider} /> · {tokens(m.context_limit)} context</span>
                 {!m.ok && <span className="small">{m.reason}</span>}
               </button>
             ))}
@@ -573,7 +573,7 @@ export function Text({ s }: { s: string }) {
 }
 
 function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: string) => void }) {
-  const { graph } = useLive();
+  const { graph, labels } = useLive();
   const [cat, setCat] = useState<Catalog | null>(null);
   const [served, setServed] = useState<ProviderInfo[]>([]);
   const [preset, setPreset] = useState("");
@@ -641,7 +641,7 @@ function NewSession({ onClose, onMade }: { onClose: () => void; onMade: (id: str
           >
             {presets.map((id) => (
               <option key={id} value={id}>
-                {cat!.presets[id].name} — {cat!.providers[cat!.presets[id].provider]?.name ?? cat!.presets[id].provider}
+                {cat!.presets[id].name} — {labelled(labels, cat!.presets[id].provider, cat!.providers[cat!.presets[id].provider]?.name ?? cat!.presets[id].provider)}
               </option>
             ))}
           </select>
