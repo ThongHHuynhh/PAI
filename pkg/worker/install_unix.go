@@ -58,7 +58,7 @@ func setup(token string) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return err
 	}
-	if err := rejoin(); err != nil {
+	if err := rejoin(token); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(stateDir, "join"), []byte(token), 0o600); err != nil {

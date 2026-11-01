@@ -204,7 +204,7 @@ func Install(token string) error {
 	if err := windows.SetNamedSecurityInfo(stateDir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
 		return err
 	}
-	if err := rejoin(); err != nil {
+	if err := rejoin(token); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(stateDir, "join"), []byte(token), 0o600); err != nil {

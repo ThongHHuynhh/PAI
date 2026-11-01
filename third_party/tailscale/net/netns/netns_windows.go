@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/tailscale/wireguard-go/tun"
 	"golang.org/x/sys/cpu"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -146,6 +147,13 @@ func isTailscaleInterface(ifaceIdx uint32) (bool, error) {
 	ifaceLUID, err := winipcfg.LUIDFromIndex(ifaceIdx)
 	if err != nil {
 		return false, err
+	}
+
+	// PAI: only the process's own adapter is its own. The user's Tailscale
+	// adapter is one more route, as the way to a harness on their tailnet.
+	if g := tun.WintunStaticRequestedGUID; g != nil {
+		own, err := winipcfg.LUIDFromGUID(g)
+		return err == nil && own == ifaceLUID, nil
 	}
 
 	iface, err := ifaceLUID.Interface()
