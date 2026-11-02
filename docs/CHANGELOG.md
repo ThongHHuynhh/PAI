@@ -5,6 +5,9 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 ## Unreleased
 
 - A worker whose mesh node wedges, so it cannot reach the harness for 2 minutes while the coordinator answers (or 10 minutes in all), restarts with a new node instead of waiting for a manual service restart; a dead harness connection now ends after 4 failed keepalives.
+- The web app finds memory ids in the current format (m plus uppercase base32) in recall lists and merge reasons, not only old hex ids.
+- A Claude Code usage limit notice is no longer saved as the model's reply; the step fails as exhausted and moves to the fallback, and the error no longer ends in an empty "claude stderr:".
+- Provider labels are limited to 100 characters, not 100 bytes, so non-ASCII names are not cut short.
 
 ## v0.2.5
 

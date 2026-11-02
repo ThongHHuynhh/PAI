@@ -65,6 +65,8 @@ func TestAccountSettingsRoutes(t *testing.T) {
 	if c, _ := Load(path); c.Providers["claude-code-2"].Label != "Claude personal" || h.Providers["claude-code-2"].Label != "Claude personal" {
 		t.Fatalf("label not saved and served: %+v", c.Providers)
 	}
+	call("PUT", "/providers/claude-code-2/label", strings.Repeat("é", harness.MaxName), 204)
+	call("PUT", "/providers/claude-code-2/label", strings.Repeat("é", harness.MaxName+1), 400)
 	call("PUT", "/providers/claude-code-2/label", "", 204)
 	if c, _ := Load(path); c.Providers["claude-code-2"].Label != "" {
 		t.Fatalf("label not cleared: %+v", c.Providers)
