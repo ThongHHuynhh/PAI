@@ -803,32 +803,39 @@ func (s *session) sessionModels(a *App) {
 				a.SayError(err)
 				return
 			}
-			m := &Menu{}
-			for _, model := range models {
-				hint := tokens(model.ContextLimit)
-				if !model.OK {
-					hint = model.Reason
-				}
-				if model.Current {
-					hint = "current · " + hint
-					m.Start = len(m.Items)
-				}
-				m.Items = append(m.Items, MenuItem{Label: model.Name, Hint: hint, Section: model.Provider, Disabled: !model.OK, Pick: func(a *App, _ *MenuItem) {
-					if !model.Current {
-						s.swapModel(a, model.Model)
-					}
-				}})
-			}
-			a.OpenMenu("Model for this session · from the next step", m)
+			a.OpenMenu("Model for this session", s.modelMenu(models))
 		})
 	})
 }
 
-func (s *session) swapModel(a *App, model string) {
+// modelMenu is the models the session can move to, by provider: the current
+// one marked, the ones it cannot move to dimmed with the reason.
+func (s *session) modelMenu(models []harness.SessionModel) *Menu {
+	m := &Menu{}
+	for _, model := range models {
+		hint := tokens(model.ContextLimit)
+		if !model.OK {
+			hint = model.Reason
+		}
+		if model.Current {
+			hint = "current · " + hint
+			m.Start = len(m.Items)
+		}
+		m.Items = append(m.Items, MenuItem{Label: model.Name, Hint: hint, Section: model.Provider, Disabled: !model.OK, Pick: func(a *App, _ *MenuItem) {
+			if !model.Current {
+				s.swapModel(a, model)
+			}
+		}})
+	}
+	return m
+}
+
+func (s *session) swapModel(a *App, to harness.SessionModel) {
+	id := s.id
 	a.Go(func() {
 		ctx, cancel := context.WithTimeout(s.ctx, callTime)
 		defer cancel()
-		err := s.c.SetModel(ctx, s.id, via, model)
+		err := s.c.SetModel(ctx, id, via, to.Model)
 		a.Post(func() {
 			if s.ctx.Err() != nil {
 				return
@@ -839,6 +846,7 @@ func (s *session) swapModel(a *App, model string) {
 			}
 			s.price = nil // use the new model's catalog price
 			// The config record arriving through follow owns the transcript note.
+			a.Say("Model: " + to.Name + ", applies from the next step")
 		})
 	})
 }
