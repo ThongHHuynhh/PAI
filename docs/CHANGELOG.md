@@ -10,6 +10,7 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 - Provider labels are limited to 100 characters, not 100 bytes, so non-ASCII names are not cut short.
 - TUI: `PAI_THEME=light` or `dark` sets the background the Auto theme follows, for a terminal that does not report its own; anything else keeps auto.
 - TUI `/model` in an open session: rows skip the models that cannot take the session (dimmed, with the reason, which leaves the name half the row), and a pick says the model applies from the next step.
+- TUI transcript: tool calls in a row fold into one line, as in the web app: how many, how many failed, and the latest call with its time while it runs. A click opens the group to show each call as before, without moving what is above.
 
 ## v0.2.5
 
