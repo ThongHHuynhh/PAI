@@ -2,6 +2,10 @@
 
 One section per release, newest first. A `-beta` tag, cut from the beta branch, ships the section of the release it is a candidate for.
 
+## Unreleased
+
+- A worker whose mesh node wedges, so it cannot reach the harness for 2 minutes while the coordinator answers (or 10 minutes in all), restarts with a new node instead of waiting for a manual service restart; a dead harness connection now ends after 4 failed keepalives.
+
 ## v0.2.5
 
 - Web Performance page on any screen: a section's tiles share one full row (two across on a phone, an odd last one spans both), charts sit three across (one on a phone), pairs sit two across only on a wide screen with the errors box as tall as its neighbour, and a table's first column stays put while it scrolls sideways. Nothing overflows sideways from 320 px up.
