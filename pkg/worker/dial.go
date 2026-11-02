@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"os"
 	"time"
 
 	"pai/pkg/mesh"
@@ -16,12 +17,21 @@ import (
 // against a dead harness costs nothing. A dial waits longer than the longest
 // wait: a first connect over a relayed path can take seconds.
 // A keepalive probe every 5s idle meets a restarted harness's reset within
-// seconds; a harness that is gone takes the OS's count of probes.
+// seconds; a harness that is gone fails 4 probes, so its connection ends in
+// about 25s on every OS, not after the OS's own count.
+// A mesh can wedge so no packet comes back from the harness while it answers
+// as coordinator, as one started before the network did (2026-11-01): only a
+// new node mends it. With the coordinator answering, 2 minutes without a
+// connection is that; with it silent too, the harness may just be down, and a
+// restart every 10 minutes is cheap enough to cover a map poll that wedged.
 const (
-	redialMin   = 200 * time.Millisecond
-	redialMax   = 5 * time.Second
-	dialTimeout = 10 * time.Second
-	keepAlive   = 5 * time.Second
+	redialMin    = 200 * time.Millisecond
+	redialMax    = 5 * time.Second
+	dialTimeout  = 10 * time.Second
+	keepAlive    = 5 * time.Second
+	keepAliveCnt = 4
+	stuckPolling = 2 * time.Minute
+	stuckSilent  = 10 * time.Minute
 )
 
 // Default is the interpreters of each OS: the shell it ships with, the
@@ -33,14 +43,16 @@ var Default = map[string][]string{"windows": {"pwsh", "js"}, "linux": {"bash", "
 // ends, dial again, until the harness removes this worker. WireGuard proved
 // both ends, so the hello carries no secret. A connection that ends within
 // the longest wait, as a refused hello does, keeps the backoff; only one that
-// held resets it. The js folder is readied beside it.
+// held resets it. A worker that cannot connect for long restarts, which
+// makes its mesh node anew. The js folder is readied beside it.
 func Dial(m *mesh.Mesh, l Local) {
 	go startJS(l)
 	go dial(m, l)
 }
 
 func dial(m *mesh.Mesh, l Local) {
-	wait, d := redialMin, net.Dialer{Timeout: dialTimeout, KeepAlive: keepAlive}
+	wait, connected := redialMin, time.Now()
+	d := net.Dialer{Timeout: dialTimeout, KeepAliveConfig: net.KeepAliveConfig{Enable: true, Idle: keepAlive, Interval: keepAlive, Count: keepAliveCnt}}
 	for {
 		err := errors.New("no harness in the mesh map yet")
 		if a, ok := m.Peer(Harness); ok {
@@ -53,6 +65,7 @@ func dial(m *mesh.Mesh, l Local) {
 				err = Serve(conn, l)
 				close(done)
 				_ = conn.Close()
+				connected = time.Now()
 				if time.Since(start) > redialMax {
 					wait = redialMin
 				}
@@ -65,6 +78,14 @@ func dial(m *mesh.Mesh, l Local) {
 				log.Printf("mesh: reroute: %v", err)
 			}
 		}
+		if off := time.Since(connected); stuck(off, m.Polling()) {
+			exe, err := os.Executable()
+			if err != nil {
+				log.Fatalf("no connection to the harness in %s, and no restart: %v", off.Round(time.Second), err)
+			}
+			log.Printf("no connection to the harness in %s: restarting for a new mesh node", off.Round(time.Second))
+			restart(exe)
+		}
 		log.Printf("%v, redial in %s", err, wait)
 		select {
 		case <-m.Removed():
@@ -74,6 +95,12 @@ func dial(m *mesh.Mesh, l Local) {
 		}
 		wait = min(2*wait, redialMax)
 	}
+}
+
+// stuck is whether a worker off the harness for off, with the map poll up or
+// not, should make its mesh node anew.
+func stuck(off time.Duration, polling bool) bool {
+	return off > stuckSilent || polling && off > stuckPolling
 }
 
 // hangUpOnMove closes conn once this node's address is no longer the one

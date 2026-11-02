@@ -20,7 +20,7 @@ import (
 const tableWord = 12
 
 // The transcript shows messages, text, errors, and each call with its
-// result. Start, config, system, name, thinking and step records are not
+// result; calls in a row fold into one line until it is clicked. Start, config, system, name, thinking and step records are not
 // shown.
 
 // run is s as glyphs in one style.
@@ -548,6 +548,7 @@ type callBlock struct {
 	name string
 	args map[string]any
 	open bool
+	g    *callGroup // the run of calls it folds into
 }
 
 func newCall(s *session, r statefile.Record) *callBlock {
@@ -673,7 +674,72 @@ func (b *callBlock) status(a *App) []Glyph {
 	return cat(gs, run(line, muted))
 }
 
-func (b *callBlock) Rows(a *App, w int) []Line { return indent(b.rows(a, max(1, w-margin-1))) }
+func (b *callBlock) Rows(a *App, w int) []Line {
+	if b.g != nil && !b.g.open {
+		return nil
+	}
+	return indent(b.rows(a, max(1, w-margin-1)))
+}
+
+func (b *callBlock) failed() bool { return b.res != nil && b.res.Exit != nil && *b.res.Exit != 0 }
+
+// callGroup is a run of calls in a row, as the web app folds them: one line
+// with how many, how many failed, and the latest call, which shows its time
+// while it runs. A click opens it, and its calls show below as before.
+type callGroup struct {
+	calls []*callBlock
+	open  bool
+}
+
+func (g *callGroup) add(b *callBlock) { b.g, g.calls = g, append(g.calls, b) }
+
+// Click opens and closes the group, and lays its calls out again.
+func (g *callGroup) Click(a *App) {
+	g.open = !g.open
+	for _, b := range g.calls {
+		b.s.transcript.Changed(b)
+	}
+}
+
+func (g *callGroup) Rows(a *App, w int) []Line {
+	w = max(1, w-margin-1)
+	muted := a.Theme.muted()
+	mark, n := "▸ ", fmt.Sprintf("%d tool calls", len(g.calls))
+	if g.open {
+		mark = "▾ "
+	}
+	if len(g.calls) == 1 {
+		n = "1 tool call"
+	}
+	gs := cat(deco(mark, muted), run(n, term.Style{FG: a.Theme.Text, Attr: term.Bold}))
+	failed := 0
+	for _, b := range g.calls {
+		if b.failed() {
+			failed++
+		}
+	}
+	if failed > 0 {
+		gs = cat(gs, run(" · ", muted), run(fmt.Sprintf("%d failed", failed), term.Style{FG: a.Theme.Error}))
+	}
+	var right []Glyph
+	if last := g.calls[len(g.calls)-1]; !g.open {
+		head := last.name
+		if last.call.ID == "" {
+			head = "result"
+		}
+		if wk := last.arg("worker"); wk != "" {
+			head += " on " + wk
+		}
+		if last.call.ID != "" {
+			head += ": " + last.summary()
+		}
+		gs = cat(gs, run(" · "+head, muted))
+		if last.res == nil && last.s.stepping() {
+			right = cat([]Glyph{{G: "⠋", W: 1, St: muted, Spin: true}}, deco(" ", muted), last.meta(a))
+		}
+	}
+	return indent([]Line{{Gs: spread(gs, right, w)}})
+}
 
 func (b *callBlock) rows(a *App, w int) []Line {
 	muted := a.Theme.muted()

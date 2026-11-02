@@ -240,6 +240,10 @@ func (m *Mesh) Self() netip.Addr {
 	return netip.Addr{}
 }
 
+// Polling is whether this node's map poll to the coordinator, the harness,
+// is up.
+func (m *Mesh) Polling() bool { return m.health.GetInPollNetMap() }
+
 // Peer is the address of the peer named name in the last map, which stays
 // while the coordinator is out of reach.
 func (m *Mesh) Peer(name string) (netip.Addr, bool) {
