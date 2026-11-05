@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -108,12 +109,15 @@ func (o OpenAI) Name() string { return "openai:" + o.URL + ":" + o.Model }
 const embedTime = 60 * time.Second
 
 func (o OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
 	body, _ := json.Marshal(map[string]any{"model": o.Model, "input": texts})
 	ctx, cancel := context.WithTimeout(ctx, embedTime)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(o.URL, "/")+"/embeddings", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("embeddings: %w (check the endpoint and that model %q is installed)", err, o.Model)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if o.Key != "" {
@@ -121,7 +125,7 @@ func (o OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) 
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("embeddings: %w (check the endpoint and that model %q is installed)", err, o.Model)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -141,11 +145,100 @@ func (o OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) 
 		return nil, fmt.Errorf("embeddings: %d vectors for %d texts", len(r.Data), len(texts))
 	}
 	out := make([][]float32, len(texts))
+	dims := 0
 	for _, d := range r.Data {
 		if d.Index < 0 || d.Index >= len(out) {
 			return nil, fmt.Errorf("embeddings: index %d out of range", d.Index)
 		}
+		if out[d.Index] != nil {
+			return nil, fmt.Errorf("embeddings: duplicate index %d", d.Index)
+		}
+		if dims == 0 {
+			dims = len(d.Embedding)
+		}
+		if dims == 0 || len(d.Embedding) != dims {
+			return nil, fmt.Errorf("embeddings: empty or inconsistent vector dimensions")
+		}
+		var norm float64
+		for _, x := range d.Embedding {
+			if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+				return nil, fmt.Errorf("embeddings: non-finite vector")
+			}
+			norm += float64(x) * float64(x)
+		}
+		if norm == 0 {
+			return nil, fmt.Errorf("embeddings: zero vector")
+		}
 		out[d.Index] = normalize(d.Embedding)
+	}
+	return out, nil
+}
+
+// embedCacheSize bounds retained texts and vectors; the cache is process-local
+// and model-specific. Stored item vectors remain in SQLite across restarts.
+const embedCacheSize = 256
+
+type cachedEmbedder struct {
+	base   Embedder
+	mu     sync.Mutex
+	values map[string][]float32
+	order  []string
+}
+
+// NewCached avoids repeated model calls for identical queries and for the
+// Related -> Remember path. Errors are never cached; vectors are copied so a
+// caller cannot mutate a later result. FIFO eviction keeps memory bounded.
+func NewCached(e Embedder) Embedder {
+	return &cachedEmbedder{base: e, values: make(map[string][]float32)}
+}
+
+func (c *cachedEmbedder) Name() string { return c.base.Name() }
+
+func (c *cachedEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out := make([][]float32, len(texts))
+	var missing []string
+	positions := make(map[string][]int)
+	c.mu.Lock()
+	for i, text := range texts {
+		if v, ok := c.values[text]; ok {
+			out[i] = append([]float32(nil), v...)
+		} else {
+			if _, ok := positions[text]; !ok {
+				missing = append(missing, text)
+			}
+			positions[text] = append(positions[text], i)
+		}
+	}
+	c.mu.Unlock()
+	if len(missing) == 0 {
+		return out, nil
+	}
+	vectors, err := c.base.Embed(ctx, missing)
+	if err != nil {
+		return nil, err
+	}
+	if len(vectors) != len(missing) {
+		return nil, fmt.Errorf("embeddings: %d vectors for %d texts", len(vectors), len(missing))
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, text := range missing {
+		v := vectors[i]
+		for _, pos := range positions[text] {
+			out[pos] = append([]float32(nil), v...)
+		}
+		if _, ok := c.values[text]; ok {
+			continue
+		}
+		if len(c.order) == embedCacheSize {
+			delete(c.values, c.order[0])
+			c.order = c.order[1:]
+		}
+		c.values[text] = append([]float32(nil), v...)
+		c.order = append(c.order, text)
 	}
 	return out, nil
 }

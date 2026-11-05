@@ -59,6 +59,12 @@ func main() {
 		fatal(server.Up(args[1]))
 	case verb == "install":
 		h, fresh, quick := config(args[1:])
+		if fresh {
+			if _, err := os.Stat(server.Conf); os.IsNotExist(err) && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+				h.Memory, err = memorySetup(os.Stdin, os.Stdout)
+				fatal(err)
+			}
+		}
 		fatal(h.Expand())
 		if !elevate.Is() {
 			var code int

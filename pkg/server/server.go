@@ -31,6 +31,7 @@ import (
 	"pai/pkg/events"
 	"pai/pkg/harness"
 	"pai/pkg/identity"
+	"pai/pkg/localembed"
 	"pai/pkg/memory"
 	"pai/pkg/provider"
 	"pai/pkg/relay"
@@ -55,7 +56,7 @@ type Config struct {
 	Tunnel    *Tunnel             `json:"tunnel,omitempty"` // the user's own Cloudflare tunnel; none, and no URL, is loopback only
 	Providers map[string]Provider `json:"providers"`
 	Links     [][2]string         `json:"links,omitempty"`  // pairs of workers, by name, that reach each other on the mesh
-	Memory    *MemoryConfig       `json:"memory,omitempty"` // how memory embeds; none is the built-in hash embedder
+	Memory    *MemoryConfig       `json:"memory,omitempty"` // absent preserves model-free retrieval
 	// Fallbacks names, for a provider, the one its sessions move to when its
 	// account is out of usage, such as {"claude-code": "claude-code-2"}.
 	Fallbacks map[string]string `json:"fallbacks,omitempty"`
@@ -66,17 +67,53 @@ type Config struct {
 // /embeddings endpoint, such as OpenAI's or Ollama's at
 // http://localhost:11434/v1. Values expand from the environment.
 type MemoryConfig struct {
+	Mode  string `json:"mode,omitempty"`  // semantic (default), hybrid, or hash (legacy offline)
+	Local bool   `json:"local,omitempty"` // PAI owns an optional private runtime under its data directory
 	URL   string `json:"url"`
 	Key   string `json:"key,omitempty"`
 	Model string `json:"model"`
 }
 
-// embedder is the one c names, else the hash embedder, which needs nothing.
-func (c *MemoryConfig) embedder() memory.Embedder {
-	if c == nil || c.URL == "" || c.Model == "" {
-		return memory.Hash{}
+// Missing config preserves existing model-free installations. Explicit model
+// config uses semantic retrieval; failures never silently switch to hashing.
+func (c *MemoryConfig) embedder() (memory.Embedder, error) {
+	if c == nil {
+		return memory.Hash{}, nil
 	}
-	return memory.OpenAI{URL: os.ExpandEnv(c.URL), Key: os.ExpandEnv(c.Key), Model: os.ExpandEnv(c.Model)}
+	if c.Mode == "hash" && !c.Local {
+		return memory.Hash{}, nil
+	}
+	o, err := c.connection()
+	if err != nil {
+		return nil, err
+	}
+	return memory.NewCached(o), nil
+}
+
+func (c *MemoryConfig) connection() (memory.OpenAI, error) {
+	if c.Mode != "" && c.Mode != "semantic" && c.Mode != "hybrid" && c.Mode != "hash" {
+		return memory.OpenAI{}, fmt.Errorf("memory: unknown mode %q", c.Mode)
+	}
+	if c.Local && c.Mode == "hash" {
+		return memory.OpenAI{}, errors.New("memory: local runtime requires semantic or hybrid mode")
+	}
+	u, model := strings.TrimSpace(os.ExpandEnv(c.URL)), strings.TrimSpace(os.ExpandEnv(c.Model))
+	if c.URL == "" && c.Model == "" {
+		u, model = "http://localhost:11434/v1", "embeddinggemma"
+		if c.Local {
+			u = "http://127.0.0.1:11435/v1"
+		}
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || model == "" {
+		return memory.OpenAI{}, errors.New("memory: set both a valid http(s) url and model (environment variables must be set)")
+	}
+	if c.Local {
+		if err := localembed.Validate(strings.TrimRight(u, "/")); err != nil {
+			return memory.OpenAI{}, err
+		}
+	}
+	return memory.OpenAI{URL: strings.TrimRight(u, "/"), Key: os.ExpandEnv(c.Key), Model: model}, nil
 }
 
 // Tunnel is a tunnel the user made in Cloudflare, which routes URL to it and
@@ -253,11 +290,30 @@ func Harness(ctx context.Context, path string) error {
 	coord.Gone = pool.Drop
 	coord.Link(c.Links)
 	bus := events.New()
-	mem, err := memory.Open(filepath.Join(dir, "memory"), c.Memory.embedder())
+	if c.Memory != nil && c.Memory.Local {
+		o, err := c.Memory.connection()
+		if err != nil {
+			return err
+		}
+		stop, err := localembed.Start(ctx, dir, o.URL)
+		if err != nil {
+			return err
+		}
+		defer stop()
+		if err := localembed.Warm(ctx, o.URL, o.Model); err != nil {
+			return err
+		}
+	}
+	embedder, err := c.Memory.embedder()
+	if err != nil {
+		return err
+	}
+	mem, err := memory.Open(filepath.Join(dir, "memory"), embedder)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = mem.Close() }()
+	mem.Hybrid = c.Memory == nil || c.Memory.Mode == "hybrid" || c.Memory.Mode == "hash"
 	mem.OnEvent = func(e memory.Event) {
 		bus.Publish(events.Event{Type: "memory", Session: e.Session, Data: e})
 	}

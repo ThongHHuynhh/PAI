@@ -26,6 +26,8 @@ curl -fsSL https://github.com/ThongHHuynhh/PAI/releases/latest/download/install.
 
 The quickstart connects a model provider, then your other machines. Open the web app at the server's URL, under `/app/`, and sign in with the API key the install printed.
 
+Terminal setup asks whether to download private Ollama and an embedding model for semantic memory. Choose yes to keep the runtime and models inside PAI's data folder, or no for model-free retrieval. Existing installations keep their choice on update.
+
 Connect another machine with the line the server prints (`pai-server join` prints it again):
 
 ```bash

@@ -1,0 +1,29 @@
+{
+  "kind": "read-only live API self-match, not an independent semantic accuracy corpus",
+  "valid_items": 38,
+  "invalid_items": 47,
+  "self_match_top1": 1.0,
+  "self_match_recall3": 1.0,
+  "self_match_recall6": 1.0,
+  "first_pass": {
+    "n": 38,
+    "p50_ms": 27.17813400158775,
+    "p95_ms": 56.81474299854017,
+    "max_ms": 83.9652920003573
+  },
+  "cached": {
+    "n": 190,
+    "p50_ms": 4.442580000613816,
+    "p95_ms": 5.011318000470055,
+    "max_ms": 7.729474000370828
+  },
+  "cached_concurrency4": {
+    "n": 200,
+    "p50_ms": 5.673720999766374,
+    "p95_ms": 8.906406997994054,
+    "max_ms": 12.916920000861865
+  },
+  "cached_requests_per_second": 635.3679561496506,
+  "invalid_hits": 0,
+  "lexical_ranks": 0
+}

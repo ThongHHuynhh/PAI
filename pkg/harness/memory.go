@@ -131,7 +131,10 @@ func (h *Harness) recallTurn(ctx context.Context, s *session, id string, conf st
 	rv, err := h.Memory.Recall(ctx, memory.Turn{Session: id, Query: strings.Join(asked, "\n"), Fill: fill})
 	if err != nil {
 		log.Printf("session %s: recall: %v", id, err)
-		return nil // a turn goes on without memory
+		// Keep a failed recall visible to the model and in the append-only
+		// history; it must not confidently assume that no memory matched.
+		_, appendErr := h.append(s, system("memory-error", "Long-term memory retrieval is unavailable for this turn. Do not assume no relevant memories exist. If the answer depends on prior facts, retry with recall or tell the user that memory could not be checked."))
+		return appendErr
 	}
 	if len(rv.Hits) == 0 {
 		return nil
