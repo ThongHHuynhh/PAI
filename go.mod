@@ -6,6 +6,7 @@ toolchain go1.27.3
 
 require (
 	filippo.io/cpace v0.0.0-20210101143347-24d601e2e469
+	github.com/klauspost/compress v1.19.1
 	github.com/rivo/uniseg v0.4.7
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
 	golang.org/x/image v0.45.0
@@ -41,7 +42,6 @@ require (
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.1 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect

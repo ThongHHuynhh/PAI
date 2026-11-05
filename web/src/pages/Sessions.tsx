@@ -520,7 +520,7 @@ function parseCall(r: Rec) {
 // record, when it is loaded, adds the scores and what came of it.
 function MemoryCard({ r, recalls }: { r: Rec; recalls: { [id: string]: Retrieval } }) {
   const [open, setOpen] = useState(false);
-  const items = [...r.body.matchAll(/^- \[(m[0-9a-f]+)\] \(([^,]+), ([^)]+)\) (.*)$/gm)].map((m) => ({ id: m[1], kind: m[2], scope: m[3], text: m[4] }));
+  const items = [...r.body.matchAll(/^- \[(m[0-9A-Za-z]+)\] \(([^,]+), ([^)]+)\) (.*)$/gm)].map((m) => ({ id: m[1], kind: m[2], scope: m[3], text: m[4] }));
   const rv = recalls[r.body.match(/\(retrieval (\w+)\)/)?.[1] ?? ""];
   const hits = new Map((rv?.hits ?? []).map((h) => [h.item.id, h]));
   return (

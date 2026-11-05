@@ -25,6 +25,11 @@ import (
 // for ssh, where a round trip can take a few hundred ms.
 const queryWait = 500 * time.Millisecond
 
+// themeEnv sets the background the theme follows, light or dark, for a
+// terminal that does not answer the background query or answers wrong; any
+// other value keeps the answer, and with none, dark.
+const themeEnv = "PAI_THEME"
+
 // readSize is how much one read of stdin takes. A console window types a
 // paste as win32 key records, some 40 bytes a character with the key ups, and
 // the paste is told by arriving in one read: 64 KiB holds about 1,600.
@@ -129,12 +134,25 @@ func Open() (*Terminal, error) {
 			done = true
 		}
 	}
+	t.Caps.Dark = background(t.Caps.Dark)
 	if t.Caps.Kitty {
 		t.Write(kittyPush)
 	}
 	t.Write(keysOn) // after the replies: conhost drops their ESC in win32-input-mode
 	t.Flush()
 	return t, nil
+}
+
+// background is whether the theme takes a dark background: as themeEnv
+// says, else dark, the terminal's answer.
+func background(dark bool) bool {
+	switch os.Getenv(themeEnv) {
+	case "light":
+		return false
+	case "dark":
+		return true
+	}
+	return dark
 }
 
 // modes sets raw mode and the platform's console modes, under the lock Close

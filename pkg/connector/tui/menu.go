@@ -44,7 +44,7 @@ type mrow struct {
 // OpenMenu shows m in a dialog.
 func (a *App) OpenMenu(title string, m *Menu) {
 	m.filter()
-	if i := slices.IndexFunc(m.rows, func(r mrow) bool { return r.item == m.Start && r.item >= 0 }); i >= 0 {
+	if i := slices.IndexFunc(m.rows, func(r mrow) bool { return r.item == m.Start && r.item >= 0 }); m.can(i) {
 		m.sel = i
 	}
 	m.layer = a.Dialog(title, &Node{View: m})
@@ -84,11 +84,17 @@ func (m *Menu) filter() {
 				m.rows = append(m.rows, mrow{title: section, item: -1})
 			}
 		}
-		if m.sel < 0 {
+		if m.sel < 0 && !it.Disabled {
 			m.sel = len(m.rows)
 		}
 		m.rows = append(m.rows, mrow{item: i})
 	}
+}
+
+// can is whether row is an item that can be selected: not a title, not
+// disabled.
+func (m *Menu) can(row int) bool {
+	return row >= 0 && row < len(m.rows) && m.rows[row].item >= 0 && !m.Items[m.rows[row].item].Disabled
 }
 
 // Height is the search row, a blank, and the rows; at least one row, for
@@ -118,13 +124,13 @@ func (m *Menu) Draw(a *App, c *Canvas, r Rect) {
 			continue
 		}
 		it := m.Items[row.item]
-		st, hint := a.Theme.text(), muted
+		st, hintSt := a.Theme.text(), muted
 		if it.Disabled {
 			st = muted
 		} else if m.top+y == m.sel {
 			c.Fill(Rect{r.X - 1, ry, r.W + 2, 1}, a.Theme.Accent)
 			st = term.Style{FG: a.Theme.BG, BG: a.Theme.Accent}
-			hint = st
+			hintSt = st
 		}
 		label := it.Label
 		if m.Checks && (!m.Single || it.Section != "") {
@@ -134,7 +140,9 @@ func (m *Menu) Draw(a *App, c *Canvas, r Rect) {
 			}
 			label = mark + label
 		}
-		gs := spread(run(label, st), run(it.Hint, hint), r.W)
+		// a long hint, such as why an item is disabled, leaves the label half the row
+		hint := clip(run(it.Hint, hintSt), max(r.W/2, r.W-term.Width(label)-2))
+		gs := spread(run(label, st), hint, r.W)
 		x := r.X
 		for _, g := range gs {
 			c.Set(x, ry, g.G, g.W, st)
@@ -157,7 +165,7 @@ func (m *Menu) step(n int) {
 		if i < 0 || i >= len(m.rows) {
 			return
 		}
-		if m.rows[i].item >= 0 {
+		if m.can(i) {
 			m.sel, n = i, n-1
 		}
 	}
@@ -171,7 +179,7 @@ func (m *Menu) page(n int) {
 	i := min(max(0, m.sel+n), len(m.rows)-1)
 	for d := 0; d < len(m.rows); d++ {
 		for _, j := range []int{i - d, i + d} {
-			if j >= 0 && j < len(m.rows) && m.rows[j].item >= 0 {
+			if m.can(j) {
 				m.sel = j
 				return
 			}
@@ -256,12 +264,12 @@ func (m *Menu) Mouse(a *App, mo term.Mouse, r Rect) bool {
 	case mo.Button == term.WheelDown:
 		m.step(1)
 	case mo.Action == term.Press && mo.Button == term.Left:
-		if row := m.top + mo.Y - r.Y - 2; mo.Y >= r.Y+2 && row < len(m.rows) {
+		if row := m.top + mo.Y - r.Y - 2; mo.Y >= r.Y+2 && m.can(row) {
 			m.sel = row
 			m.pick(a, row)
 		}
 	case mo.Action == term.Motion && mo.Button == term.NoButton:
-		if row := m.top + mo.Y - r.Y - 2; mo.Y >= r.Y+2 && row < len(m.rows) && m.rows[row].item >= 0 {
+		if row := m.top + mo.Y - r.Y - 2; mo.Y >= r.Y+2 && m.can(row) {
 			m.sel = row
 		}
 	default:

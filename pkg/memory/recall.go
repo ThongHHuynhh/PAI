@@ -56,6 +56,9 @@ func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit
 	}
 	byID := map[string]*Hit{}
 	for _, it := range items {
+		if len(vecs[0]) != len(it.vec) {
+			return nil, fmt.Errorf("memory: embedding dimensions changed for %s; use a versioned model name and reindex before searching", it.ID)
+		}
 		byID[it.ID] = &Hit{Item: it, Cosine: float64(cosine(vecs[0], it.vec))}
 	}
 	// vector list
@@ -65,12 +68,17 @@ func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit
 			vl = append(vl, h)
 		}
 	}
-	slices.SortFunc(vl, func(a, b *Hit) int { return cmpFloat(b.Cosine, a.Cosine) })
+	slices.SortFunc(vl, func(a, b *Hit) int {
+		if c := cmpFloat(b.Cosine, a.Cosine); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Item.ID, b.Item.ID)
+	})
 	for i, h := range vl[:min(len(vl), candidates)] {
 		h.Vector = i + 1
 	}
 	// lexical list
-	if q := ftsQuery(query); q != "" {
+	if q := ftsQuery(query); s.Hybrid && q != "" {
 		rows, err := s.db.QueryContext(ctx, `SELECT items.id FROM items_fts JOIN items ON items.rowid=items_fts.rowid WHERE items_fts MATCH ? AND items.invalid=0 ORDER BY bm25(items_fts) LIMIT ?`, q, candidates)
 		if err != nil {
 			return nil, fmt.Errorf("memory: search: %w", err)
@@ -88,6 +96,9 @@ func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit
 			}
 		}
 		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
 	now := time.Now()
 	var hits []Hit
@@ -101,7 +112,10 @@ func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit
 				rrf += 1 / float64(rrfK+r)
 			}
 		}
-		base := rrf / (2 / float64(rrfK+1)) // 1 for first in both lists
+		base := h.Cosine // semantic relevance is primary by default
+		if s.Hybrid {
+			base = rrf / (2 / float64(rrfK+1))
+		}
 		age := now.Sub(h.Item.Updated).Hours() / 24
 		h.Score = base*(1-utilityWeigh/2+utilityWeigh*h.Item.Utility) + recencyWeigh*math.Exp(-age/recencyDays)
 		if session != "" && h.Item.Session == session {
@@ -109,7 +123,12 @@ func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit
 		}
 		hits = append(hits, *h)
 	}
-	slices.SortFunc(hits, func(a, b Hit) int { return cmpFloat(b.Score, a.Score) })
+	slices.SortFunc(hits, func(a, b Hit) int {
+		if c := cmpFloat(b.Score, a.Score); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Item.ID, b.Item.ID)
+	})
 	return hits[:min(len(hits), k)], nil
 }
 

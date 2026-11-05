@@ -85,6 +85,7 @@ type session struct {
 	outbox     chan string           // sent, to be posted in order
 	stopping   bool                  // a stop was asked for and the status has not changed since
 	calls      map[string]*callBlock // by call id, to pair each result with its call
+	group      *callGroup            // the run of calls the next call joins, nil after anything else
 	running    []*callBlock          // calls with no result yet
 	workerSet  sync.Mutex            // one PUT of the workers at a time
 	workerSets atomic.Int64          // the toggles so far; only the newest is sent
@@ -99,9 +100,7 @@ func newSession(a *App, l *sessionList, id string) *session {
 		meta: &Glyphs{}, busy: &Glyphs{},
 	}
 	s.transcript.Gap = func(prev, next Block) bool {
-		_, p := prev.(*callBlock)
-		_, n := next.(*callBlock)
-		return !p || !n
+		return !isCall(prev) || !isCall(next)
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if l.cur == nil {
@@ -348,6 +347,7 @@ func (s *session) Tick(a *App) {
 		s.second = sec
 		for _, b := range s.running {
 			s.transcript.Changed(b)
+			s.transcript.Changed(b.g)
 		}
 	}
 	s.title(a)
@@ -414,10 +414,34 @@ func (s *session) add(a *App, recs []statefile.Record, info harness.Info) {
 		s.list.tick(a)
 		for _, b := range s.running {
 			s.transcript.Changed(b)
+			s.transcript.Changed(b.g)
 		}
 	}
 	s.title(a)
 	s.syncAsk(a)
+}
+
+func isCall(b Block) bool {
+	switch b.(type) {
+	case *callBlock, *callGroup:
+		return true
+	}
+	return false
+}
+
+// put adds b to the transcript. Anything but a call ends the run of calls.
+func (s *session) put(b Block) {
+	if c, ok := b.(*callBlock); ok {
+		if s.group == nil {
+			s.group = &callGroup{}
+			s.transcript.Append(s.group)
+		}
+		s.group.add(c)
+		s.transcript.Changed(s.group)
+	} else {
+		s.group = nil
+	}
+	s.transcript.Append(b)
 }
 
 // show puts a record in the transcript, or a result in its call's block.
@@ -427,7 +451,7 @@ func (s *session) show(r statefile.Record) {
 		var conf statefile.Conf
 		if json.Unmarshal(r.Body, &conf) == nil {
 			if s.model != "" && s.model != conf.Model {
-				s.transcript.Append(&textBlock{fmt.Sprintf("model: %s -> %s, from the next step", s.model, conf.Model)})
+				s.put(&textBlock{fmt.Sprintf("model: %s -> %s, from the next step", s.model, conf.Model)})
 			}
 			s.model = conf.Model
 		}
@@ -436,19 +460,19 @@ func (s *session) show(r statefile.Record) {
 		if r.Source == "memory" {
 			body := string(r.Body)
 			n := strings.Count(body, "\n- [")
-			s.transcript.Append(&memBlock{head: fmt.Sprintf("◆ recalled %d memories", n), body: body[strings.Index(body, "\n")+1:]})
+			s.put(&memBlock{head: fmt.Sprintf("◆ recalled %d memories", n), body: body[strings.Index(body, "\n")+1:]})
 		}
 	case statefile.Compaction:
-		s.transcript.Append(&memBlock{head: fmt.Sprintf("⟲ compacted records 1–%d into a summary; the full history stays in the session file", r.Upto), body: string(r.Body)})
+		s.put(&memBlock{head: fmt.Sprintf("⟲ compacted records 1–%d into a summary; the full history stays in the session file", r.Upto), body: string(r.Body)})
 	case statefile.Message:
 		b := &msgBlock{r}
 		s.asked = append(s.asked, b)
 		s.turn = r.Time
-		s.transcript.Append(b)
+		s.put(b)
 	case statefile.Text:
-		s.transcript.Append(&textBlock{string(r.Body)})
+		s.put(&textBlock{string(r.Body)})
 	case statefile.Error:
-		s.transcript.Append(&errBlock{string(r.Body)})
+		s.put(&errBlock{string(r.Body)})
 	case statefile.Call:
 		b := newCall(s, r)
 		s.calls[r.ID] = b
@@ -456,18 +480,19 @@ func (s *session) show(r statefile.Record) {
 			s.askCall = &r
 		}
 		s.running = append(s.running, b)
-		s.transcript.Append(b)
+		s.put(b)
 	case statefile.Result:
 		if s.askCall != nil && s.askCall.ID == r.For {
 			s.askCall = nil
 		}
 		b, ok := s.calls[r.For]
 		if !ok {
-			s.transcript.Append(&callBlock{s: s, res: &r})
+			s.put(&callBlock{s: s, res: &r})
 			return
 		}
 		b.res = &r
 		s.transcript.Changed(b)
+		s.transcript.Changed(b.g)
 		delete(s.calls, r.For)
 		for i, x := range s.running {
 			if x == b {

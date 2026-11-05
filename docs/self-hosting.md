@@ -76,13 +76,69 @@ When a step fails because an account is out of usage, PAI moves the session to t
 
 ## Memory
 
-Memory works with no setup: the built-in embedder needs no model. For better recall of reworded questions, point it at an embeddings endpoint:
+New server installs in a terminal ask:
 
-```json
-"memory": {"url": "https://api.openai.com/v1", "key": "$OPENAI_API_KEY", "model": "text-embedding-3-small"}
+```text
+Download private Ollama and enable local embeddings? [y/N]:
 ```
 
-Ollama works too (`http://localhost:11434/v1` with `nomic-embed-text`). Items are embedded again when the embedder changes.
+Choose **yes** to download a pinned Ollama runtime and `embeddinggemma` into
+PAI's data directory. PAI starts the private runtime on loopback port 11435,
+keeps the model loaded, checks readiness, and stops its child runtime on
+shutdown. Binaries, models, runtime HOME, caches, temporary files and logs all
+stay under the same PAI data directory. Downloads and storage need several GB.
+No global Ollama installation is modified.
+
+Choose **no** (the default) for model-free hash/keyword retrieval. No runtime or
+model is downloaded. Unattended installs also use this option unless an
+explicit config opts in. Reinstalls and updates retain the installed choice;
+old configs without a `memory` field retain model-free retrieval.
+
+For unattended opt-in, pass a config file with:
+
+```json
+"memory": {"mode": "semantic", "local": true}
+```
+
+To use an already running embedding service, omit `local: true`. For example,
+prepare an existing Ollama with `ollama pull embeddinggemma`, then configure:
+
+```json
+"memory": {"mode": "semantic", "url": "http://localhost:11434/v1", "model": "embeddinggemma"}
+```
+
+`url` is the base URL ending in `/v1`, not `/embeddings`. An optional `key` accepts
+an environment variable such as `$EMBEDDING_API_KEY`. Both `url` and `model` must
+be supplied when overriding the defaults. Chat subscription credentials do not
+automatically provide an embedding endpoint. An external endpoint receives the
+memory texts and search queries.
+
+`semantic` is the default for an explicit embedding configuration and does not
+use keyword ranking. `hybrid` explicitly
+adds BM25 rank fusion for exact identifiers; `hash` explicitly restores the old
+model-free word-based behavior. These modes can be selected as
+`"memory": {"mode": "hybrid"}` (existing endpoint) or
+`"memory": {"mode": "hash"}`. Managed embeddings can also use hybrid mode by
+retaining `"local": true`.
+
+Restart the server after changing memory configuration. Existing items are
+re-embedded in batches of 64 when the endpoint or model name changes; the text,
+ids and history stay intact. The first startup can take longer. Use versioned
+model names: replacing weights under an unchanged name cannot be detected
+reliably. A failed migration stops startup and can resume on the next restart.
+An unavailable service during a turn is recorded for the model as a memory
+retrieval failure; PAI does not silently substitute word matching. Explicit
+`recall` calls return the service error. Check the active embedder under Memory
+stats (`GET /memory/stats`). Repeated inputs use a bounded in-process embedding
+cache; persisted item vectors remain in SQLite.
+
+Local semantic quality and latency depend on the chosen model and hardware;
+validate on your own questions before relying on it for critical facts. See
+[the retrieval and efficiency audit](retrieval-efficiency-audit.md) for remaining
+accuracy risks and a measurement plan. The embedding endpoint follows
+[Ollama's compatibility API](https://docs.ollama.com/api/openai-compatibility);
+[Ollama's embeddings guide](https://docs.ollama.com/capabilities/embeddings)
+explains semantic vectors and model consistency.
 
 What PAI keeps, and how, is shown in the web app under Memory. In short:
 

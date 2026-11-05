@@ -367,7 +367,8 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: pai [<session id> | <verb> ...]
 
                                      no verb opens the TUI: login, then the session given or a new one; on the
-                                     server's machine with no provider yet, the quickstart
+                                     server's machine with no provider yet, the quickstart; PAI_THEME=light or dark
+                                     sets the background its Auto theme follows, for a terminal that does not say
   quickstart                         the TUI on the quickstart: a provider, machines, a connector
   worker     [<url> <code>]          make this machine a worker, named by its hostname, with the server URL and
                                      device code pai-server join prints; none is the installed worker's

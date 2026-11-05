@@ -99,6 +99,19 @@ func Get(v, file string) ([]byte, error) {
 // Install puts release v's build of cmd for this machine at path. The new
 // binary must say it is v. The old one moves aside: see Aside.
 func Install(path, cmd, v string) error {
+	// Update the executable behind a compatibility link. Replacing the link
+	// itself would move an NVMe installation back onto the system drive.
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		path = resolved
+	} else {
+		if st, statErr := os.Lstat(path); statErr == nil && st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("installed binary link cannot be resolved: %w", err)
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
 	name := cmd + "-" + runtime.GOOS + "-" + runtime.GOARCH
 	if runtime.GOOS == "windows" {
 		name += ".exe"

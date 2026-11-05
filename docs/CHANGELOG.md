@@ -2,6 +2,22 @@
 
 One section per release, newest first. A `-beta` tag, cut from the beta branch, ships the section of the release it is a candidate for.
 
+## Unreleased
+
+## v0.3.0
+
+- Terminal setup of a new server asks whether to download private Ollama and `embeddinggemma` inside PAI's data directory. Yes enables semantic retrieval; No needs no model or runtime. Existing installations and unattended setup keep model-free retrieval unless explicitly configured. The private runtime binds only to loopback and keeps its models, caches, temporary files and logs inside PAI's folder.
+- Explicit embedding configurations use semantic retrieval by default, with optional hybrid keyword fusion and legacy hash mode. Existing vectors reindex when the model changes. Repeated embeddings are cached, malformed vectors are rejected, distinct facts cannot be discarded on similarity alone, and recall failures are recorded for the model. See self-hosting for setup and the retrieval benchmark report for results and limits.
+- Signed updates preserve binary compatibility links, so an NVMe executable is updated in place rather than copied back to the system disk.
+
+- A worker whose mesh node wedges, so it cannot reach the harness for 2 minutes while the coordinator answers (or 10 minutes in all), restarts with a new node instead of waiting for a manual service restart; a dead harness connection now ends after 4 failed keepalives.
+- The web app finds memory ids in the current format (m plus uppercase base32) in recall lists and merge reasons, not only old hex ids.
+- A Claude Code usage limit notice is no longer saved as the model's reply; the step fails as exhausted and moves to the fallback, and the error no longer ends in an empty "claude stderr:".
+- Provider labels are limited to 100 characters, not 100 bytes, so non-ASCII names are not cut short.
+- TUI: `PAI_THEME=light` or `dark` sets the background the Auto theme follows, for a terminal that does not report its own; anything else keeps auto.
+- TUI `/model` in an open session: rows skip the models that cannot take the session (dimmed, with the reason, which leaves the name half the row), and a pick says the model applies from the next step.
+- TUI transcript: tool calls in a row fold into one line, as in the web app: how many, how many failed, and the latest call with its time while it runs. A click opens the group to show each call as before, without moving what is above.
+
 ## v0.2.5
 
 - Web Performance page on any screen: a section's tiles share one full row (two across on a phone, an odd last one spans both), charts sit three across (one on a phone), pairs sit two across only on a wide screen with the errors box as tall as its neighbour, and a table's first column stays put while it scrolls sideways. Nothing overflows sideways from 320 px up.

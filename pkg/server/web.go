@@ -60,6 +60,10 @@ type webAPI struct {
 // connections.
 const heartbeat = 25 * time.Second
 
+// maxLabelBytes bounds a provider label's body: harness.MaxName characters
+// of at most 4 bytes each, as UTF-8 has.
+const maxLabelBytes = 4 * harness.MaxName
+
 // maxMemoryBody bounds a memory write: an item is a sentence or a summary.
 const maxMemoryBody = 256 << 10
 
@@ -171,10 +175,10 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("PUT /providers/{name}/label", func(w http.ResponseWriter, r *http.Request) {
-		b, err := io.ReadAll(io.LimitReader(r.Body, harness.MaxName+1))
+		b, err := io.ReadAll(io.LimitReader(r.Body, maxLabelBytes+1))
 		label := strings.TrimSpace(string(b))
-		if err == nil && (len(label) > harness.MaxName || !utf8.ValidString(label) || strings.ContainsAny(label, "\r\n")) {
-			err = fmt.Errorf("a label is one line of at most %d bytes of UTF-8", harness.MaxName)
+		if err == nil && (len(b) > maxLabelBytes || utf8.RuneCountInString(label) > harness.MaxName || !utf8.ValidString(label) || strings.ContainsAny(label, "\r\n")) {
+			err = fmt.Errorf("a label is one line of at most %d characters of UTF-8", harness.MaxName)
 		}
 		if err == nil {
 			err = setLabel(wa.path, r.PathValue("name"), label, wa.h.SetProviders)

@@ -404,8 +404,11 @@ func runClaude(ctx context.Context, dir string, body []byte, emit func(statefile
 	if err == nil && werr != nil {
 		err = werr
 	}
+	if err != nil && stderr.b.Len() > 0 {
+		err = fmt.Errorf("%w; claude stderr: %s", err, stderr.b.Bytes())
+	}
 	if err != nil {
-		return statefile.Header{}, fmt.Errorf("%w; claude stderr: %s", err, stderr.b.Bytes())
+		return statefile.Header{}, err
 	}
 	return h, keepTurn(dir, req, recs, end, resumed)
 }
@@ -514,6 +517,9 @@ func (claudeCode) Stream(resp io.Reader, emit func(statefile.Record)) (statefile
 	return h, err
 }
 
+// syntheticModel marks an assistant event claude wrote itself.
+const syntheticModel = "<synthetic>"
+
 // claudeStream is Stream and where the turn ends in claude's transcript.
 func claudeStream(resp io.Reader, emit func(statefile.Record), health ...func(Health)) (statefile.Header, ccTurn, error) {
 	var end ccTurn
@@ -535,10 +541,16 @@ func claudeStream(resp io.Reader, emit func(statefile.Record), health ...func(He
 		case "assistant":
 			end.UUID = e.UUID
 			var m struct {
+				Model   string            `json:"model"`
 				Content []json.RawMessage `json:"content"`
 			}
 			if err := json.Unmarshal(e.Message, &m); err != nil {
 				return statefile.Header{}, ccTurn{}, fmt.Errorf("claude-code: %w: %.200s", err, line)
+			}
+			// claude's own notice, as of a usage limit, is no model's
+			// reply: the result that follows carries it as an error.
+			if m.Model == syntheticModel {
+				continue
 			}
 			for _, raw := range m.Content {
 				rec, ok, err := claudeBlock(raw)

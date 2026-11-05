@@ -432,7 +432,7 @@ function Forgotten({ tick }: { tick: number }) {
   return (
     <ul className="nb-list">
       {items.map((it) => {
-        const into = it.reason?.match(/(?:merged into|superseded by summary) (m[0-9a-f]+)/)?.[1];
+        const into = it.reason?.match(/(?:merged into|superseded by summary) (m[0-9A-Za-z]+)/)?.[1];
         const reason = into ? it.reason?.split(" m")[0] : it.reason;
         return (
           <li key={it.id} className="nb-line">
