@@ -52,7 +52,7 @@ case $#:${1:-}:${2:-}:${3:-} in
   # pai beside it, which places that in /usr/local/bin, and logs it in. Under curl | sh stdin is
   # the script, so the quickstart's TUI reads the terminal, when there is one.
   shift
-  if [ "${1:-}" = quickstart ] && (true < /dev/tty) 2> /dev/null; then
+  if (true < /dev/tty) 2> /dev/null; then
     ./pai-server install ${1+"$@"} < /dev/tty
   else
     ./pai-server install ${1+"$@"}

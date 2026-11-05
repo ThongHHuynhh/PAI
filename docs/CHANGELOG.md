@@ -4,6 +4,12 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.3.0
+
+- Terminal setup of a new server asks whether to download private Ollama and `embeddinggemma` inside PAI's data directory. Yes enables semantic retrieval; No needs no model or runtime. Existing installations and unattended setup keep model-free retrieval unless explicitly configured. The private runtime binds only to loopback and keeps its models, caches, temporary files and logs inside PAI's folder.
+- Explicit embedding configurations use semantic retrieval by default, with optional hybrid keyword fusion and legacy hash mode. Existing vectors reindex when the model changes. Repeated embeddings are cached, malformed vectors are rejected, distinct facts cannot be discarded on similarity alone, and recall failures are recorded for the model. See self-hosting for setup and the retrieval benchmark report for results and limits.
+- Signed updates preserve binary compatibility links, so an NVMe executable is updated in place rather than copied back to the system disk.
+
 - A worker whose mesh node wedges, so it cannot reach the harness for 2 minutes while the coordinator answers (or 10 minutes in all), restarts with a new node instead of waiting for a manual service restart; a dead harness connection now ends after 4 failed keepalives.
 - The web app finds memory ids in the current format (m plus uppercase base32) in recall lists and merge reasons, not only old hex ids.
 - A Claude Code usage limit notice is no longer saved as the model's reply; the step fails as exhausted and moves to the fallback, and the error no longer ends in an empty "claude stderr:".

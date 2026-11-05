@@ -1,0 +1,1215 @@
+{
+  "Version": 1,
+  "At": "2026-11-05T21:37:35Z",
+  "Model": "embeddinggemma",
+  "URL": "http://127.0.0.1:11434/v1",
+  "Repeats": 5,
+  "Results": [
+    {
+      "mode": "hash-hybrid",
+      "items": 43,
+      "IndexMS": 185.653149,
+      "Quality": {
+        "n": 40,
+        "Top1": 0.55,
+        "Recall3": 0.7,
+        "Recall6": 0.75,
+        "MRR": 0.6270833333333333
+      },
+      "Groups": {
+        "constraint": {
+          "n": 10,
+          "Top1": 0.9,
+          "Recall3": 1,
+          "Recall6": 1,
+          "MRR": 0.9333333333333333
+        },
+        "identifier": {
+          "n": 10,
+          "Top1": 0.9,
+          "Recall3": 1,
+          "Recall6": 1,
+          "MRR": 0.95
+        },
+        "synonym": {
+          "n": 20,
+          "Top1": 0.2,
+          "Recall3": 0.4,
+          "Recall6": 0.5,
+          "MRR": 0.3125
+        }
+      },
+      "FirstPass": {
+        "n": 44,
+        "P50": 5.083413,
+        "P95": 6.794428,
+        "Max": 7.858976
+      },
+      "Cached": {
+        "n": 220,
+        "P50": 5.256918,
+        "P95": 7.101117,
+        "Max": 7.940577
+      },
+      "InvalidHits": 0,
+      "Queries": [
+        {
+          "ID": "s01",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 1,
+          "BestCosine": 0.028336508199572563,
+          "FirstMS": 2.672715
+        },
+        {
+          "ID": "s02",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 1,
+          "BestCosine": 0.22907648980617523,
+          "FirstMS": 2.791916
+        },
+        {
+          "ID": "s03",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 0,
+          "BestCosine": 0,
+          "FirstMS": 1.880551
+        },
+        {
+          "ID": "s04",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 0,
+          "BestCosine": 0,
+          "FirstMS": 2.265034
+        },
+        {
+          "ID": "s05",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 2,
+          "BestCosine": 0.2033807635307312,
+          "FirstMS": 4.384978
+        },
+        {
+          "ID": "s06",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 1,
+          "BestCosine": 0.14382411539554596,
+          "FirstMS": 3.267021
+        },
+        {
+          "ID": "s07",
+          "Group": "synonym",
+          "Rank": 3,
+          "Hits": 5,
+          "BestCosine": 0.228510320186615,
+          "FirstMS": 3.598607
+        },
+        {
+          "ID": "s08",
+          "Group": "synonym",
+          "Rank": 4,
+          "Hits": 4,
+          "BestCosine": 0.1649405062198639,
+          "FirstMS": 3.719312
+        },
+        {
+          "ID": "s09",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 3,
+          "BestCosine": 0.27402517199516296,
+          "FirstMS": 3.647727
+        },
+        {
+          "ID": "s10",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 2,
+          "BestCosine": 0,
+          "FirstMS": 2.718539
+        },
+        {
+          "ID": "s11",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 2,
+          "BestCosine": 0.14456818997859955,
+          "FirstMS": 5.693207
+        },
+        {
+          "ID": "s12",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 1,
+          "BestCosine": 0.07303270697593689,
+          "FirstMS": 5.289974
+        },
+        {
+          "ID": "s13",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 3,
+          "BestCosine": 0.27789589762687683,
+          "FirstMS": 5.154229
+        },
+        {
+          "ID": "s14",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 3,
+          "BestCosine": 0.13917984068393707,
+          "FirstMS": 5.982393
+        },
+        {
+          "ID": "s15",
+          "Group": "synonym",
+          "Rank": 6,
+          "Hits": 6,
+          "BestCosine": 0.14904651045799255,
+          "FirstMS": 5.859192
+        },
+        {
+          "ID": "s16",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 1,
+          "BestCosine": 0.008243177086114883,
+          "FirstMS": 6.075385
+        },
+        {
+          "ID": "s17",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 5,
+          "BestCosine": 0.17376048862934113,
+          "FirstMS": 5.394519
+        },
+        {
+          "ID": "s18",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 2,
+          "BestCosine": 0.1447991132736206,
+          "FirstMS": 5.250005
+        },
+        {
+          "ID": "s19",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 4,
+          "BestCosine": 0.08507104218006134,
+          "FirstMS": 4.78274
+        },
+        {
+          "ID": "s20",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 4,
+          "BestCosine": 0.09131784737110138,
+          "FirstMS": 5.204917
+        },
+        {
+          "ID": "x01",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 5,
+          "BestCosine": 0.624948263168335,
+          "FirstMS": 5.34799
+        },
+        {
+          "ID": "x02",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5674606561660767,
+          "FirstMS": 5.096629
+        },
+        {
+          "ID": "x03",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 1,
+          "BestCosine": 0.4045959413051605,
+          "FirstMS": 2.535498
+        },
+        {
+          "ID": "x04",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 2,
+          "BestCosine": 0.5629023313522339,
+          "FirstMS": 2.499498
+        },
+        {
+          "ID": "x05",
+          "Group": "identifier",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.14205493032932281,
+          "FirstMS": 2.592619
+        },
+        {
+          "ID": "x06",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 5,
+          "BestCosine": 0.5403683185577393,
+          "FirstMS": 2.231817
+        },
+        {
+          "ID": "x07",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 1,
+          "BestCosine": 0.5208467245101929,
+          "FirstMS": 4.91234
+        },
+        {
+          "ID": "x08",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.4586774408817291,
+          "FirstMS": 5.967641
+        },
+        {
+          "ID": "x09",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 4,
+          "BestCosine": 0.1883045881986618,
+          "FirstMS": 5.467191
+        },
+        {
+          "ID": "x10",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 3,
+          "BestCosine": 0.5189594626426697,
+          "FirstMS": 4.706003
+        },
+        {
+          "ID": "c01",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 4,
+          "BestCosine": 0.27313193678855896,
+          "FirstMS": 5.88796
+        },
+        {
+          "ID": "c02",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 5,
+          "BestCosine": 0.1638815999031067,
+          "FirstMS": 7.833441
+        },
+        {
+          "ID": "c03",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 3,
+          "BestCosine": 0.31475546956062317,
+          "FirstMS": 6.794428
+        },
+        {
+          "ID": "c04",
+          "Group": "constraint",
+          "Rank": 3,
+          "Hits": 3,
+          "BestCosine": 0.18805542588233948,
+          "FirstMS": 7.858976
+        },
+        {
+          "ID": "c05",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 4,
+          "BestCosine": 0.16972258687019348,
+          "FirstMS": 5.906584
+        },
+        {
+          "ID": "c06",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.17341579496860504,
+          "FirstMS": 6.683132
+        },
+        {
+          "ID": "c07",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 4,
+          "BestCosine": 0.34697505831718445,
+          "FirstMS": 6.645755
+        },
+        {
+          "ID": "c08",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 1,
+          "BestCosine": 0.17355287075042725,
+          "FirstMS": 3.910289
+        },
+        {
+          "ID": "c09",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 3,
+          "BestCosine": 0.23040767014026642,
+          "FirstMS": 6.402106
+        },
+        {
+          "ID": "c10",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 1,
+          "BestCosine": 0.06537109613418579,
+          "FirstMS": 5.27599
+        },
+        {
+          "ID": "n01",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 0,
+          "BestCosine": 0,
+          "FirstMS": 3.393934
+        },
+        {
+          "ID": "n02",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 0,
+          "BestCosine": 0,
+          "FirstMS": 3.545198
+        },
+        {
+          "ID": "n03",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 0,
+          "BestCosine": 0,
+          "FirstMS": 5.083413
+        },
+        {
+          "ID": "n04",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 0,
+          "BestCosine": 0,
+          "FirstMS": 3.432558
+        }
+      ]
+    },
+    {
+      "mode": "semantic",
+      "items": 43,
+      "IndexMS": 1099.534452,
+      "Quality": {
+        "n": 40,
+        "Top1": 0.975,
+        "Recall3": 1,
+        "Recall6": 1,
+        "MRR": 0.9833333333333332
+      },
+      "Groups": {
+        "constraint": {
+          "n": 10,
+          "Top1": 1,
+          "Recall3": 1,
+          "Recall6": 1,
+          "MRR": 1
+        },
+        "identifier": {
+          "n": 10,
+          "Top1": 1,
+          "Recall3": 1,
+          "Recall6": 1,
+          "MRR": 1
+        },
+        "synonym": {
+          "n": 20,
+          "Top1": 0.95,
+          "Recall3": 1,
+          "Recall6": 1,
+          "MRR": 0.9666666666666666
+        }
+      },
+      "FirstPass": {
+        "n": 44,
+        "P50": 15.148831,
+        "P95": 18.775662,
+        "Max": 21.315607
+      },
+      "Cached": {
+        "n": 220,
+        "P50": 1.433286,
+        "P95": 2.264298,
+        "Max": 2.847596
+      },
+      "InvalidHits": 0,
+      "Queries": [
+        {
+          "ID": "s01",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5232899188995361,
+          "FirstMS": 16.944294
+        },
+        {
+          "ID": "s02",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5708291530609131,
+          "FirstMS": 18.502668
+        },
+        {
+          "ID": "s03",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6033799648284912,
+          "FirstMS": 17.177031
+        },
+        {
+          "ID": "s04",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.560653030872345,
+          "FirstMS": 15.747425
+        },
+        {
+          "ID": "s05",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6865108013153076,
+          "FirstMS": 16.957382
+        },
+        {
+          "ID": "s06",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.4521062970161438,
+          "FirstMS": 17.704073
+        },
+        {
+          "ID": "s07",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6698206067085266,
+          "FirstMS": 18.112331
+        },
+        {
+          "ID": "s08",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.4562029540538788,
+          "FirstMS": 18.306827
+        },
+        {
+          "ID": "s09",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7536530494689941,
+          "FirstMS": 18.296971
+        },
+        {
+          "ID": "s10",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5092894434928894,
+          "FirstMS": 18.775662
+        },
+        {
+          "ID": "s11",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5923764705657959,
+          "FirstMS": 15.5168
+        },
+        {
+          "ID": "s12",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.4000431001186371,
+          "FirstMS": 17.564744
+        },
+        {
+          "ID": "s13",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5849726796150208,
+          "FirstMS": 17.046279
+        },
+        {
+          "ID": "s14",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6135103106498718,
+          "FirstMS": 21.315607
+        },
+        {
+          "ID": "s15",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5190317630767822,
+          "FirstMS": 17.076327
+        },
+        {
+          "ID": "s16",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.39300599694252014,
+          "FirstMS": 18.636109
+        },
+        {
+          "ID": "s17",
+          "Group": "synonym",
+          "Rank": 3,
+          "Hits": 6,
+          "BestCosine": 0.3473452627658844,
+          "FirstMS": 18.402315
+        },
+        {
+          "ID": "s18",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5478285551071167,
+          "FirstMS": 17.661641
+        },
+        {
+          "ID": "s19",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5772872567176819,
+          "FirstMS": 19.377968
+        },
+        {
+          "ID": "s20",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.4525689482688904,
+          "FirstMS": 14.926142
+        },
+        {
+          "ID": "x01",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7750072479248047,
+          "FirstMS": 17.251463
+        },
+        {
+          "ID": "x02",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7631009817123413,
+          "FirstMS": 15.611296
+        },
+        {
+          "ID": "x03",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.693385660648346,
+          "FirstMS": 15.148831
+        },
+        {
+          "ID": "x04",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.8059414029121399,
+          "FirstMS": 14.159898
+        },
+        {
+          "ID": "x05",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5804630517959595,
+          "FirstMS": 14.163706
+        },
+        {
+          "ID": "x06",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7742950320243835,
+          "FirstMS": 12.380659
+        },
+        {
+          "ID": "x07",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7324481010437012,
+          "FirstMS": 14.885438
+        },
+        {
+          "ID": "x08",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6913724541664124,
+          "FirstMS": 13.491223
+        },
+        {
+          "ID": "x09",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5772057175636292,
+          "FirstMS": 13.994874
+        },
+        {
+          "ID": "x10",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7719473242759705,
+          "FirstMS": 14.222523
+        },
+        {
+          "ID": "c01",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7074908018112183,
+          "FirstMS": 14.900573
+        },
+        {
+          "ID": "c02",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7204096913337708,
+          "FirstMS": 14.290619
+        },
+        {
+          "ID": "c03",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7160259485244751,
+          "FirstMS": 15.062078
+        },
+        {
+          "ID": "c04",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.46349790692329407,
+          "FirstMS": 14.941374
+        },
+        {
+          "ID": "c05",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6575077772140503,
+          "FirstMS": 15.319135
+        },
+        {
+          "ID": "c06",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7292665839195251,
+          "FirstMS": 13.875801
+        },
+        {
+          "ID": "c07",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7211891412734985,
+          "FirstMS": 14.207803
+        },
+        {
+          "ID": "c08",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6253213286399841,
+          "FirstMS": 13.195382
+        },
+        {
+          "ID": "c09",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6243125200271606,
+          "FirstMS": 13.671608
+        },
+        {
+          "ID": "c10",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6655406355857849,
+          "FirstMS": 14.770269
+        },
+        {
+          "ID": "n01",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.2736209034919739,
+          "FirstMS": 14.39414
+        },
+        {
+          "ID": "n02",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.2423979938030243,
+          "FirstMS": 13.604536
+        },
+        {
+          "ID": "n03",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.2824843227863312,
+          "FirstMS": 13.74444
+        },
+        {
+          "ID": "n04",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.3054405152797699,
+          "FirstMS": 13.889626
+        }
+      ]
+    },
+    {
+      "mode": "model-hybrid",
+      "items": 43,
+      "IndexMS": 1066.753709,
+      "Quality": {
+        "n": 40,
+        "Top1": 0.7,
+        "Recall3": 0.975,
+        "Recall6": 0.975,
+        "MRR": 0.8333333333333333
+      },
+      "Groups": {
+        "constraint": {
+          "n": 10,
+          "Top1": 1,
+          "Recall3": 1,
+          "Recall6": 1,
+          "MRR": 1
+        },
+        "identifier": {
+          "n": 10,
+          "Top1": 1,
+          "Recall3": 1,
+          "Recall6": 1,
+          "MRR": 1
+        },
+        "synonym": {
+          "n": 20,
+          "Top1": 0.4,
+          "Recall3": 0.95,
+          "Recall6": 0.95,
+          "MRR": 0.6666666666666666
+        }
+      },
+      "FirstPass": {
+        "n": 44,
+        "P50": 17.442215,
+        "P95": 21.01471,
+        "Max": 22.040027
+      },
+      "Cached": {
+        "n": 220,
+        "P50": 4.992404,
+        "P95": 7.170558,
+        "Max": 8.338211
+      },
+      "InvalidHits": 0,
+      "Queries": [
+        {
+          "ID": "s01",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.5232899188995361,
+          "FirstMS": 19.375504
+        },
+        {
+          "ID": "s02",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.5708291530609131,
+          "FirstMS": 20.096339
+        },
+        {
+          "ID": "s03",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6033799648284912,
+          "FirstMS": 15.305279
+        },
+        {
+          "ID": "s04",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.560653030872345,
+          "FirstMS": 17.012998
+        },
+        {
+          "ID": "s05",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6865108013153076,
+          "FirstMS": 15.909793
+        },
+        {
+          "ID": "s06",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.4521062970161438,
+          "FirstMS": 19.245584
+        },
+        {
+          "ID": "s07",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6698206067085266,
+          "FirstMS": 17.674665
+        },
+        {
+          "ID": "s08",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.4562029540538788,
+          "FirstMS": 17.380007
+        },
+        {
+          "ID": "s09",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7536530494689941,
+          "FirstMS": 17.722793
+        },
+        {
+          "ID": "s10",
+          "Group": "synonym",
+          "Rank": 3,
+          "Hits": 6,
+          "BestCosine": 0.5092894434928894,
+          "FirstMS": 16.725797
+        },
+        {
+          "ID": "s11",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.5923764705657959,
+          "FirstMS": 18.645421
+        },
+        {
+          "ID": "s12",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.4000431001186371,
+          "FirstMS": 18.02945
+        },
+        {
+          "ID": "s13",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.5849726796150208,
+          "FirstMS": 17.378888
+        },
+        {
+          "ID": "s14",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6135103106498718,
+          "FirstMS": 17.4098
+        },
+        {
+          "ID": "s15",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.5190317630767822,
+          "FirstMS": 18.623469
+        },
+        {
+          "ID": "s16",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.39300599694252014,
+          "FirstMS": 16.934917
+        },
+        {
+          "ID": "s17",
+          "Group": "synonym",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.3473452627658844,
+          "FirstMS": 18.953103
+        },
+        {
+          "ID": "s18",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5478285551071167,
+          "FirstMS": 17.442215
+        },
+        {
+          "ID": "s19",
+          "Group": "synonym",
+          "Rank": 2,
+          "Hits": 6,
+          "BestCosine": 0.5772872567176819,
+          "FirstMS": 17.237672
+        },
+        {
+          "ID": "s20",
+          "Group": "synonym",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.4525689482688904,
+          "FirstMS": 17.943434
+        },
+        {
+          "ID": "x01",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7750072479248047,
+          "FirstMS": 15.360159
+        },
+        {
+          "ID": "x02",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7631009817123413,
+          "FirstMS": 19.565264
+        },
+        {
+          "ID": "x03",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.693385660648346,
+          "FirstMS": 16.436228
+        },
+        {
+          "ID": "x04",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.8059414029121399,
+          "FirstMS": 15.771841
+        },
+        {
+          "ID": "x05",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5804630517959595,
+          "FirstMS": 17.123175
+        },
+        {
+          "ID": "x06",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7742950320243835,
+          "FirstMS": 15.384927
+        },
+        {
+          "ID": "x07",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7324481010437012,
+          "FirstMS": 15.972834
+        },
+        {
+          "ID": "x08",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6913724541664124,
+          "FirstMS": 17.07271
+        },
+        {
+          "ID": "x09",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.5772057175636292,
+          "FirstMS": 17.349576
+        },
+        {
+          "ID": "x10",
+          "Group": "identifier",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7719473242759705,
+          "FirstMS": 17.004934
+        },
+        {
+          "ID": "c01",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7074908018112183,
+          "FirstMS": 19.280111
+        },
+        {
+          "ID": "c02",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7204096913337708,
+          "FirstMS": 19.244144
+        },
+        {
+          "ID": "c03",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7160259485244751,
+          "FirstMS": 18.665325
+        },
+        {
+          "ID": "c04",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.46349790692329407,
+          "FirstMS": 21.01471
+        },
+        {
+          "ID": "c05",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6575077772140503,
+          "FirstMS": 19.612657
+        },
+        {
+          "ID": "c06",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7292665839195251,
+          "FirstMS": 19.355504
+        },
+        {
+          "ID": "c07",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.7211891412734985,
+          "FirstMS": 21.954202
+        },
+        {
+          "ID": "c08",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6253213286399841,
+          "FirstMS": 19.183599
+        },
+        {
+          "ID": "c09",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6243125200271606,
+          "FirstMS": 16.928422
+        },
+        {
+          "ID": "c10",
+          "Group": "constraint",
+          "Rank": 1,
+          "Hits": 6,
+          "BestCosine": 0.6655406355857849,
+          "FirstMS": 22.040027
+        },
+        {
+          "ID": "n01",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.2736209034919739,
+          "FirstMS": 18.858382
+        },
+        {
+          "ID": "n02",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.2423979938030243,
+          "FirstMS": 17.489096
+        },
+        {
+          "ID": "n03",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.2824843227863312,
+          "FirstMS": 16.549668
+        },
+        {
+          "ID": "n04",
+          "Group": "unrelated",
+          "Rank": 0,
+          "Hits": 6,
+          "BestCosine": 0.3054405152797699,
+          "FirstMS": 15.53088
+        }
+      ]
+    }
+  ]
+}

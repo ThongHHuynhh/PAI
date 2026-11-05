@@ -17,6 +17,7 @@ import (
 
 	"pai/pkg/auth"
 	"pai/pkg/identity"
+	"pai/pkg/localembed"
 	"pai/pkg/mesh"
 	"pai/pkg/release"
 	"pai/pkg/worker"
@@ -26,8 +27,10 @@ import (
 // failed, and its log says why. Its tunnel takes longer: the first start
 // downloads cloudflared, about 50 MB.
 const (
-	startWait  = 10 * time.Second
-	tunnelWait = 3 * time.Minute
+	startWait = 10 * time.Second
+	// Embedding startup can include GPU kernel compilation and vector migration.
+	embeddingStartWait = 6 * time.Minute
+	tunnelWait         = 3 * time.Minute
 	// Behind the user's own proxy nothing has to start: the URL answers at
 	// once, or a part the user set up is wrong.
 	urlWait = 20 * time.Second
@@ -77,7 +80,7 @@ var envProviders = map[string]Provider{
 // loopback, and every provider whose key is set in this environment serves.
 // With none set, keys go in the config after install.
 func Default() Config {
-	c := Config{HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}}
+	c := Config{HTTP: "127.0.0.1:8080", Providers: map[string]Provider{}, Memory: &MemoryConfig{Mode: "hash"}}
 	for name, p := range envProviders {
 		if os.ExpandEnv(p.Key) != "" {
 			c.Providers[name] = p
@@ -90,6 +93,24 @@ func Default() Config {
 // service will not have, and refuses a provider the harness does not know.
 func (c *Config) Expand() error {
 	c.named()
+	if c.Memory != nil {
+		for _, v := range []*string{&c.Memory.URL, &c.Memory.Key, &c.Memory.Model} {
+			if *v != "" && os.ExpandEnv(*v) == "" {
+				return errors.New("memory: environment variable is unset")
+			}
+			*v = os.ExpandEnv(*v)
+		}
+		if _, err := c.Memory.embedder(); err != nil {
+			return err
+		}
+		if c.Memory.Mode != "hash" {
+			o, err := c.Memory.connection()
+			if err != nil {
+				return err
+			}
+			c.Memory.URL, c.Memory.Key, c.Memory.Model = o.URL, o.Key, o.Model
+		}
+	}
 	for name, p := range c.Providers {
 		for _, s := range []*string{&p.Key, &p.URL, &p.Region} {
 			if *s != "" && os.ExpandEnv(*s) == "" {
@@ -122,6 +143,15 @@ func Install(c *Config, keep bool) error {
 		}
 		if write = url != ""; write { // a URL given to install replaces how the kept config is reached
 			c.URL, c.Tunnel = url, nil
+		}
+	}
+	if c.Memory != nil && c.Memory.Local {
+		o, err := c.Memory.connection()
+		if err != nil {
+			return err
+		}
+		if err := localembed.Install(context.Background(), Dir, o.Model, os.Stdout); err != nil {
+			return err
 		}
 	}
 	if write {
@@ -161,7 +191,11 @@ func Install(c *Config, keep bool) error {
 	if err := start(); err != nil {
 		return err
 	}
-	if err := answers(c.HTTP); err != nil {
+	wait := startWait
+	if c.Memory != nil && c.Memory.Mode != "hash" {
+		wait = embeddingStartWait
+	}
+	if err := answers(c.HTTP, wait); err != nil {
 		return err
 	}
 	if err := admin(k); err != nil {
@@ -314,7 +348,7 @@ func upgrades(ctx context.Context, u string) error {
 
 // answers waits for the harness to answer at addr as only it does: 401 to a
 // request with no api key. Another program on the port is an error at once.
-func answers(addr string) error {
+func answers(addr string, wait time.Duration) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
@@ -324,7 +358,7 @@ func answers(addr string) error {
 	}
 	url := "http://" + net.JoinHostPort(host, port) + "/"
 	client := http.Client{Timeout: time.Second}
-	for end := time.Now().Add(startWait); ; time.Sleep(200 * time.Millisecond) {
+	for end := time.Now().Add(wait); ; time.Sleep(200 * time.Millisecond) {
 		resp, err := client.Get(url)
 		if err == nil {
 			_ = resp.Body.Close()
@@ -334,7 +368,7 @@ func answers(addr string) error {
 			return nil
 		}
 		if time.Now().After(end) {
-			return fmt.Errorf("the harness service started but did not answer at %s in %s; its log says why", url, startWait)
+			return fmt.Errorf("the harness service started but did not answer at %s in %s; its log says why", url, wait)
 		}
 	}
 }

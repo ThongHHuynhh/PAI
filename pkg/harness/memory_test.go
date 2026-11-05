@@ -16,6 +16,55 @@ func r(n int, k statefile.Kind, body string) statefile.Record {
 	return statefile.Record{Header: statefile.Header{N: n, Kind: k, ID: statefile.NewID()}, Body: []byte(body)}
 }
 
+type unavailableEmbedder struct{ fail bool }
+
+func (e *unavailableEmbedder) Name() string { return "test-unavailable" }
+func (e *unavailableEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if e.fail {
+		return nil, errors.New("embedding endpoint offline")
+	}
+	return (memory.Hash{}).Embed(ctx, texts)
+}
+
+func TestRecallFailureIsRecorded(t *testing.T) {
+	ctx, embed := context.Background(), &unavailableEmbedder{}
+	st, err := memory.Open(t.TempDir(), embed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, _, err := st.Remember(ctx, memory.Item{Text: "The staging database uses port 5433"}); err != nil {
+		t.Fatal(err)
+	}
+	embed.fail = true
+	h := &Harness{Memory: st, Sessions: statefile.Sessions{Dir: t.TempDir()}}
+	f, err := h.Sessions.Start("s1", []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	msg := statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "test"}, Body: []byte("Which port does the staging database use?")}
+	if err := f.Append(msg); err != nil {
+		t.Fatal(err)
+	}
+	chain, err := h.Sessions.Load("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{id: "s1", f: f, changed: make(chan struct{})}
+	if err := h.recallTurn(ctx, s, "s1", statefile.Conf{}, chain); err != nil {
+		t.Fatal(err)
+	}
+	chain, err = h.Sessions.Load("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := chain[len(chain)-1]
+	if last.Source != "memory-error" || !strings.Contains(string(last.Body), "unavailable") {
+		t.Fatalf("failure not recorded: %+v", last)
+	}
+}
+
 // The cut never falls between a call and its result, and keeps the tail.
 func TestCutPointKeepsCallsWhole(t *testing.T) {
 	big := strings.Repeat("x", 1000)

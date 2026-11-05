@@ -3,8 +3,8 @@
 // where it came from. Nothing is deleted. A wrong or old item is invalidated:
 // it stops being recalled, and stays to be seen and restored.
 //
-// Recall is hybrid: BM25 over the text (SQLite FTS5) and cosine over
-// embeddings, fused by rank, then weighed by what each item proved worth.
+// Recall uses cosine over embeddings, weighed by what each item proved
+// worth. Optional hybrid mode fuses vectors and BM25 ranks.
 // A contextual bandit learns, per kind of turn, whether to recall at all and
 // how much, from whether recalled items were used.
 package memory
@@ -43,8 +43,8 @@ var kinds = []string{Fact, Preference, Decision, Todo, Procedure, Summary}
 const Global = "global"
 
 // dupCosine is how alike two items' embeddings are before the newer one is
-// taken as the same item said again. Hash embeddings of a reworded sentence
-// sit near 0.8; a repeat sits above 0.95.
+// considered for exact-text deduplication. Similarity alone is insufficient
+// to discard a fact; distinct texts go through model-guided consolidation.
 const dupCosine = 0.93
 
 // minText is the shortest item worth keeping: a statement shorter than this
@@ -103,9 +103,11 @@ type Event struct {
 }
 
 type Store struct {
-	db    *sql.DB
-	embed Embedder
-	mu    sync.Mutex // one writer: SQLite has one, and dedup reads before it writes
+	// Hybrid enables BM25 rank fusion; semantic vector retrieval is the default.
+	Hybrid bool
+	db     *sql.DB
+	embed  Embedder
+	mu     sync.Mutex // one writer: SQLite has one, and dedup reads before it writes
 	// OnEvent, when set, hears every change. It must not block.
 	OnEvent func(Event)
 }
@@ -174,7 +176,11 @@ func Open(dir string, e Embedder) (*Store, error) {
 		}
 	}
 	s := &Store{db: db, embed: e}
-	return s, s.reembed(context.Background())
+	if err := s.reembed(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -247,7 +253,9 @@ func (s *Store) nearest(ctx context.Context, it Item) (Item, bool, error) {
 	}
 	best, bi := float32(0), -1
 	for i, o := range items {
-		if c := cosine(it.vec, o.vec); c > best {
+		// Similar meaning alone cannot prove equality: negations, versions and
+		// numbers often have almost identical model vectors. Keep distinct facts.
+		if c := cosine(it.vec, o.vec); c > best && strings.TrimSuffix(it.Text, ".") == strings.TrimSuffix(o.Text, ".") {
 			best, bi = c, i
 		}
 	}
@@ -457,6 +465,10 @@ func (s *Store) reembed(ctx context.Context) error {
 			return err
 		}
 		ids, texts = append(ids, id), append(texts, text)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
 	}
 	_ = rows.Close()
 	for i := 0; i < len(ids); i += 64 {
