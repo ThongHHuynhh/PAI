@@ -157,3 +157,24 @@ func TestDownloadDigestAndIncompletePull(t *testing.T) {
 		t.Fatal("incomplete model pull accepted")
 	}
 }
+
+func TestExistingModelIsNotDownloadedAgain(t *testing.T) {
+	for _, code := range []int{http.StatusOK, http.StatusNotFound, http.StatusInternalServerError} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/show" {
+					t.Errorf("unexpected download request %s", r.URL.Path)
+				}
+				w.WriteHeader(code)
+			}))
+			defer srv.Close()
+			present, err := modelPresent(context.Background(), srv.URL+"/v1", "embeddinggemma")
+			if (code == http.StatusOK) != present {
+				t.Fatalf("presence=%v for status %d", present, code)
+			}
+			if (code == http.StatusInternalServerError) != (err != nil) {
+				t.Fatalf("error=%v for status %d", err, code)
+			}
+		})
+	}
+}

@@ -68,6 +68,13 @@ startup/warmup with a fresh CUDA cache took 72.19 seconds. The model produced
 vectors, and stopping the runtime closed its private listener. Startup
 readiness checks and persistent model residency account for this cost.
 
+A full fresh-install check also downloaded the official ARM64 archive,
+verified its pinned SHA-256, extracted it, downloaded embeddinggemma, and
+produced a readiness vector in an isolated PAI directory. It completed in
+138.62 seconds including downloads and initial warmup; starting and warming
+that installed runtime again took 3.75 seconds. Runtime archive links were
+materialized as regular files, satisfying PAI's installation path checks.
+
 ## Precision, tokens and limits
 
 - The fixed 0.12 similarity cutoff still returned six candidates for each

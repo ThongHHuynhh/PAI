@@ -186,10 +186,17 @@ func post(ctx context.Context, endpoint, path string, body any) (*http.Response,
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("private embeddings: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return nil, &statusError{resp.StatusCode, fmt.Sprintf("private embeddings: %s: %s", resp.Status, strings.TrimSpace(string(b)))}
 	}
 	return resp, nil
 }
+
+type statusError struct {
+	code    int
+	message string
+}
+
+func (e *statusError) Error() string { return e.message }
 
 // Warm verifies the downloaded model before PAI accepts requests.
 func Warm(ctx context.Context, endpoint, model string) error {

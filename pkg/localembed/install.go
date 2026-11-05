@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -122,11 +123,34 @@ func Install(ctx context.Context, dir, model string, progress io.Writer) error {
 		return err
 	}
 	defer stop()
-	_, _ = fmt.Fprintf(progress, "Downloading embedding model %s into %s...\n", model, filepath.Join(dir, "embeddings", "models"))
-	if err := pull(ctx, endpoint, model, progress); err != nil {
+	present, err := modelPresent(ctx, endpoint, model)
+	if err != nil {
 		return err
 	}
+	if !present {
+		_, _ = fmt.Fprintf(progress, "Downloading embedding model %s into %s...\n", model, filepath.Join(dir, "embeddings", "models"))
+		if err := pull(ctx, endpoint, model, progress); err != nil {
+			return err
+		}
+	} else {
+		_, _ = fmt.Fprintf(progress, "Using existing private embedding model %s.\n", model)
+	}
 	return Warm(ctx, endpoint, model)
+}
+
+// Do not repull an installed tag during reinstall: different weights under
+// the same name would leave previously stored vectors in a different space.
+func modelPresent(ctx context.Context, endpoint, model string) (bool, error) {
+	resp, err := post(ctx, endpoint, "/api/show", map[string]any{"model": model})
+	if err == nil {
+		_ = resp.Body.Close()
+		return true, nil
+	}
+	var status *statusError
+	if errors.As(err, &status) && status.code == http.StatusNotFound {
+		return false, nil
+	}
+	return false, err
 }
 
 func executable(dir string) (string, error) {
