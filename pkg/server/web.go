@@ -405,7 +405,7 @@ func (wa *webAPI) patch(w http.ResponseWriter, r *http.Request) {
 	var it memory.Item
 	var err error
 	if b.Text != "" || b.Kind != "" || b.Scope != "" || b.Topic != "" {
-		if it, err = wa.mem.Edit(r.Context(), id, b.Text, b.Kind, b.Scope, b.Topic); err != nil {
+		if it, err = wa.mem.Edit(r.Context(), id, b.Text, b.Kind, b.Scope, b.Topic, "person"); err != nil {
 			fail(w, err)
 			return
 		}

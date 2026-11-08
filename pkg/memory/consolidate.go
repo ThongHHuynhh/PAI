@@ -57,6 +57,10 @@ func scopeOr(s string) string {
 	return s
 }
 
+// MergedInto starts the reason of an item that a merge or an edit replaced,
+// and the replacing item's id follows it.
+const MergedInto = "merged into "
+
 // Merge replaces the items ids with one, it, in a single step: it is stored
 // with their history, the best of their utility and counts, pinned when any
 // was, and each of them is invalidated as merged into it. Nothing is lost:
@@ -116,7 +120,7 @@ func (s *Store) Merge(ctx context.Context, ids []string, it Item) (Item, error) 
 		it.ID, it.Kind, it.Text, it.Scope, it.Topic, strings.Join(it.Merged, ","), it.Session, it.From, it.To, it.Source, now.UnixMilli(), now.UnixMilli(), it.Pinned, it.Utility, it.Shown, it.Used, s.embed.Name(), pack(it.vec))
 	for _, o := range olds {
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE items SET invalid=?, reason=?, updated=? WHERE id=?`, now.UnixMilli(), "merged into "+it.ID, now.UnixMilli(), o.ID)
+			_, err = tx.ExecContext(ctx, `UPDATE items SET invalid=?, reason=?, updated=? WHERE id=?`, now.UnixMilli(), MergedInto+it.ID, now.UnixMilli(), o.ID)
 		}
 	}
 	if err == nil {
