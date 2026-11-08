@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- MCP: Claude Code, Claude Desktop, Cursor and other MCP clients can read and write PAI's memory, through `pai mcp` or `/mcp` on the server. It is the same store as PAI's own, so what a client writes shows up live in the web app. Items written this way are marked as unverified when recalled into a session. See [docs/mcp.md](mcp.md).
+
 ## v0.3.0
 
 - Terminal setup of a new server asks whether to download private Ollama and `embeddinggemma` inside PAI's data directory. Yes enables semantic retrieval; No needs no model or runtime. Existing installations and unattended setup keep model-free retrieval unless explicitly configured. The private runtime binds only to loopback and keeps its models, caches, temporary files and logs inside PAI's folder.
