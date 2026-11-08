@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.3.1
+
 - MCP: Claude Code, Claude Desktop, Cursor and other MCP clients can read and write PAI's memory, through `pai mcp` or `/mcp` on the server. It is the same store as PAI's own, so what a client writes shows up live in the web app. Items written this way are marked as unverified when recalled into a session. See [docs/mcp.md](mcp.md).
 
 ## v0.3.0
