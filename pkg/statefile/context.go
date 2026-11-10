@@ -27,6 +27,7 @@ func compacted(chain []Record) []Record {
 			break
 		}
 		switch {
+		case r.Kind == Instruction:
 		case opening && (r.Kind == Start || r.Kind == Config || r.Kind == System || r.Kind == Name):
 			out = append(out, r)
 		case r.Kind == System && r.Source == "workers":
@@ -81,7 +82,7 @@ func Build(chain []Record) ([]Record, int) {
 	}
 	for _, r := range chain {
 		switch {
-		case r.Kind == Start || r.Kind == Config || r.Kind == Name || r.Kind == Compaction:
+		case r.Kind == Start || r.Kind == Config || r.Kind == Name || r.Kind == Compaction || r.Kind == Instruction:
 		case isBlock(r.Kind):
 			blocks[r.Step] = append(blocks[r.Step], r)
 		case r.Kind == Step:
@@ -154,7 +155,7 @@ func ContextUsed(chain []Record) int {
 // file's, so a caller that holds the lock knows better than this.
 func Derive(chain []Record) Status {
 	i := len(chain) - 1
-	for chain[i].Kind == Name { // a rename leaves status as it was; record 1 is start
+	for chain[i].Kind == Name || chain[i].Kind == Instruction { // metadata leaves status as it was; record 1 is start
 		i--
 	}
 	if chain[i].Kind == Error {

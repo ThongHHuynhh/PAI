@@ -287,6 +287,11 @@ textarea { width: 100%; min-height: 72px; resize: vertical; }
 .nb-head h1 { margin: 0; font-size: 22px; }
 .nb-info { color: var(--muted); cursor: help; font-size: 14px; }
 .nb-search { width: 240px; flex: 0 1 240px; min-width: 0; }
+.instruction-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.instruction-tools input { flex: 1; min-width: 180px; }
+.instruction-file { border-bottom: 1px solid var(--line); padding: 10px 6px; }
+.instruction-file summary { cursor: pointer; overflow-wrap: anywhere; margin-bottom: 6px; }
+.instruction-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 560px; overflow: auto; padding: 12px; background: var(--panel-2); border-radius: 6px; }
 .nb-btn { width: 84px; flex: none; }
 .tabs { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line); margin: 12px 0 10px; overflow-x: auto; }
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 10px; color: var(--muted); white-space: nowrap; min-width: 104px; text-align: left; }
