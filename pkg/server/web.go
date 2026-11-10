@@ -86,6 +86,14 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 		reply(w, c)
 	})
 	mux.HandleFunc("GET /memory", wa.list)
+	mux.HandleFunc("GET /instructions", func(w http.ResponseWriter, r *http.Request) {
+		items, err := wa.h.Instructions()
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, items)
+	})
 	mux.HandleFunc("GET /memory/stats", wa.stats)
 	mux.HandleFunc("GET /memory/retrievals", wa.retrievals)
 	mux.HandleFunc("GET /metrics", wa.metrics)

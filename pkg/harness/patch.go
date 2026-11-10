@@ -161,7 +161,7 @@ func indexSeq(lines, seq []string) int {
 
 // applyPatch computes every file before writing any, so a hunk that fails to
 // match leaves the worker as it was and the model can retry the whole patch.
-func applyPatch(ctx context.Context, w Worker, input string) error {
+func applyPatch(ctx context.Context, w Worker, input string, observe func(string, []byte)) error {
 	secs, err := parsePatch(input)
 	if err != nil {
 		return err
@@ -186,6 +186,9 @@ func applyPatch(ctx context.Context, w Worker, input string) error {
 	for i, s := range secs {
 		if err := w.Write(ctx, s.path, out[i]); err != nil {
 			return err
+		}
+		if observe != nil {
+			observe(s.path, out[i])
 		}
 	}
 	return nil

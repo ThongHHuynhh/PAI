@@ -31,36 +31,41 @@ const killTimeout = 5 * time.Second
 // ones below it listed. The calls show verbatim with the worker they ran on,
 // so the model knows what ran and how to run more. The scans run at once,
 // each under agentsTimeout, and print in a fixed order.
-func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) string {
+func (h *Harness) agents(ctx context.Context, id string, conf statefile.Conf) (string, []statefile.Record) {
 	out := make([]string, len(conf.Workers))
+	observed := make([][]statefile.Record, len(conf.Workers))
 	var wg sync.WaitGroup
 	for i, w := range conf.Workers {
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(ctx, agentsTimeout)
 			defer cancel()
-			out[i] = h.scratch(ctx, id, w.Name)
+			out[i] = h.scratch(ctx, id, w.Name, func(r statefile.Record) { observed[i] = append(observed[i], r) })
 		})
 	}
 	wg.Wait()
-	return "The following read and run calls were made automatically\n" + strings.Join(out, "")
+	var records []statefile.Record
+	for _, rs := range observed {
+		records = append(records, rs...)
+	}
+	return "The following read and run calls were made automatically\n" + strings.Join(out, ""), records
 }
 
 // scratch is the section of a worker's scratch, which only the worker knows.
-func (h *Harness) scratch(ctx context.Context, id, name string) string {
+func (h *Harness) scratch(ctx context.Context, id, name string, observe func(statefile.Record)) string {
 	r, ok := h.Workers.Get(name)
 	if !ok {
 		return fmt.Sprintf("\nworker %s, scratch: not connected\n", name)
 	}
-	return scan(ctx, r, id, fmt.Sprintf("worker %s, scratch %s", name, r.Scratch), r.Scratch, listing(r.Interps[0], r.Scratch))
+	return scan(ctx, r, id, fmt.Sprintf("worker %s, scratch %s", name, r.Scratch), r.Scratch, listing(r.Interps[0], r.Scratch), observe)
 }
 
 // scan is one section: the read of root/AGENTS.md and the listing code,
 // both on r.
-func scan(ctx context.Context, r *Remote, id, head, root, code string) string {
+func scan(ctx context.Context, r *Remote, id, head, root, code string, observe func(statefile.Record)) string {
 	var b strings.Builder
 	file := root + "/AGENTS.md"
 	fmt.Fprintf(&b, "\n%s\nread %s\n", head, file)
-	rec, cut := call(ctx, r, id, "read", args{Path: file})
+	rec, cut := call(ctx, r, id, "read", args{Worker: r.Name, Path: file}, observe)
 	b.WriteString(text("read", args{Path: file}, rec, cut))
 	interp := r.Interps[0]
 	fmt.Fprintf(&b, "run %s: %s\n", interp, code)
@@ -72,8 +77,12 @@ func scan(ctx context.Context, r *Remote, id, head, root, code string) string {
 // call executes one call of a scan. A call over agentsTimeout says so, and a
 // run is ended on the worker, else it would hold the session's environment
 // there until runTimeout.
-func call(ctx context.Context, r *Remote, id, tool string, a args) (statefile.Record, int) {
-	rec, cut := execute(ctx, r, id, tool, a, nil)
+func call(ctx context.Context, r *Remote, id, tool string, a args, observers ...func(statefile.Record)) (statefile.Record, int) {
+	var observe func(statefile.Record)
+	if len(observers) != 0 {
+		observe = observers[0]
+	}
+	rec, cut := executeObserved(ctx, r, id, tool, a, nil, observe)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		rec.Exit, rec.Body = nil, fmt.Appendf(nil, "error: timed out after %s on worker %s, this scan is incomplete", agentsTimeout, r.Name)
 		if tool == "run" {

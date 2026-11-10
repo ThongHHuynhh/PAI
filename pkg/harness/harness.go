@@ -226,7 +226,8 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	if err := f.Append(system("harness", System(model))); err != nil {
 		return "", err
 	}
-	if err := f.Append(system("agents", h.agents(ctx, id, conf))); err != nil {
+	agents, observations := h.agents(ctx, id, conf)
+	if err := f.Append(system("agents", agents)); err != nil {
 		return "", err
 	}
 	if err := f.Append(system("workers", workersFirst+h.workers(conf.Workers))); err != nil {
@@ -239,6 +240,11 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	}
 	if c.Name != "" {
 		if err := f.Append(name(via, c.Name)); err != nil {
+			return "", err
+		}
+	}
+	for _, observation := range observations {
+		if err := f.Append(observation); err != nil {
 			return "", err
 		}
 	}
@@ -573,14 +579,21 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	}
 	for _, c := range calls {
 		r := result(c.ID, "not run")
+		var observations []statefile.Record
 		if ctx.Err() == nil {
-			r = h.execute(ctx, id, conf, c)
+			r = h.execute(ctx, id, conf, c, func(r statefile.Record) { observations = append(observations, r) })
 			if ctx.Err() != nil {
 				r = result(c.ID, "stopped, effect unknown")
 			}
 		}
 		if _, err := h.append(s, r); err != nil {
 			return "", err
+		}
+		for _, observation := range observations {
+			observation.For = c.ID
+			if _, err := h.append(s, observation); err != nil {
+				return "", err
+			}
 		}
 	}
 	if via := s.stoppedBy(); via != "" {
@@ -702,7 +715,7 @@ func result(call, text string) statefile.Record {
 
 // execute routes a call to the worker its arguments name. The session reaches
 // only the workers its config lists.
-func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, call statefile.Record) statefile.Record {
+func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, call statefile.Record, observers ...func(statefile.Record)) statefile.Record {
 	var c provider.Call
 	if err := json.Unmarshal(call.Body, &c); err != nil {
 		return result(call.ID, "error: "+err.Error())
@@ -736,7 +749,11 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	if c.Name == "run" && a.Background {
 		return h.job(ctx, id, call.ID, w, a)
 	}
-	r, dropped := execute(ctx, w, id, c.Name, a, conf.Input)
+	var observe func(statefile.Record)
+	if len(observers) != 0 {
+		observe = observers[0]
+	}
+	r, dropped := executeObserved(ctx, w, id, c.Name, a, conf.Input, observe)
 	r = finish(c.Name, a, r, dropped)
 	r.Kind, r.For = statefile.Result, call.ID
 	return r
