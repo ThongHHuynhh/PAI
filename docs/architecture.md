@@ -35,6 +35,7 @@ Every route but `/app/`, `/id` and `/join` takes `Authorization: Bearer <api key
 | `GET/POST /sessions`, `GET /sessions/{id}`, `GET/POST /sessions/{id}/records` | sessions and their records; records long-poll with `?wait=` |
 | `PUT /sessions/{id}/model`, `PUT /sessions/{id}/workers`, `/stop`, `/retry` | change or steer a session |
 | `POST /sessions/{id}/answer` | answer the questions of an open `ask` call: `{"call", "answers"}` or `{"call", "declined": true}`; 409 when none waits |
+| `POST /mcp` | memory for MCP clients, see [mcp.md](mcp.md) |
 | `GET /events` | Server-Sent Events: records, workers, memory |
 | `GET /graph` | the server, machines, sessions and memory stats |
 | `GET /memory`, `POST /memory`, `PATCH /memory/{id}`, `/invalidate`, `/restore`, `/feedback`, `POST /memory/consolidate`, `GET /memory/retrievals`, `GET /memory/stats` | memory |
