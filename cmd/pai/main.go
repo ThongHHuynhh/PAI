@@ -8,6 +8,7 @@
 //	pai login   <api key>       find the harness, remember it and the key in ~/.pai/login.json, and become its release
 //	pai uninstall               remove the worker service and the CLI; ~/.pai stays
 //	pai status                  the harness logged in to, and this worker on the mesh from its local socket
+//	pai mcp                     PAI's memory for an MCP client, on stdio: see docs/mcp.md
 //	pai version                 the release this binary was built from
 //	pai <verb> ...              one verb per harness route, see cli.go
 package main
@@ -90,6 +91,11 @@ func main() {
 		logIn(os.Args[2])
 	case "status":
 		status(os.Args[2:])
+	case "mcp":
+		if len(os.Args) != 2 {
+			usage()
+		}
+		serveMCP()
 	case "version":
 		if len(os.Args) != 2 {
 			usage()
@@ -378,6 +384,8 @@ func usage() {
   uninstall                          remove the worker service and the CLI; asks for sudo or UAC; ~/.pai stays
   status                             the server logged in to, then this worker on the mesh: its name and address,
                                      and each peer's address and path, direct or through the relay
+  mcp                                PAI's memory for an MCP client such as Claude Code, on stdio; the client starts
+                                     it: see docs/mcp.md
   version                            the release this binary was built from
 
   new                                POST /sessions, body from stdin: {"model","context_limit","workers","tools","input","params",

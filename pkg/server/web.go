@@ -15,6 +15,7 @@ import (
 	"pai/pkg/coordinator"
 	"pai/pkg/events"
 	"pai/pkg/harness"
+	"pai/pkg/mcp"
 	"pai/pkg/memory"
 	"pai/pkg/statefile"
 	"pai/pkg/version"
@@ -37,7 +38,8 @@ import (
 //	POST   /memory/{id}/invalidate      {"reason"} -> the item
 //	POST   /memory/{id}/restore         -> the item
 //	POST   /memory/{id}/feedback        {"up"} -> the item
-//	GET    /fallbacks                   -> {"provider": "the provider its sessions move to at its limit"}
+//	POST   /mcp                         one JSON-RPC message: memory for an MCP client, see docs/mcp.md
+//	GET    /fallbacks                  -> {"provider": "the provider its sessions move to at its limit"}
 //	PUT    /fallbacks                   the same, whole: saved in the config and applied
 //	GET/PUT /balance                    {"mode":"off|auto","pool":["provider/model",...]}
 //	GET    /accounts                    account limits and observed utilization; unknown usage is null
@@ -68,6 +70,11 @@ const maxLabelBytes = 4 * harness.MaxName
 const maxMemoryBody = 256 << 10
 
 func (wa *webAPI) handle(mux *http.ServeMux) {
+	var st mcp.Store // nil when there is no store: a nil *memory.Store in it would not be
+	if wa.mem != nil {
+		st = wa.mem
+	}
+	mux.Handle("/mcp", mcp.New(mcp.Memory(st)...)) // every method, so MCP's own 405 answers
 	mux.HandleFunc("GET /events", wa.events)
 	mux.HandleFunc("GET /graph", wa.graph)
 	mux.HandleFunc("GET /catalog", func(w http.ResponseWriter, r *http.Request) {
@@ -405,7 +412,7 @@ func (wa *webAPI) patch(w http.ResponseWriter, r *http.Request) {
 	var it memory.Item
 	var err error
 	if b.Text != "" || b.Kind != "" || b.Scope != "" || b.Topic != "" {
-		if it, err = wa.mem.Edit(r.Context(), id, b.Text, b.Kind, b.Scope, b.Topic); err != nil {
+		if it, err = wa.mem.Edit(r.Context(), id, b.Text, b.Kind, b.Scope, b.Topic, "person"); err != nil {
 			fail(w, err)
 			return
 		}

@@ -28,6 +28,10 @@ const (
 // helped nothing, so a recall whose items get used beats it.
 const skipReward = 0.1
 
+// maxPinned bounds the pinned items one recall carries: they come whatever
+// the turn asks, so each one costs context on every turn.
+const maxPinned = 10
+
 // Hit is an item a search found, with why: its place in each list and the
 // parts of its score.
 type Hit struct {
@@ -40,9 +44,44 @@ type Hit struct {
 	Used    bool    `json:"used,omitempty"`   // once settled: the reply carried its words
 }
 
+// Query is what Find looks for and where. The filters apply before items are
+// ranked and cut to K, so a narrow scope still gets its K best.
+type Query struct {
+	Text        string
+	Session     string // favours what was learnt there
+	Scope       string // only this scope and global; none is every scope
+	K           int
+	NoSummaries bool // leave out compactions' accounts of sessions
+}
+
+// filter is the query's narrowing as SQL to follow a WHERE, and its arguments.
+func (q Query) filter() (string, []any) {
+	sql, args := "", []any{}
+	if q.Scope != "" {
+		sql, args = sql+` AND scope IN (?,?)`, append(args, q.Scope, Global)
+	}
+	if q.NoSummaries {
+		sql, args = sql+` AND kind<>?`, append(args, Summary)
+	}
+	return sql, args
+}
+
 // Search is the k valid items most relevant to query, best first. session,
 // when set, favours what was learnt there.
 func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit, error) {
+	return s.Find(ctx, Query{Text: query, Session: session, K: k})
+}
+
+// Pinned is the newest valid pinned items that q's filters allow; q's text
+// and K do not matter.
+func (s *Store) Pinned(ctx context.Context, q Query) ([]Item, error) {
+	filter, args := q.filter()
+	return s.query(ctx, `WHERE invalid=0 AND pinned=1`+filter+fmt.Sprintf(` ORDER BY updated DESC LIMIT %d`, maxPinned), args...)
+}
+
+// Find is the q.K valid items most relevant to q.Text, best first.
+func (s *Store) Find(ctx context.Context, q Query) ([]Hit, error) {
+	query, session, k := q.Text, q.Session, q.K
 	if k <= 0 || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
@@ -50,7 +89,8 @@ func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit
 	if err != nil {
 		return nil, err
 	}
-	items, err := s.query(ctx, `WHERE invalid=0`)
+	filter, filterArgs := q.filter()
+	items, err := s.query(ctx, `WHERE invalid=0`+filter, filterArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +118,9 @@ func (s *Store) Search(ctx context.Context, query, session string, k int) ([]Hit
 		h.Vector = i + 1
 	}
 	// lexical list
-	if q := ftsQuery(query); s.Hybrid && q != "" {
-		rows, err := s.db.QueryContext(ctx, `SELECT items.id FROM items_fts JOIN items ON items.rowid=items_fts.rowid WHERE items_fts MATCH ? AND items.invalid=0 ORDER BY bm25(items_fts) LIMIT ?`, q, candidates)
+	if fts := ftsQuery(query); s.Hybrid && fts != "" {
+		args := append(append([]any{fts}, filterArgs...), candidates)
+		rows, err := s.db.QueryContext(ctx, `SELECT items.id FROM items_fts JOIN items ON items.rowid=items_fts.rowid WHERE items_fts MATCH ? AND items.invalid=0`+filter+` ORDER BY bm25(items_fts) LIMIT ?`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("memory: search: %w", err)
 		}
@@ -194,7 +235,7 @@ func (s *Store) Recall(ctx context.Context, t Turn) (Retrieval, error) {
 	if r.Hits, err = s.Search(ctx, t.Query, t.Session, k); err != nil {
 		return r, err
 	}
-	pinned, err := s.query(ctx, `WHERE invalid=0 AND pinned=1 ORDER BY updated DESC LIMIT 10`)
+	pinned, err := s.Pinned(ctx, Query{})
 	if err != nil {
 		return r, err
 	}

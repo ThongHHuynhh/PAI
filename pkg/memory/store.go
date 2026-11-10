@@ -81,7 +81,7 @@ type Item struct {
 	Session string    `json:"session,omitempty"` // where it was learnt
 	From    int       `json:"from,omitempty"`    // the records of that session it was learnt from
 	To      int       `json:"to,omitempty"`
-	Source  string    `json:"source"` // who wrote it: extract, compaction, the model's remember, or a person
+	Source  string    `json:"source"` // who wrote it: extract, compaction, the model's remember, a person, or a client over MCP
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 	// Invalid is when it stopped holding, and Reason why; zero while valid.
@@ -280,9 +280,9 @@ func (s *Store) Pin(ctx context.Context, id string, on bool) (Item, error) {
 	return s.change(ctx, id, "pinned", `UPDATE items SET pinned=?, updated=? WHERE id=?`, on, time.Now().UnixMilli(), id)
 }
 
-// Edit is a person's correction of an item's text, kind, scope or topic: a
+// Edit is a correction of an item's text, kind, scope or topic by source: a
 // new version that replaces it, as a merge of one, so the old text stays.
-func (s *Store) Edit(ctx context.Context, id, text, kind, scope, topic string) (Item, error) {
+func (s *Store) Edit(ctx context.Context, id, text, kind, scope, topic, source string) (Item, error) {
 	it, err := s.Get(ctx, id)
 	if err != nil {
 		return it, err
@@ -298,7 +298,7 @@ func (s *Store) Edit(ctx context.Context, id, text, kind, scope, topic string) (
 			*f.to = f.v
 		}
 	}
-	it.Source, it.Shown, it.Used, it.Merged = "person", 0, 0, nil
+	it.Source, it.Shown, it.Used, it.Merged = source, 0, 0, nil
 	return s.Merge(ctx, []string{id}, it)
 }
 
@@ -337,6 +337,7 @@ type Filter struct {
 	Kind, Scope, Session string
 	Invalid              bool
 	Limit                int
+	NoSummaries          bool // leave out compactions' accounts of sessions
 }
 
 // List is the items that match f, newest first.
@@ -344,6 +345,9 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Item, error) {
 	where, args := []string{"1=1"}, []any{}
 	if !f.Invalid {
 		where = append(where, "invalid=0")
+	}
+	if f.NoSummaries {
+		where, args = append(where, "kind<>?"), append(args, Summary)
 	}
 	for col, v := range map[string]string{"kind": f.Kind, "scope": f.Scope, "session": f.Session} {
 		if v != "" {
