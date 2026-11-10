@@ -34,9 +34,9 @@ const (
 )
 
 var (
-	recall   = provider.Tool{Name: "recall", Description: "Search PAI's long-term memory: what was learnt in every earlier session, on every machine and model. Returns items with ids", Schema: schema(`{"type":"object","properties":{"query":{"type":"string"},"k":{"type":"integer","description":"how many items, default 8"}},"required":["query"]}`)}
-	remember = provider.Tool{Name: "remember", Description: "Save one lasting item to PAI's long-term memory, as one self-contained sentence. Use for facts about the user, their machines and projects, preferences, decisions and why, todos, and procedures that worked", Schema: schema(`{"type":"object","properties":{"text":{"type":"string"},"topic":{"type":"string","description":"a short lower case name of the subject, shared by related items, such as deploy or database"},"kind":{"type":"string","enum":["fact","preference","decision","todo","procedure"]},"scope":{"type":"string","description":"global, or project:<name>; default global"}},"required":["text"]}`)}
-	forget   = provider.Tool{Name: "forget", Description: "Mark a memory item as no longer true, by its id, with why. It stops being recalled; it is never deleted", Schema: schema(`{"type":"object","properties":{"id":{"type":"string"},"reason":{"type":"string"}},"required":["id","reason"]}`)}
+	recall   = provider.Tool{Name: "recall", Description: memory.RecallDoc, Schema: schema(`{"type":"object","properties":{"query":{"type":"string"},"k":{"type":"integer","description":"` + memory.KDoc + `"}},"required":["query"]}`)}
+	remember = provider.Tool{Name: "remember", Description: memory.RememberDoc, Schema: schema(`{"type":"object","properties":{"text":{"type":"string"},"topic":{"type":"string","description":"` + memory.TopicDoc + `"},"kind":{"type":"string","enum":` + memory.KindEnum + `},"scope":{"type":"string","description":"` + memory.ScopeDoc + `"}},"required":["text"]}`)}
+	forget   = provider.Tool{Name: "forget", Description: memory.ForgetDoc, Schema: schema(`{"type":"object","properties":{"id":{"type":"string"},"reason":{"type":"string"}},"required":["id","reason"]}`)}
 )
 
 // memoryTools are the tools that run on the server, not on a worker.
@@ -59,11 +59,7 @@ func (h *Harness) memoryCall(ctx context.Context, id string, call statefile.Reco
 	}
 	switch c.Name {
 	case "recall":
-		k := a.K
-		if k <= 0 {
-			k = 8
-		}
-		hits, err := h.Memory.Search(ctx, a.Query, id, min(k, 30))
+		hits, err := h.Memory.Search(ctx, a.Query, id, memory.RecallK(a.K))
 		if err != nil {
 			return result(call.ID, "error: "+err.Error())
 		}
@@ -72,7 +68,7 @@ func (h *Harness) memoryCall(ctx context.Context, id string, call statefile.Reco
 		}
 		var b strings.Builder
 		for _, hit := range hits {
-			b.WriteString(line(hit.Item))
+			b.WriteString(memory.Line(hit.Item))
 		}
 		return result(call.ID, b.String())
 	case "remember":
@@ -92,11 +88,6 @@ func (h *Harness) memoryCall(ctx context.Context, id string, call statefile.Reco
 		return result(call.ID, "forgot "+it.ID+": "+it.Text)
 	}
 	return result(call.ID, "error: unknown tool "+c.Name)
-}
-
-// line is an item as the model reads it.
-func line(it memory.Item) string {
-	return fmt.Sprintf("- [%s] (%s, %s) %s\n", it.ID, it.Kind, it.Scope, it.Text)
 }
 
 // recallTurn adds what memory recalls for the messages a person sent since
@@ -142,7 +133,7 @@ func (h *Harness) recallTurn(ctx context.Context, s *session, id string, conf st
 	var b strings.Builder
 	fmt.Fprintf(&b, "Memory recalled for this turn (retrieval %s). Use what helps and ignore the rest. Call forget with an id that is no longer true, and recall for more.\n", rv.ID)
 	for _, hit := range rv.Hits {
-		b.WriteString(line(hit.Item))
+		b.WriteString(memory.Line(hit.Item))
 	}
 	_, err = h.append(s, system("memory", b.String()))
 	return err

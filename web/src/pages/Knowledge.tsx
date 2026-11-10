@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "reac
 import { ago, call, type Arm, type Hit, type Item, type Retrieval, type Stats } from "../api";
 import { useLive } from "../live";
 import { go } from "../App";
+import Instructions from "../components/Instructions";
 
 // Memory reads like a notebook: what PAI knows as plain lines under their
 // topics, the kind a colored dot. Where an item came from, how often it helped
@@ -27,7 +28,7 @@ const HOW =
   "PAI keeps what lasts from your sessions: facts, preferences, decisions, todos and how-tos. " +
   "It refuses secrets, merges what repeats and never deletes: forgotten items stay under Forgotten. " +
   "For each message it recalls what fits, and learns from what the model uses.";
-type Tab = "knows" | "activity" | "forgotten";
+type Tab = "knows" | "activity" | "forgotten" | "instructions";
 
 export default function Knowledge({ focus }: { focus?: string }) {
   const { memoryTick } = useLive();
@@ -59,6 +60,7 @@ export default function Knowledge({ focus }: { focus?: string }) {
     ["knows", "Knows", stats?.items],
     ["activity", "Activity", stats?.recalls],
     ["forgotten", "Forgotten", stats?.invalid],
+    ["instructions", "Permanent instructions", undefined],
   ];
   return (
     <div className="knowledge-page">
@@ -68,7 +70,7 @@ export default function Knowledge({ focus }: { focus?: string }) {
           ⓘ
         </span>
         <div className="grow" />
-        <input
+        {tab !== "instructions" && <><input
           className="search nb-search"
           placeholder="Search"
           title="Finds by words and by meaning, the way PAI recalls"
@@ -90,7 +92,7 @@ export default function Knowledge({ focus }: { focus?: string }) {
           title="Teach PAI something"
         >
           Add
-        </button>
+        </button></>}
       </header>
       <div className="tabs nb-tabs">
         {tabs.map(([t, l, n]) => (
@@ -106,6 +108,7 @@ export default function Knowledge({ focus }: { focus?: string }) {
       {tab === "knows" && <Knows q={q} focus={focus} tick={memoryTick} adding={adding} onAdded={() => setAdding(false)} />}
       {tab === "activity" && <Activity tick={memoryTick} stats={stats} arms={arms} />}
       {tab === "forgotten" && <Forgotten tick={memoryTick} />}
+      {tab === "instructions" && <Instructions />}
     </div>
   );
 }

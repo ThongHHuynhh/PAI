@@ -44,7 +44,7 @@ func TestMergeKeepsLineageAndStats(t *testing.T) {
 	if _, err := s.Merge(ctx, []string{a.ID}, Item{Text: "again from a retired item"}); err == nil {
 		t.Fatal("merged an invalid item")
 	}
-	e, err := s.Edit(ctx, m.ID, "Staging database is Postgres 17 on port 5432", "", "", "")
+	e, err := s.Edit(ctx, m.ID, "Staging database is Postgres 17 on port 5432", "", "", "", "person")
 	if err != nil || e.ID == m.ID || e.Merged[0] != m.ID || e.Topic != "database" {
 		t.Fatalf("an edit should be a new version: %+v %v", e, err)
 	}

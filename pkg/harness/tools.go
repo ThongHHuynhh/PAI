@@ -229,6 +229,17 @@ const maxMedia = 5 << 20
 // its output; the file holding the whole is in the header. A read of a file
 // whose sniffed type is in input is media; every other file is text.
 func execute(ctx context.Context, w Worker, session, tool string, a args, input []string) (statefile.Record, int) {
+	return executeObserved(ctx, w, session, tool, a, input, nil)
+}
+
+func executeObserved(ctx context.Context, w Worker, session, tool string, a args, input []string, observe func(statefile.Record)) (statefile.Record, int) {
+	snapshot := func(p string, b []byte) {
+		if observe != nil {
+			if r, ok := instructionRecord(a.Worker, p, b); ok {
+				observe(r)
+			}
+		}
+	}
 	r := statefile.Record{Header: statefile.Header{Type: "text/plain"}}
 	ok := func(body string) (statefile.Record, int) { r.Body = []byte(body); return r, 0 }
 	fail := func(err error) (statefile.Record, int) { return ok("error: " + err.Error()) }
@@ -253,14 +264,17 @@ func execute(ctx context.Context, w Worker, session, tool string, a args, input 
 			if len(b) > maxMedia {
 				return fail(fmt.Errorf("%s is %d bytes of %s, over the %d byte media limit", a.Path, len(b), t, maxMedia))
 			}
+			snapshot(a.Path, b)
 			r.Type, r.Body = t, b
 			return r, 0
 		}
+		snapshot(a.Path, b)
 		return ok(string(b))
 	case "write":
 		if err := w.Write(ctx, a.Path, []byte(a.Content)); err != nil {
 			return fail(err)
 		}
+		snapshot(a.Path, []byte(a.Content))
 		return ok("ok")
 	case "edit":
 		b, err := w.Read(ctx, a.Path)
@@ -270,12 +284,14 @@ func execute(ctx context.Context, w Worker, session, tool string, a args, input 
 		if n := bytes.Count(b, []byte(a.Old)); n != 1 {
 			return fail(fmt.Errorf("old matches %d times, need exactly 1", n))
 		}
-		if err := w.Write(ctx, a.Path, bytes.Replace(b, []byte(a.Old), []byte(a.New), 1)); err != nil {
+		updated := bytes.Replace(b, []byte(a.Old), []byte(a.New), 1)
+		if err := w.Write(ctx, a.Path, updated); err != nil {
 			return fail(err)
 		}
+		snapshot(a.Path, updated)
 		return ok("ok")
 	case "patch":
-		if err := applyPatch(ctx, w, a.Input); err != nil {
+		if err := applyPatch(ctx, w, a.Input, snapshot); err != nil {
 			return fail(err)
 		}
 		return ok("ok")

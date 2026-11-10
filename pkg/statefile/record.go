@@ -18,17 +18,18 @@ import (
 type Kind string
 
 const (
-	Start    Kind = "start"
-	Config   Kind = "config"
-	System   Kind = "system"
-	Message  Kind = "message"
-	Text     Kind = "text"
-	Thinking Kind = "thinking"
-	Call     Kind = "call"
-	Step     Kind = "step"
-	Result   Kind = "result"
-	Error    Kind = "error"
-	Name     Kind = "name" // the session's name, newest wins; empty removes it. Never in the context
+	Start       Kind = "start"
+	Config      Kind = "config"
+	System      Kind = "system"
+	Message     Kind = "message"
+	Text        Kind = "text"
+	Thinking    Kind = "thinking"
+	Call        Kind = "call"
+	Step        Kind = "step"
+	Result      Kind = "result"
+	Error       Kind = "error"
+	Name        Kind = "name"        // the session's name, newest wins; empty removes it. Never in the context
+	Instruction Kind = "instruction" // observed worker Markdown snapshot; never in model context
 	// Compaction is a summary of records through its upto, which the context
 	// carries in their place. The records stay in the file.
 	Compaction Kind = "compaction"

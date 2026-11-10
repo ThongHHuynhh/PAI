@@ -34,7 +34,7 @@ Connect another machine with the line the server prints (`pai-server join` print
 curl -fsSL https://github.com/ThongHHuynhh/PAI/releases/latest/download/install.sh | sh -s -- https://pai.example.com XXXX-XXXX
 ```
 
-Windows uses `install.ps1` the same way. See [docs/self-hosting.md](docs/self-hosting.md) for URLs, tunnels, accounts and failover, and [docs/architecture.md](docs/architecture.md) for how it works.
+Windows uses `install.ps1` the same way. See [docs/self-hosting.md](docs/self-hosting.md) for URLs, tunnels, accounts and failover, and [docs/architecture.md](docs/architecture.md) for how it works. To use PAI's memory from Claude Code, Cursor or another MCP client, see [docs/mcp.md](docs/mcp.md).
 
 ## Build from source
 
