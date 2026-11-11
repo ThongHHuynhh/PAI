@@ -112,6 +112,7 @@ func (h *Harness) providers() map[string]provider.Provider {
 // waits for.
 type Create struct {
 	Routing      *statefile.Routing         `json:"routing,omitempty"`
+	Compact      string                     `json:"compact,omitempty"`
 	Parent       string                     `json:"parent,omitempty"`
 	From         string                     `json:"from,omitempty"`
 	N            int                        `json:"n,omitempty"`
@@ -136,7 +137,7 @@ func system(source, body string) statefile.Record {
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewName(h.Sessions.Exists)
 	if c.From != "" {
-		if c.Parent != "" || c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" || c.Routing != nil {
+		if c.Parent != "" || c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" || c.Routing != nil || c.Compact != "" {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
 		if err := h.cut(c.From, c.N); err != nil {
@@ -189,7 +190,10 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	if Tools(c.Tools, nil) == nil {
 		return "", fmt.Errorf("unknown tools %q; sets: default, patch, orchestrator, patch-orchestrator", c.Tools)
 	}
-	conf := statefile.Conf{Parent: c.Parent, Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset, Routing: c.Routing}
+	conf := statefile.Conf{Parent: c.Parent, Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset, Routing: c.Routing, Compact: c.Compact}
+	if err := compactMode(conf.Compact); err != nil {
+		return "", err
+	}
 	if err := h.validateRouting(conf); err != nil {
 		return "", err
 	}
@@ -378,7 +382,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 			}
 		}
 	}
-	if compactable(chain) {
+	if compactable(chain) && h.compactDue(s, id, conf, chain) {
 		done, err := h.compact(ctx, s, id, conf, chain)
 		if err != nil {
 			log.Printf("session %s: %v", id, err) // the limit below still holds
@@ -754,7 +758,7 @@ func (h *Harness) job(ctx context.Context, id, call string, w Worker, a args) st
 		}
 		tail, _ := clip(o.Body, true)
 		text := fmt.Sprintf("[job %s on %s exited %d after %s. Log: %s]\n%s", call, a.Worker, o.Exit, time.Since(start).Round(time.Second), o.Full, tail)
-		if _, err := h.Post(ctx, id, "job", call, []Part{{Type: "text/plain", Body: []byte(text)}}); err != nil {
+		if _, err := h.Post(ctx, id, "job", call, []Part{{Type: "text/plain", Body: h.mask(ctx, statefile.Record{Body: []byte(text)}).Body}}); err != nil {
 			log.Printf("session %s: job %s: %v", id, call, err)
 		}
 	})
@@ -794,6 +798,15 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	if orchestratorTools[c.Name] {
 		return h.orchestratorCall(ctx, id, conf, call, c)
 	}
+	if c.Name == "compact" {
+		return h.compactCall(ctx, id, call)
+	}
+	if c.Name == "diagnose" {
+		return h.diagnoseCall(ctx, call, c)
+	}
+	if c.Name == "credential" {
+		return h.credentialCall(ctx, id, call, c)
+	}
 	if c.Name == "ask" {
 		if conf.Parent != "" {
 			return result(call.ID, "error: a child session cannot ask; report the clarification needed to its parent and stop dependent actions")
@@ -810,15 +823,18 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	if !ok {
 		return result(call.ID, "error: worker "+a.Worker+" is not connected")
 	}
+	if err := h.fill(ctx, &a); err != nil {
+		return result(call.ID, "error: "+err.Error())
+	}
 	if c.Name == "run" && a.Background {
-		return h.job(ctx, id, call.ID, w, a)
+		return h.mask(ctx, h.job(ctx, id, call.ID, w, a))
 	}
 	var observe func(statefile.Record)
 	if len(observers) != 0 {
-		observe = observers[0]
+		observe = func(r statefile.Record) { observers[0](h.mask(ctx, r)) }
 	}
 	r, dropped := executeObserved(ctx, w, id, c.Name, a, conf.Input, observe)
-	r = finish(c.Name, a, r, dropped)
+	r = h.mask(ctx, finish(c.Name, a, r, dropped))
 	r.Kind, r.For = statefile.Result, call.ID
 	return r
 }

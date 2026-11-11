@@ -211,15 +211,7 @@ func (s *server) answer(f Frame) (Frame, error) {
 		b, err := s.read(f.Path)
 		return Frame{Header: Header{Kind: Bytes}, Body: b}, err
 	case Write:
-		w, err := s.create(f.Path)
-		if err != nil {
-			return Frame{}, err
-		}
-		_, werr := w.Write(f.Body)
-		if err := w.Close(); err != nil {
-			return Frame{}, err
-		}
-		return Frame{Header: Header{Kind: Done}}, werr
+		return Frame{Header: Header{Kind: Done}}, s.write(f.Path, f.Body, f.Expect)
 	case Kill:
 		s.kill(f.Session)
 		return Frame{Header: Header{Kind: Done}}, nil

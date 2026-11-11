@@ -51,6 +51,10 @@ const MaxPost = 8 << 20
 //	                                  takes over from the next step
 //	PUT  /sessions/{id}/name          the name as text; ?via= required. a name     -> {"n"}
 //	                                  record; empty removes the name
+//	PUT  /sessions/{id}/compact       auto or manual as text; ?via= required. a   -> {"n"}
+//	                                  config record with that compaction mode
+//	POST /sessions/{id}/compact       ?via= required. compact an idle session now -> {"compacted"}
+//	GET  /sessions/{id}/diagnose      -> working, waiting or stuck, and on what
 //	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
 //	                                  a running step is stopped first
 //	GET  /workers                     -> connected workers' hellos, and refused
@@ -194,6 +198,44 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 	handle("PUT /sessions/{id}/model", h.serveModel)
 	handle("GET /sessions/{id}/models", h.serveModels)
 	handle("PUT /sessions/{id}/name", h.serveName)
+	handle("PUT /sessions/{id}/compact", func(w http.ResponseWriter, r *http.Request) {
+		via, err := via(r)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxName))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		n, err := h.SetCompact(r.PathValue("id"), via, strings.TrimSpace(string(b)))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]int{"n": n})
+	})
+	handle("GET /sessions/{id}/diagnose", func(w http.ResponseWriter, r *http.Request) {
+		d, err := h.Diagnose(r.PathValue("id"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, d)
+	})
+	handle("POST /sessions/{id}/compact", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := via(r); err != nil {
+			fail(w, err)
+			return
+		}
+		done, err := h.CompactNow(ctx, r.PathValue("id"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, map[string]bool{"compacted": done})
+	})
 	return mux
 }
 

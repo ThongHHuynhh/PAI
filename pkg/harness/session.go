@@ -184,6 +184,24 @@ func (h *Harness) SetModel(id, via, model string) (int, error) {
 	})
 }
 
+// SetCompact sets the session's compaction mode from its next step on.
+func (h *Harness) SetCompact(id, via, mode string) (int, error) {
+	if err := compactMode(mode); err != nil {
+		return 0, err
+	}
+	return h.setConf(id, via, func(c *statefile.Conf, _ []statefile.Record) error {
+		c.Compact = mode
+		return nil
+	})
+}
+
+func compactMode(mode string) error {
+	if mode != "" && mode != statefile.CompactAuto && mode != statefile.CompactManual {
+		return fmt.Errorf("compaction mode %q: it is auto or manual", mode)
+	}
+	return nil
+}
+
 // setConf appends a config record that is the newest one changed by fn,
 // under the lock a post takes.
 func (h *Harness) setConf(id, via string, fn func(*statefile.Conf, []statefile.Record) error) (int, error) {

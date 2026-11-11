@@ -162,7 +162,7 @@ func (h *Harness) copyLogs(ctx context.Context, s *session) {
 		if !ok {
 			continue
 		}
-		if err := r.Write(ctx, r.Scratch+"/logs/"+id+".log", b); err != nil {
+		if err := r.Write(ctx, r.Scratch+"/logs/"+id+".log", b, ""); err != nil {
 			log.Printf("session %s: log copy to %s: %v", id, w.Name, err)
 		}
 	}

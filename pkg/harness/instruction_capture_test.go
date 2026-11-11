@@ -62,7 +62,7 @@ type instructionWorker struct {
 func (w *instructionWorker) Read(context.Context, string) ([]byte, error) {
 	return w.content, w.readErr
 }
-func (w *instructionWorker) Write(_ context.Context, _ string, b []byte) error {
+func (w *instructionWorker) Write(_ context.Context, _ string, b []byte, _ string) error {
 	w.writes++
 	if w.failAt == w.writes {
 		return errors.New("write failed")

@@ -353,6 +353,18 @@ func (c *Client) SetModel(ctx context.Context, id, via, model string) error {
 	return c.Call(ctx, "PUT", "/sessions/"+id+"/model?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(model), nil)
 }
 
+// SetCompact sets the session's compaction mode, auto or manual.
+func (c *Client) SetCompact(ctx context.Context, id, via, mode string) error {
+	return c.Call(ctx, "PUT", "/sessions/"+id+"/compact?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(mode), nil)
+}
+
+// Compact compacts an idle session now; false when there was too little to.
+func (c *Client) Compact(ctx context.Context, id, via string) (bool, error) {
+	var out struct{ Compacted bool }
+	err := c.Call(ctx, "POST", "/sessions/"+id+"/compact?via="+url.QueryEscape(via), "", nil, &out)
+	return out.Compacted, err
+}
+
 // SetWorkers makes ws the session's workers from its next step on.
 func (c *Client) SetWorkers(ctx context.Context, id, via string, ws []statefile.Worker) error {
 	b, err := json.Marshal(ws)

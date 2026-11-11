@@ -48,7 +48,9 @@ func commands() []command {
 	return []command{
 		{"new", []string{"clear"}, "New session", "ctrl+n", (*session).fresh},
 		{"sessions", []string{"resume"}, "Sessions", "ctrl+o", (*session).sessions},
-		{"continue", []string{"compact"}, "Continue in a new session", "", (*session).carryOn},
+		{"continue", nil, "Continue in a new session", "", (*session).carryOn},
+		{"compact", nil, "Compact the context now", "", (*session).compactNow},
+		{"compaction", nil, "Compaction mode: auto or manual", "", (*session).compactionMenu},
 		{"config", nil, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model: swap this session, or choose for a new one", "", (*session).models},
@@ -320,6 +322,68 @@ func (s *session) carryOn(a *App) {
 		return
 	}
 	s.continueAs(a, s.info.Config, s.price)
+}
+
+// compactNow has the harness fold the oldest records into a summary.
+func (s *session) compactNow(a *App) {
+	if s.id == "" {
+		a.Say("No session to compact yet")
+		return
+	}
+	id := s.id
+	a.Say("Compacting…")
+	a.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		defer cancel()
+		done, err := s.c.Compact(ctx, id, via)
+		a.Post(func() {
+			switch {
+			case err != nil:
+				a.SayError(err)
+			case !done:
+				a.Say("Nothing to compact yet")
+			default:
+				a.Say("Compacted")
+			}
+		})
+	})
+}
+
+// compactionMenu picks the session's compaction mode.
+func (s *session) compactionMenu(a *App) {
+	if s.id == "" {
+		a.Say("No session yet")
+		return
+	}
+	id, cur := s.id, s.info.Config.Compact
+	if cur == "" {
+		cur = statefile.CompactAuto
+	}
+	m := &Menu{}
+	for _, mode := range []struct{ name, hint string }{
+		{statefile.CompactAuto, "compact when PAI judges it right"},
+		{statefile.CompactManual, "ask me first; compact unasked only near the limit"},
+	} {
+		label := mode.name
+		if mode.name == cur {
+			label += "  (now)"
+		}
+		m.Items = append(m.Items, MenuItem{Label: label, Hint: mode.hint, Pick: func(a *App, _ *MenuItem) {
+			a.Go(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), callTime)
+				defer cancel()
+				err := s.c.SetCompact(ctx, id, via, mode.name)
+				a.Post(func() {
+					if err != nil {
+						a.SayError(err)
+						return
+					}
+					a.Say("Compaction: " + mode.name)
+				})
+			})
+		}})
+	}
+	a.OpenMenu("Compaction mode", m)
 }
 
 // continueAs is carryOn with the config cf at price p.

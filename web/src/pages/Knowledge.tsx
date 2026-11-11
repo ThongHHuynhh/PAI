@@ -28,7 +28,7 @@ const HOW =
   "PAI keeps what lasts from your sessions: facts, preferences, decisions, todos and how-tos. " +
   "It refuses secrets, merges what repeats and never deletes: forgotten items stay under Forgotten. " +
   "For each message it recalls what fits, and learns from what the model uses.";
-type Tab = "knows" | "activity" | "forgotten" | "instructions";
+type Tab = "knows" | "activity" | "forgotten" | "credentials" | "instructions";
 
 export default function Knowledge({ focus }: { focus?: string }) {
   const { memoryTick } = useLive();
@@ -60,6 +60,7 @@ export default function Knowledge({ focus }: { focus?: string }) {
     ["knows", "Knows", stats?.items],
     ["activity", "Activity", stats?.recalls],
     ["forgotten", "Forgotten", stats?.invalid],
+    ["credentials", "Credentials", undefined],
     ["instructions", "Permanent instructions", undefined],
   ];
   return (
@@ -70,7 +71,7 @@ export default function Knowledge({ focus }: { focus?: string }) {
           ⓘ
         </span>
         <div className="grow" />
-        {tab !== "instructions" && <><input
+        {tab !== "instructions" && tab !== "credentials" && <><input
           className="search nb-search"
           placeholder="Search"
           title="Finds by words and by meaning, the way PAI recalls"
@@ -108,6 +109,7 @@ export default function Knowledge({ focus }: { focus?: string }) {
       {tab === "knows" && <Knows q={q} focus={focus} tick={memoryTick} adding={adding} onAdded={() => setAdding(false)} />}
       {tab === "activity" && <Activity tick={memoryTick} stats={stats} arms={arms} />}
       {tab === "forgotten" && <Forgotten tick={memoryTick} />}
+      {tab === "credentials" && <Credentials tick={memoryTick} />}
       {tab === "instructions" && <Instructions />}
     </div>
   );
@@ -462,5 +464,74 @@ function Forgotten({ tick }: { tick: number }) {
         );
       })}
     </ul>
+  );
+}
+
+type Credential = { name: string; description: string; scope: string; created: string; updated: string; source?: string; session?: string };
+
+// Credentials are the hidden section: never recalled into a context, used by
+// agents as {{cred:name}}. Values stay hidden here until shown on a click.
+function Credentials({ tick }: { tick: number }) {
+  const [cs, setCs] = useState<Credential[]>([]);
+  const [shown, setShown] = useState<Record<string, string>>({});
+  const [form, setForm] = useState({ name: "", description: "", value: "", scope: "global" });
+  const [err, setErr] = useState("");
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    call<Credential[]>("GET", "/credentials").then(setCs, (e) => setErr(String(e.message ?? e)));
+  }, [tick, n]);
+  const toggle = (name: string) => {
+    if (name in shown) {
+      const { [name]: _, ...rest } = shown;
+      setShown(rest);
+      return;
+    }
+    call<{ value: string }>("GET", `/credentials/${encodeURIComponent(name)}`).then((r) => setShown({ ...shown, [name]: r.value }), (e) => setErr(String(e.message ?? e)));
+  };
+  const forget = (name: string) => {
+    const reason = window.prompt(`Forget ${name}? Its value is erased. Why?`);
+    if (!reason) return;
+    call("POST", `/credentials/${encodeURIComponent(name)}/forget`, { reason }).then(() => setN(n + 1), (e) => setErr(String(e.message ?? e)));
+  };
+  const save = () =>
+    call("PUT", `/credentials/${encodeURIComponent(form.name.trim())}`, form).then(() => {
+      setForm({ name: "", description: "", value: "", scope: "global" });
+      setErr("");
+      setN(n + 1);
+    }, (e) => setErr(String(e.message ?? e)));
+  return (
+    <div>
+      <p className="muted small nb-sum">
+        Hidden from recall. Agents see a name and description, and use the value as <code>{"{{cred:name}}"}</code>; PAI fills it in on the worker and masks it in output.
+      </p>
+      <div className="card nb-add">
+        <div className="row">
+          <input placeholder="name, e.g. jetson-ssh" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input placeholder="what it is for" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <input type="password" placeholder="value" autoComplete="off" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+          <input placeholder="scope" value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} />
+          <button className="primary small" disabled={!form.name.trim() || !form.value || !form.description.trim()} onClick={save}>
+            Save
+          </button>
+        </div>
+        {err && <p className="error">{err}</p>}
+      </div>
+      {cs.length === 0 && <div className="empty small">No credentials.</div>}
+      {cs.map((c) => (
+        <div key={c.name} className="nb-line">
+          <b>{c.name}</b> <span>{c.description}</span>{" "}
+          <span className="muted small" title={`${c.source ?? ""} ${c.session ?? ""}`}>
+            {c.scope} · {ago(c.updated)}
+          </span>{" "}
+          <code>{c.name in shown ? shown[c.name] : "••••••••"}</code>{" "}
+          <button className="ghost small" onClick={() => toggle(c.name)}>
+            {c.name in shown ? "Hide" : "Show"}
+          </button>
+          <button className="ghost small" onClick={() => forget(c.name)}>
+            Forget
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }

@@ -275,13 +275,13 @@ func redeem(url, code string) (string, error) {
 }
 
 // operator is a root worker's own work, run as the operator; not for people:
-// `file read|write <path>`, one read or write, and `js <dir>`, which readies
+// `file read|write <path> [expect]`, one read or write, and `js <dir>`, which readies
 // the js interpreter's folder.
 func operator(args []string) {
 	var err error
 	switch {
-	case args[0] == "file" && len(args) == 3:
-		err = worker.File(args[1], args[2])
+	case args[0] == "file" && (len(args) == 3 || len(args) == 4):
+		err = worker.File(args[1], args[2], strings.Join(args[3:], ""))
 	case args[0] == "js" && len(args) == 2:
 		err = worker.JS(args[1])
 	default:
@@ -398,6 +398,9 @@ func usage() {
   stop       <id>                    POST /sessions/{id}/stop: cut a running step, kill its environments and jobs
   delete     <id>                    DELETE /sessions/{id}: stop the session, then it is gone for good
   info       <id>                    GET  /sessions/{id}
+  diagnose   <id>                    GET  /sessions/{id}/diagnose: working, waiting or stuck, and on what
+  compact    <id> [auto|manual]      POST /sessions/{id}/compact: compact an idle session now; with a mode,
+                                     PUT  it: auto compacts when PAI judges it right, manual asks first
   name       <id> [text]             PUT  /sessions/{id}/name: the session's name; no text removes it
   sessions   [status]                GET  /sessions
   workers                            GET  /workers

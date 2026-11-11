@@ -56,6 +56,11 @@ const minText = 12
 // it would be recalled into any session on any model.
 var secret = regexp.MustCompile(`(?i)(sk-[a-z0-9_-]{16,}|sk-ant-[a-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|xox[abpr]-[A-Za-z0-9-]{10,}|pai_(key|join)_[A-Za-z0-9_.-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(password|passwd|secret|token|api[_ -]?key)\s*[:=]\s*\S{6,})`)
 
+// injection finds text that addresses the agent instead of stating a fact:
+// a page or a tool output trying to plant orders that every later session
+// would recall.
+var injection = regexp.MustCompile(`(?i)(ignore|disregard|forget|override) (all |any )?(the )?(previous|prior|above|earlier|system) (instructions|prompts?|rules)|\bnew system prompt\b|\byou are now (in )?(developer|dan|jailbreak)|\b(exfiltrate|send|upload|post) (the |all )?(credentials|secrets|keys|passwords)\b`)
+
 // ErrNotUseful is an item refused before it is stored, and why.
 var ErrNotUseful = errors.New("memory: not stored")
 
@@ -66,7 +71,9 @@ func Useful(text string) error {
 	case len([]rune(strings.TrimSpace(text))) < minText:
 		return fmt.Errorf("%w: too short to be useful", ErrNotUseful)
 	case secret.MatchString(text):
-		return fmt.Errorf("%w: it looks like it holds a secret", ErrNotUseful)
+		return fmt.Errorf("%w: it looks like it holds a secret; save the secret with the credential tool and remember only what it is for", ErrNotUseful)
+	case injection.MatchString(text):
+		return fmt.Errorf("%w: it reads as an instruction planted for agents, not a fact", ErrNotUseful)
 	}
 	return nil
 }
@@ -112,6 +119,7 @@ type Store struct {
 	// Hybrid enables BM25 rank fusion; semantic vector retrieval is the default.
 	Hybrid bool
 	db     *sql.DB
+	dir    string // holds the credentials' sealing key
 	embed  Embedder
 	mu     sync.Mutex // one writer: SQLite has one, and dedup reads before it writes
 	// OnEvent, when set, hears every change. It must not block.
@@ -182,11 +190,11 @@ func Open(dir string, e Embedder) (*Store, error) {
 			}
 		}
 	}
-	if _, err := db.Exec(contractSchema); err != nil {
+	if _, err := db.Exec(contractSchema + credentialSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, embed: e}
+	s := &Store{db: db, dir: dir, embed: e}
 	if err := s.reembed(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err

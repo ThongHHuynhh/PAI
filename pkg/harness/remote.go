@@ -428,10 +428,10 @@ func (r *Remote) Read(ctx context.Context, path string) ([]byte, error) {
 	return b, err
 }
 
-func (r *Remote) Write(ctx context.Context, path string, data []byte) error {
+func (r *Remote) Write(ctx context.Context, path string, data []byte, expect string) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	return r.call(ctx, worker.Header{Kind: worker.Write, Path: path}, data, func(worker.Frame) {})
+	return r.call(ctx, worker.Header{Kind: worker.Write, Path: path, Expect: expect}, data, func(worker.Frame) {})
 }
 
 // Update has the worker make cmd beside it release v.

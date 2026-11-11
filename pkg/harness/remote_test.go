@@ -89,7 +89,7 @@ func TestRemoteAckAndDuplicateTerminal(t *testing.T) {
 func TestRemoteDisconnectIsUncertain(t *testing.T) {
 	r, peer := testRemote(t)
 	go func() { _, _ = worker.Decode(bufio.NewReader(peer)); peer.Close() }()
-	err := r.Write(context.Background(), "file", []byte("mutation"))
+	err := r.Write(context.Background(), "file", []byte("mutation"), "")
 	if err == nil || !strings.Contains(err.Error(), "uncertain") {
 		t.Fatalf("%v", err)
 	}

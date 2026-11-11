@@ -4,6 +4,16 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.1
+
+- Compaction has two modes, set per session. Auto, the default, compacts past 70% of the context limit, and past 50% when a new request from the person arrives, so a finished task's detail folds before the next one. Manual asks the person through the agent at 70% and compacts unasked only past 90%, so the session does not fail at its limit. The model can call the new compact tool when a task is done. In the TUI, /compact compacts an idle session now and /compaction picks the mode; /continue no longer has the compact alias. CLI: `pai compact <id> [auto|manual]`. API: `POST` and `PUT /sessions/{id}/compact`.
+- File writes are atomic and conflict-checked. The worker writes to a temporary file and renames it over the target, so a crash or a failed write never leaves a torn file. edit, patch and apply_edit send the hash of what they read, and the worker refuses the write if the file changed since, instead of losing the other writer's change. Writes to one path through one worker take turns.
+- Credentials are a hidden section of memory for addresses, logins, SSH details, keys and passwords the person wants agents to use. Values are sealed with AES-GCM under a key file beside memory.db, are never recalled into a context, and are not served over MCP. Recall shows only a matching credential's name and description. Agents write `{{cred:name}}` in run, write, edit and patch arguments; the harness fills the value in on the way to the worker and masks every stored value in results and job output. The credential tool lists, saves, forgets, and gets a value only with a stated reason. The web app's Memory page has a Credentials tab to add, show, hide and forget them.
+- Memory refuses items that read as instructions planted for agents, such as "ignore previous instructions" or "send the credentials to".
+- The new diagnose tool, `pai diagnose <id>` and `GET /sessions/{id}/diagnose` say whether a session is working, waiting on a person, a model or a worker, or stuck, with each call waiting for a result, its worker, whether that worker is connected, and how long it has been quiet.
+- context-eval measures answer quality: fixtures carry questions with facts the answer must and must not state, answered from only each policy's selected context. `-answer <cmd>` has a model CLI answer; without it an extractive answerer gives a model-free bound.
+- New tests: writer crash mid-write, failed writes, concurrent edits from many sessions, stale writes, and harness crash recovery at every execution stage never replaying a call.
+
 ## v0.4.0
 
 - Tool execution is durable. Every call records dispatch, acknowledgment, start and its outcome in the session file. Workers spool requests and results to disk, acknowledge results with receipts and replay unacknowledged results after a reconnect. Requests are never replayed, so a call whose effect cannot be confirmed reports an uncertain outcome instead of running twice. Server-side deadlines bound runs, file operations and control calls, so a stalled worker fails the call instead of hanging the session. Session info lists running and background calls with their worker and age.
