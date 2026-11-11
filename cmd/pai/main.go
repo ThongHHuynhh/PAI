@@ -51,6 +51,9 @@ func main() {
 	}
 	if len(os.Args) > 2 && os.Args[1] == "worker" && (os.Args[2] == "remove" || os.Args[2] == "rename") {
 		cli("worker "+os.Args[2], os.Args[3:])
+	}
+	if len(os.Args) > 2 && os.Args[1] == "provider" && os.Args[2] == "remove" {
+		cli("provider remove", os.Args[3:])
 		return
 	}
 	if len(os.Args) > 2 && os.Args[1] == "workers" {
@@ -412,6 +415,8 @@ func usage() {
   worker     rename <name> <new>     PUT  /workers/{name}/name: same keys and address; links and sessions
                                      keep naming the old name
   providers                          GET  /providers: each one's name, shape and url
+  provider   remove <name>           DELETE /providers/{name}: drop its key or sign-in, and the fallbacks and
+                                     balancing that name it; sessions on it fail until moved
   fallback   [<provider> <to|->]     GET/PUT /fallbacks: provider or provider/model target; - removes it
   balance    [off|auto <provider/model>...]  GET/PUT /balance: automatic account selection (at least two models)
   accounts                           GET /accounts: usage and reset times

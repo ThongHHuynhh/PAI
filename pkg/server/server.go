@@ -359,6 +359,18 @@ func Harness(ctx context.Context, path string) error {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	routes.HandleFunc("DELETE /providers/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if name == "" || strings.ContainsAny(name, "/\\.") {
+			http.Error(w, "bad provider name", http.StatusBadRequest)
+			return
+		}
+		if err := removeProvider(path, name, h.SetProviders); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	logins := &logins{ctx: ctx, path: path, serve: h.SetProviders, m: map[string]*login{}}
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
@@ -527,6 +539,33 @@ func saveProvider(path, name string, in Provider, serve func(map[string]provider
 	}
 	c.Providers[name] = p
 	return serveConfig(path, c, serve)
+}
+
+// removeProvider takes provider name out of the config at path, with the
+// fallbacks and balance pool entries that name it, serves the providers left,
+// and deletes its directory of sign-in tokens. Sessions on it fail at their
+// next step until moved to another model.
+func removeProvider(path, name string, serve func(map[string]provider.Provider)) error {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	if _, ok := c.Providers[name]; !ok {
+		return fmt.Errorf("unknown provider %q", name)
+	}
+	delete(c.Providers, name)
+	for from, to := range c.Fallbacks {
+		if from == name || to == name || strings.HasPrefix(to, name+"/") {
+			delete(c.Fallbacks, from)
+		}
+	}
+	c.Balance.Pool = slices.DeleteFunc(c.Balance.Pool, func(m string) bool { return strings.HasPrefix(m, name+"/") })
+	if err := serveConfig(path, c, serve); err != nil {
+		return err
+	}
+	return os.RemoveAll(providerDir(filepath.Dir(path), name))
 }
 
 // setLabel makes label the label of provider name in the config at path, an

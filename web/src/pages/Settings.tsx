@@ -76,6 +76,23 @@ function Providers() {
       },
     );
   };
+  // remove takes a provider out of PAI after the person confirms, naming the
+  // sessions that would stop working until moved to another model
+  const remove = async (s: ProviderInfo) => {
+    setErr("");
+    try {
+      const all = await call<{ id: string; config: { model: string } }[]>("GET", "/sessions");
+      const using = all.filter((x) => x.config.model.startsWith(s.name + "/")).length;
+      const shown = s.label || cat?.providers[s.name]?.name || s.name;
+      const warn = using ? ` ${using} session${using > 1 ? "s use" : " uses"} it and will fail until moved to another model.` : "";
+      if (!confirm(`Remove provider ${shown} (${s.name})? Its key or sign-in is deleted, and fallbacks and balancing that name it are cleared.${warn}`)) return;
+      await call("DELETE", `/providers/${encodeURIComponent(s.name)}`);
+      void load();
+      refresh();
+    } catch (e: any) {
+      setErr(String(e.message ?? e));
+    }
+  };
   useEffect(() => {
     call<Catalog>("GET", "/catalog").then(setCat, () => {});
     void load();
@@ -142,6 +159,9 @@ function Providers() {
             <span className="muted small ellipsis" title={`${s.name} · ${s.shape}`}>
               {s.name} · {s.shape}
             </span>
+            <button className="link small danger" title={`Remove ${s.name}`} onClick={() => void remove(s)}>
+              Remove
+            </button>
           </li>
         ))}
       </ul>

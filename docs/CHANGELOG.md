@@ -12,6 +12,7 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 - Memory refuses items that read as instructions planted for agents, such as "ignore previous instructions" or "send the credentials to".
 - The new diagnose tool, `pai diagnose <id>` and `GET /sessions/{id}/diagnose` say whether a session is working, waiting on a person, a model or a worker, or stuck, with each call waiting for a result, its worker, whether that worker is connected, and how long it has been quiet.
 - context-eval measures answer quality: fixtures carry questions with facts the answer must and must not state, answered from only each policy's selected context. `-answer <cmd>` has a model CLI answer; without it an extractive answerer gives a model-free bound.
+- Providers can be removed: a Remove button with a confirmation on the web app's Settings page, `pai provider remove <name>`, and `DELETE /providers/{name}`. Removal deletes the key or sign-in tokens and clears fallbacks and balance pool entries that name the provider. The confirmation says how many sessions use it.
 - New tests: writer crash mid-write, failed writes, concurrent edits from many sessions, stale writes, and harness crash recovery at every execution stage never replaying a call.
 
 ## v0.4.0
