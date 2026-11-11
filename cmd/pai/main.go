@@ -51,6 +51,7 @@ func main() {
 	}
 	if len(os.Args) > 2 && os.Args[1] == "worker" && (os.Args[2] == "remove" || os.Args[2] == "rename") {
 		cli("worker "+os.Args[2], os.Args[3:])
+		return
 	}
 	if len(os.Args) > 2 && os.Args[1] == "provider" && os.Args[2] == "remove" {
 		cli("provider remove", os.Args[3:])
