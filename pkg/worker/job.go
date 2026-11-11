@@ -18,6 +18,7 @@ var jobs = struct {
 
 type job struct {
 	session string
+	id      string
 	stopped bool
 }
 
@@ -42,7 +43,7 @@ func (s *server) job(f Frame, it interp) (Frame, error) {
 	// process exists.
 	jobs.Lock()
 	e, err := start(it, s.Operator, f.Session)
-	j := &job{session: f.Session}
+	j := &job{session: f.Session, id: f.ID}
 	if err == nil {
 		jobs.m[e] = j
 	}
@@ -60,7 +61,13 @@ func (s *server) job(f Frame, it interp) (Frame, error) {
 		return Frame{}, err
 	}
 	var tail []byte
-	exit, _, err := e.run(context.Background(), string(f.Body), "pai-done-"+f.ID, func(b []byte) error {
+	s.amu.Lock()
+	ctx := s.contexts[f.ID]
+	s.amu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	exit, _, err := e.run(ctx, string(f.Body), "pai-done-"+f.ID, func(b []byte) error {
 		if tail = append(tail, b...); len(tail) > 2*MaxBytes {
 			tail = bytes.Clone(tail[len(tail)-MaxBytes:])
 		}
@@ -94,6 +101,18 @@ func killJobs(session string) {
 	defer jobs.Unlock()
 	for e, j := range jobs.m {
 		if j.session == session {
+			j.stopped = true
+			e.kill()
+		}
+	}
+}
+
+// cancelJob reaches jobs started on an earlier connection.
+func cancelJob(id string) {
+	jobs.Lock()
+	defer jobs.Unlock()
+	for e, j := range jobs.m {
+		if j.id == id {
 			j.stopped = true
 			e.kill()
 		}

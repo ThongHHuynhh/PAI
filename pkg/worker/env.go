@@ -57,7 +57,7 @@ type env struct {
 	in   io.WriteCloser
 	pipe io.Closer // our end of the output pipe
 	out  *bufio.Reader
-	mu   sync.Mutex // one run at a time
+	mu   contextLock // one run at a time, with cancellable admission
 	reap sync.Once
 }
 
@@ -102,6 +102,9 @@ func (e *env) wait() { e.reap.Do(func() { _ = e.cmd.Wait() }) }
 // the exit code. If the process ends first, alive is false and exit is the
 // process's. If ctx ends first, the process is killed and ctx's error returned.
 func (e *env) run(ctx context.Context, code, mark string, emit func([]byte) error) (exit int, alive bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, true, err
+	}
 	stop := context.AfterFunc(ctx, e.kill)
 	defer stop()
 	if e.it.wrap != nil {

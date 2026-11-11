@@ -39,8 +39,8 @@ Tools:
 - The file operation tools are for direct manipulation of data
 - The read tool returns a file as media (e.g. image, audio) when its type is in the session's input, up to 5 MiB. The "Session ... started" line names the input types. Every other file is returned as text, cut at the limits: an image outside the input comes back as raw bytes that fill context and cannot be seen
 - The edit tool matches old text byte for byte. Line endings matter: a file with CRLF line endings, common on Windows, matches only old text with CRLF
-- Put independent calls in one step. The harness still runs them serially, in order, each after the one before ends. A slow call delays every call after it
-- When a request is ambiguous or a choice is the user's, call ask with up to four multiple choice questions before you guess, instead of asking in prose. Put the option you recommend first. The user can always type another answer, and can decline; then decide yourself or say what you need
+- Put independent calls in one step. Contiguous file reads may run concurrently with bounded fanout. Other calls are ordered barriers; never assume shell commands run in parallel
+- When a request is ambiguous or a choice is the user's, call ask with up to four multiple choice questions before you guess, instead of asking in prose. Put the option you recommend first. The user can always type another answer, and can decline; then stop actions that need the answer and say what you need
 - There may be other agents or users concurrently using a worker
 - Different worker machines have different interpreters, e.g. bash on linux and pwsh on windows. The run tool specifies the interpreter, but if omitted the first interpreter from the list will be used
 - Connected workers are listed on session start. You will be notified if the list changes
@@ -49,6 +49,7 @@ Tools:
 - One run call is bounded at 10 minutes, or at its timeout argument in seconds. On timeout or crash, the next run's output begins with "environment was reset"
 - A run with background true is a job. Its result is at once: "started job <call id> on <worker>, pid <pid>, log <scratch>/jobs/<call id>.log". The job runs in a new interpreter process with no state from the persistent one and no timeout, its output going to the log
 - A job ends when its code finishes, and then its processes are killed. To keep a server up, keep the code running in the foreground (in js: await new Promise(() => {}))
+- Tell the user what background work is running. Continue independent work without waiting; wait only when its result is required.
 - When a job exits, a message via job arrives with its exit code, time, and the tail of its log
 - If the harness loses contact with a job, it may or may not still be running; the log's last line is [exit N] when it ended. A note says so, but it does not wake you: it comes with the next message
 - Cancel a job by killing its process group: kill -- -<pid> on linux and macOS, taskkill /T /F /PID <pid> on Windows. A stop of the session kills all of its jobs and environments, and sends no message for them
@@ -81,6 +82,7 @@ Context and memory:
 - When the context passes 70%% of its limit, PAI compacts it: the oldest records are replaced in your context by a summary system record from source compaction. The records stay in the .state file
 - PAI has a long-term memory shared by every session, machine and model. Each item has an id, a kind (fact, preference, decision, todo, procedure, summary) and a scope (global, project:<name>, session:<id>)
 - When a person sends a message, PAI may add a system record from source memory after it with the items it recalled for the turn. A learnt policy decides whether to recall and how much, from whether recalled items get used. Use what helps and ignore the rest
+- Use context_record for typed intent, constraints, evidence and task state with original record references. Declare competing facts with the same key and distinct values. Call context_clarify for contradictions; never silently resolve them. context_view produces a budgeted handoff with originals and unresolved conflicts. Use read_page for incremental artifact expansion and plan_edit/apply_edit for bounded, hash-checked file changes.
 - Call recall to search memory for more. Call remember to save one lasting item as a self-contained sentence: facts about the user and their machines, projects, accounts and paths, preferences, decisions and why, todos, and procedures that worked. Never save secrets
 - Call forget with an id when an item is no longer true, with why. Nothing is deleted: it stops being recalled
 - PAI also extracts lasting items from each session by itself, so remember what matters most, not everything
@@ -172,12 +174,12 @@ func Tools(name string, input []string) []provider.Tool {
 	if len(input) > 0 {
 		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
 	}
-	defaults := []provider.Tool{run, read, write, edit, ask, recall, remember, forget}
+	defaults := []provider.Tool{run, read, write, edit, ask, recall, remember, forget, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
 	switch name {
 	case "default":
 		return defaults
 	case "patch":
-		return []provider.Tool{run, read, patch, ask, recall, remember, forget}
+		return []provider.Tool{run, read, patch, ask, recall, remember, forget, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
 	case "orchestrator":
 		return append(defaults, delegate, tell, children, stopChild)
 	case "patch-orchestrator":
@@ -218,6 +220,9 @@ type args struct {
 	Worker, Code, Interpreter, Path, Content, Old, New, Input string
 	Timeout                                                   int
 	Background                                                bool
+	Offset, Limit                                             int
+	ExpectedSHA256                                            string `json:"expected_sha256"`
+	Plan                                                      *filePlan
 }
 
 // maxMedia bounds a file read as media, as a sanity cap on the state file.
@@ -244,6 +249,8 @@ func executeObserved(ctx context.Context, w Worker, session, tool string, a args
 	ok := func(body string) (statefile.Record, int) { r.Body = []byte(body); return r, 0 }
 	fail := func(err error) (statefile.Record, int) { return ok("error: " + err.Error()) }
 	switch tool {
+	case "read_page", "plan_edit", "apply_edit":
+		return structuredFile(ctx, w, tool, a, snapshot)
 	case "run":
 		if a.Timeout < 0 || a.Timeout > int(maxTimeout.Seconds()) {
 			return fail(fmt.Errorf("timeout is %d, it must be 1 to %d seconds", a.Timeout, int(maxTimeout.Seconds())))

@@ -120,6 +120,9 @@ func TestRecallSettleUpdatesUtility(t *testing.T) {
 	if r.K == 0 || len(r.Hits) == 0 {
 		t.Fatalf("a cold bandit should recall: %+v", r)
 	}
+	if err := s.RetrievalFeedback(ctx, "s1", r.ID, it.ID, "used", "The key location determined the release workflow instructions"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Settle(ctx, "s1", "The signing key is in the RELEASE_SIGNING_KEY secret of the release workflow.", false); err != nil {
 		t.Fatal(err)
 	}

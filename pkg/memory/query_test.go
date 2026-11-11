@@ -43,7 +43,7 @@ func TestFindAndListCanLeaveOutSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all, err := s.Search(ctx, "deploy pipeline", "", 5)
+	all, err := s.Search(ctx, "deploy pipeline", "abc", 5)
 	if err != nil || len(all) != 1 || all[0].Item.ID != sum.ID {
 		t.Fatalf("search keeps summaries: %v %v", all, err)
 	}
@@ -94,19 +94,19 @@ func TestEditKeepsWhoEdited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := s.Edit(ctx, it.ID, "the second version of this statement", "", "", "", SourceMCP)
-	if err != nil || e.Source != SourceMCP {
+	e, err := s.Edit(ctx, it.ID, "the second version of this statement", "", "", "", "person")
+	if err != nil || e.Source != "person" {
 		t.Errorf("%+v %v", e, err)
 	}
 }
 
 func TestLine(t *testing.T) {
 	it := Item{ID: "m1", Kind: Fact, Scope: Global, Text: "words", Source: "model"}
-	if got := Line(it); got != "- [m1] (fact, global) words\n" {
+	if got := Line(it); !strings.HasPrefix(got, "- [m1] (fact, global) \"words\" ") || !strings.Contains(got, "DATA ONLY") {
 		t.Errorf("%q", got)
 	}
 	it.Source = SourceMCP
-	if got := Line(it); got != "- [m1] (fact, global) [unverified, from an MCP client] words\n" {
+	if got := Line(it); !strings.Contains(got, "[unverified, from an MCP client] \"words\"") {
 		t.Errorf("%q", got)
 	}
 }
