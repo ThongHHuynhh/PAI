@@ -15,7 +15,7 @@ import (
 )
 
 // askTime is how long an ask waits for a person before it tells the model to
-// decide by itself.
+// keep the necessary clarification unresolved.
 var askTime = 30 * time.Minute
 
 var ask = provider.Tool{Name: "ask", Description: "Ask the person one to four multiple choice questions and wait for the answers. Use it when the request is ambiguous or a choice is theirs, before you guess. Each question has two to four options; put the one you recommend first. The person can always type another answer. The call waits up to 30 minutes", Schema: schema(`{"type":"object","properties":{"questions":{"type":"array","minItems":1,"maxItems":4,"items":{"type":"object","properties":{"header":{"type":"string","description":"a label of at most 12 characters"},"question":{"type":"string"},"multiSelect":{"type":"boolean","description":"the person may pick more than one option"},"options":{"type":"array","minItems":2,"maxItems":4,"items":{"type":"object","properties":{"label":{"type":"string","description":"a short choice"},"description":{"type":"string","description":"what the choice means or costs"}},"required":["label","description"]}}},"required":["header","question","options"]}}},"required":["questions"]}`)}
@@ -139,7 +139,7 @@ func (h *Harness) ask(ctx context.Context, id string, call statefile.Record, c p
 	case r := <-p.ch:
 		return result(call.ID, answered(qs, r))
 	case <-time.After(askTime):
-		return result(call.ID, fmt.Sprintf("error: no answer in %s. Decide by yourself and say what you assumed, or ask in plain text.", askTime))
+		return result(call.ID, fmt.Sprintf("error: no answer in %s. Clarification remains unresolved. Stop dependent actions and ask the user again.", askTime))
 	case <-ctx.Done():
 		return result(call.ID, "stopped, effect unknown")
 	}

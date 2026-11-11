@@ -14,6 +14,7 @@ import (
 // the last step's prompt in tokens, against Config.ContextLimit. Updated is
 // the newest record that is not a name, so a rename does not reorder a list.
 type Info struct {
+	Executions  []ExecutionInfo  `json:"executions,omitempty"`
 	ID          string           `json:"id"`
 	Parent      string           `json:"parent,omitempty"`
 	Name        string           `json:"name,omitempty"`
@@ -38,6 +39,7 @@ func (h *Harness) Info(id string) (Info, error) {
 	}
 	tip := chain[len(chain)-1]
 	info := Info{ID: id, Parent: conf.Parent, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
+	info.Executions = executionInfo(chain)
 	for _, r := range chain {
 		if r.Kind == statefile.Name {
 			info.Name = string(r.Body)

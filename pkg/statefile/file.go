@@ -135,4 +135,7 @@ func (sf *File) Append(r Record) error {
 // N is the index of the last record written.
 func (sf *File) N() int { return int(sf.n.Load()) }
 
+// Sync makes preceding records durable before acknowledging remote effects.
+func (sf *File) Sync() error { return sf.f.Sync() }
+
 func (sf *File) Close() error { return sf.f.Close() }

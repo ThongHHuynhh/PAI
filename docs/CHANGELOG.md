@@ -4,6 +4,18 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.0
+
+- Tool execution is durable. Every call records dispatch, acknowledgment, start and its outcome in the session file. Workers spool requests and results to disk, acknowledge results with receipts and replay unacknowledged results after a reconnect. Requests are never replayed, so a call whose effect cannot be confirmed reports an uncertain outcome instead of running twice. Server-side deadlines bound runs, file operations and control calls, so a stalled worker fails the call instead of hanging the session. Session info lists running and background calls with their worker and age.
+- Contiguous file reads in one step run concurrently, up to 4 at a time. Shell runs and writes stay ordered.
+- Typed context: the new context_record, context_view, context_clarify and context_expand tools record intent, constraints, evidence and task state with references to the original records, build a budgeted handoff for a new session, and read original records back after compaction. After compaction an archive index points to the originals instead of repeating them.
+- Contradictions are never resolved by the model. While a recorded context conflict, or a conflict on a memory item the session consulted, is open, only read-only tools and clarification run. The memory_clarify tool turns a memory conflict into an ask question, and a resolution is accepted only with a recorded answer from the user. An ask that times out or a child session that needs a choice leaves the question open.
+- Memory items can carry an optional versioned structured contract (subject, property, value, observed, verified and expiry times, dependencies, and a review policy per kind). Only different values for the same subject and property are flagged as conflicts; related prose is not. Retrieval feedback records whether a recalled item was used, irrelevant, contradicted or harmful, and replaces word-overlap rewards.
+- New read_page, plan_edit and apply_edit tools read large files in pages and apply hash-checked edits that are read back after writing.
+- Optional per-session routing policy: explicit accounts, models and escalation levels, a bounded retry budget per task, and optional verification of final answers. Route decisions and verification results are recorded in the session file. Sessions without a routing policy behave as before.
+- Provider errors are classified (rate limit, unavailable, transport, stream, authentication, request, configuration, canceled), Retry-After is capped at 30 s, and a single model step is bounded at 15 minutes.
+- cmd/context-eval compares full, recency and typed context selection on a session file.
+
 ## v0.3.1
 
 - MCP: Claude Code, Claude Desktop, Cursor and other MCP clients can read and write PAI's memory, through `pai mcp` or `/mcp` on the server. It is the same store as PAI's own, so what a client writes shows up live in the web app. Items written this way are marked as unverified when recalled into a session. See [docs/mcp.md](mcp.md).

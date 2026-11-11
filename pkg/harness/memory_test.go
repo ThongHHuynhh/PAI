@@ -115,18 +115,25 @@ func TestApplyOps(t *testing.T) {
 		texts = append(texts, it.Text)
 	}
 	got := strings.Join(texts, "|")
-	for _, want := range []string{"deploys through GitHub Actions", "editor is Helix", "DNS for the user's domains"} {
+	for _, want := range []string{"deploys run through GitHub Actions", "editor is Helix", "DNS for the user's domains"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %s", want, got)
 		}
 	}
-	for _, gone := range []string{"Sublime", "thanks", "Production runs on the VPS named atlas"} {
-		if strings.Contains(got, gone) {
-			t.Errorf("%q should not be valid: %s", gone, got)
+	for _, preserved := range []string{"Sublime", "thanks", "Production runs on the VPS named atlas"} {
+		if !strings.Contains(got, preserved) {
+			t.Errorf("lost original source %s", preserved)
 		}
 	}
-	if len(valid) != 3 {
-		t.Fatalf("want 3 valid items, got %d: %s", len(valid), got)
+	if len(valid) != 6 {
+		t.Fatalf("want all six original sources, got %d", len(valid))
+	}
+	original, err := st.Get(ctx, wrong.ID)
+	if err != nil || len(original.Conflicts) == 0 || !original.Invalid.IsZero() {
+		t.Fatalf("contradiction must remain unresolved: %+v %v", original, err)
+	}
+	if _, err := st.Invalidate(ctx, wrong.ID, "model prefers newer value"); err == nil {
+		t.Fatal("unresolved contradiction was overridden")
 	}
 }
 

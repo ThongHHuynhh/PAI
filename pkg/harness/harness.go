@@ -111,6 +111,7 @@ func (h *Harness) providers() map[string]provider.Provider {
 // whitelist, and a worker named before it dials in is a worker the session
 // waits for.
 type Create struct {
+	Routing      *statefile.Routing         `json:"routing,omitempty"`
 	Parent       string                     `json:"parent,omitempty"`
 	From         string                     `json:"from,omitempty"`
 	N            int                        `json:"n,omitempty"`
@@ -135,7 +136,7 @@ func system(source, body string) statefile.Record {
 func (h *Harness) Create(ctx context.Context, c Create, via string) (string, error) {
 	id := statefile.NewName(h.Sessions.Exists)
 	if c.From != "" {
-		if c.Parent != "" || c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" {
+		if c.Parent != "" || c.Model != "" || c.ContextLimit != 0 || c.Workers != nil || c.Tools != "" || c.Input != nil || c.Params != nil || c.Preset != "" || c.Name != "" || c.Routing != nil {
 			return "", fmt.Errorf("a copy takes no config and no name")
 		}
 		if err := h.cut(c.From, c.N); err != nil {
@@ -188,13 +189,16 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	if Tools(c.Tools, nil) == nil {
 		return "", fmt.Errorf("unknown tools %q; sets: default, patch, orchestrator, patch-orchestrator", c.Tools)
 	}
-	conf := statefile.Conf{Parent: c.Parent, Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset}
+	conf := statefile.Conf{Parent: c.Parent, Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset, Routing: c.Routing}
+	if err := h.validateRouting(conf); err != nil {
+		return "", err
+	}
 	if conf.Workers == nil {
 		conf.Workers = []statefile.Worker{}
 	}
 	original := conf
 	balanced := false
-	if to := h.best(conf, nil, nil); to != "" && to != conf.Model {
+	if to := h.best(conf, nil, nil); conf.Routing == nil && to != "" && to != conf.Model {
 		conf, err = h.moveConfig(conf, to)
 		if err != nil {
 			return "", err
@@ -343,7 +347,10 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	}()
 	if status == statefile.StatusInterrupted {
 		for _, c := range statefile.Waiting(chain) {
-			if _, err := h.append(s, result(c.ID, "interrupted, effect unknown")); err != nil {
+			if err := h.executionRecord(id, c.ID, executionEvent{State: "uncertain"}); err != nil {
+				return "", err
+			}
+			if _, err := h.append(s, recoveredExecution(chain, c.ID)); err != nil {
 				return "", err
 			}
 		}
@@ -356,7 +363,7 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 	// A healthy session keeps its account and cache. Only pool sessions at
 	// their limit are moved before sending a request.
 	current, _, _ := strings.Cut(conf.Model, "/")
-	if h.balance().Mode == "auto" && limited(h.account(current), time.Now()) {
+	if conf.Routing == nil && h.balance().Mode == "auto" && limited(h.account(current), time.Now()) {
 		if to := h.best(conf, chain, triedProviders(conf.Model, chain)); to != "" {
 			if _, err := h.failover(s, conf, to, errors.New("account usage is near its limit")); err != nil {
 				return "", err
@@ -420,6 +427,9 @@ func (h *Harness) Step(ctx context.Context, id string) (status statefile.Status,
 // candidate goes through the same context and media eligibility check.
 func (h *Harness) fallback(model string, chain []statefile.Record) string {
 	conf, _ := config(chain)
+	if conf.Routing != nil {
+		return ""
+	} // policy is the sole automatic destination authority
 	conf.Model = model
 	tried := triedProviders(model, chain)
 	if to := h.best(conf, chain, tried); to != "" {
@@ -507,6 +517,9 @@ func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []sta
 		return ""
 	}
 	records, _ := statefile.Build(chain[:last.Upto])
+	if items, _ := contextState(chain); len(items) > 0 {
+		records = append(records, contextProjection(chain))
+	}
 	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
 	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: chain[0].ID, Tools: sessionTools(conf), Context: records, Params: conf.Params})
 	if err != nil || fmt.Sprintf("sha256:%x", sha256.Sum256(body)) == last.Request {
@@ -524,21 +537,43 @@ func errorRecord(via, text string) statefile.Record {
 // record, every call not yet answered gets a stopped result, and the last
 // record is an error naming who stopped it.
 func (h *Harness) step(ctx context.Context, s *session, id string, conf statefile.Conf, chain []statefile.Record) (statefile.Status, error) {
+	original := conf
+	conf, decision, err := h.chooseRoute(conf, chain)
+	if err != nil {
+		_, err := h.append(s, errorRecord("routing", err.Error()))
+		return statefile.StatusFailed, err
+	}
 	p, model, err := h.provider(conf.Model)
 	if err != nil {
 		return "", err
 	}
 	records, upto := statefile.Build(chain)
+	records = append(records, protectedOriginals(chain)...)
+	if items, _ := contextState(chain); len(items) > 0 {
+		records = append(records, contextProjection(chain))
+	}
 	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
 	stepID := statefile.NewID()
+	if conf.Routing != nil {
+		if err := h.recordRoute(s, stepID, decision); err != nil {
+			return "", err
+		}
+	}
 	var calls []statefile.Record
+	var answer strings.Builder
 	var appendErr error
 	req := provider.Request{Model: model, Key: chain[0].ID, Tools: sessionTools(conf), Context: records, Params: conf.Params}
+	if conf.Routing != nil {
+		req.MaxAttempts = routedAttempts
+	}
 	if p.ObserveHealth != nil {
 		name, _, _ := strings.Cut(conf.Model, "/")
 		p.ObserveHealth(func(v provider.Health) { h.health(name, v) })
 	}
 	hdr, err := p.Step(ctx, req, func(r statefile.Record) {
+		if r.Kind == statefile.Text {
+			answer.Write(r.Body)
+		}
 		r.Step = stepID
 		if r.ID == "" {
 			r.ID = statefile.NewID()
@@ -557,7 +592,17 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		name, _, _ := strings.Cut(conf.Model, "/")
 		h.exhausted(name, err)
 	}
-	if err != nil && s.stoppedBy() == "" && len(calls) == 0 && provider.Exhausted(err) {
+	if err != nil && s.stoppedBy() == "" && conf.Routing != nil {
+		var pe *provider.Error
+		if errors.As(err, &pe) && pe.Retryable() && ctx.Err() == nil {
+			decision.Event, decision.Reason = "failure", fmt.Sprintf("provider %s after %d attempts: %s", pe.Kind, pe.Attempts, err)
+			if ferr := h.recordRoute(s, stepID, decision); ferr != nil {
+				return "", ferr
+			}
+			return statefile.StatusOpen, nil // the next bounded decision excludes this failed target
+		}
+	}
+	if err != nil && s.stoppedBy() == "" && len(calls) == 0 && provider.CanFailover(err) {
 		if to := h.fallback(conf.Model, chain); to != "" {
 			if _, ferr := h.failover(s, conf, to, err); ferr != nil {
 				return "", ferr
@@ -573,28 +618,44 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 		_, err := h.append(s, errorRecord("", err.Error()+rebuilt(p, model, conf, chain)))
 		return statefile.StatusFailed, err
 	}
+	var reviewErr error
+	if len(calls) == 0 && provider.Normal(hdr) {
+		// Verify before closing the generation step. A crash during review
+		// cannot leave a closed, apparently accepted candidate behind.
+		reviewErr = h.verifyRoute(ctx, s, original, conf.Model, chain, stepID, answer.String())
+	}
 	hdr.Kind, hdr.ID, hdr.Upto, hdr.Harness = statefile.Step, stepID, upto, version.V
 	if _, err := h.append(s, statefile.Record{Header: hdr}); err != nil {
 		return "", err
 	}
-	for _, c := range calls {
-		r := result(c.ID, "not run")
-		var observations []statefile.Record
-		if ctx.Err() == nil {
-			r = h.execute(ctx, id, conf, c, func(r statefile.Record) { observations = append(observations, r) })
-			if ctx.Err() != nil {
-				r = result(c.ID, "stopped, effect unknown")
+	if reviewErr != nil {
+		_, err := h.append(s, errorRecord("verification", reviewErr.Error()))
+		return statefile.StatusFailed, err
+	}
+	for begin := 0; begin < len(calls); {
+		end := begin + 1
+		if readOnly(calls[begin]) {
+			for end < len(calls) && end-begin < parallelReads && readOnly(calls[end]) {
+				end++
 			}
 		}
-		if _, err := h.append(s, r); err != nil {
-			return "", err
-		}
-		for _, observation := range observations {
-			observation.For = c.ID
-			if _, err := h.append(s, observation); err != nil {
+		batch := h.executeBatch(ctx, id, conf, calls[begin:end])
+		for i, output := range batch {
+			c, r, observations := calls[begin+i], output.record, output.observations
+			if _, err := h.append(s, r); err != nil {
 				return "", err
 			}
+			if err := h.executionRecord(id, c.ID, executionEvent{State: "recorded"}); err != nil {
+				return "", err
+			}
+			for _, observation := range observations {
+				observation.For = c.ID
+				if _, err := h.append(s, observation); err != nil {
+					return "", err
+				}
+			}
 		}
+		begin = end
 	}
 	if via := s.stoppedBy(); via != "" {
 		_, err := h.append(s, errorRecord(via, fmt.Sprintf(halted, via)))
@@ -716,6 +777,9 @@ func result(call, text string) statefile.Record {
 // execute routes a call to the worker its arguments name. The session reaches
 // only the workers its config lists.
 func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, call statefile.Record, observers ...func(statefile.Record)) statefile.Record {
+	ctx = context.WithValue(ctx, executionKey{}, executionTrace{session: id, origin: call.ID, append: func(e executionEvent) error {
+		return h.executionRecord(id, call.ID, e)
+	}})
 	var c provider.Call
 	if err := json.Unmarshal(call.Body, &c); err != nil {
 		return result(call.ID, "error: "+err.Error())
@@ -732,7 +796,7 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	}
 	if c.Name == "ask" {
 		if conf.Parent != "" {
-			return result(call.ID, "error: a child session cannot ask, as nobody watches it; decide yourself and name the choice under Open in your report")
+			return result(call.ID, "error: a child session cannot ask; report the clarification needed to its parent and stop dependent actions")
 		}
 		return h.ask(ctx, id, call, c)
 	}

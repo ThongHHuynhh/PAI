@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -72,6 +73,9 @@ func Useful(text string) error {
 
 // Item is one thing PAI knows.
 type Item struct {
+	Contract
+	Conflicts []string `json:"conflicts,omitempty"` // unresolved peer IDs; never a winner
+
 	ID      string    `json:"id"`
 	Kind    string    `json:"kind"`
 	Text    string    `json:"text"`
@@ -103,6 +107,8 @@ type Event struct {
 }
 
 type Store struct {
+	// Set once by the trusted harness; never supplied by a model or MCP client.
+	VerifyResolution func(context.Context, string, string, Resolution) error
 	// Hybrid enables BM25 rank fusion; semantic vector retrieval is the default.
 	Hybrid bool
 	db     *sql.DB
@@ -146,6 +152,7 @@ CREATE TABLE IF NOT EXISTS extracted (session TEXT PRIMARY KEY, upto INTEGER NOT
 
 // columns are added to stores made before them.
 var columns = []struct{ table, name, alter string }{
+	{"items", "contract", `ALTER TABLE items ADD COLUMN contract TEXT NOT NULL DEFAULT '{}'`},
 	{"items", "topic", `ALTER TABLE items ADD COLUMN topic TEXT NOT NULL DEFAULT ''`},
 	{"items", "merged", `ALTER TABLE items ADD COLUMN merged TEXT NOT NULL DEFAULT ''`},
 	{"retrievals", "ms", `ALTER TABLE retrievals ADD COLUMN ms INTEGER NOT NULL DEFAULT 0`},
@@ -175,6 +182,10 @@ func Open(dir string, e Embedder) (*Store, error) {
 			}
 		}
 	}
+	if _, err := db.Exec(contractSchema); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	s := &Store{db: db, embed: e}
 	if err := s.reembed(context.Background()); err != nil {
 		_ = db.Close()
@@ -196,9 +207,12 @@ func (s *Store) emit(e Event) {
 func newID() string { return "m" + rand.Text() }
 
 // Remember stores it, unless an item of its scope already says the same:
-// then that one is refreshed and returned. The text is one self-contained
+// then its provenance is appended and the original is returned. The text is one self-contained
 // statement.
 func (s *Store) Remember(ctx context.Context, it Item) (Item, bool, error) {
+	if err := prepare(&it); err != nil {
+		return it, false, err
+	}
 	it.Text = strings.TrimSpace(it.Text)
 	it.Topic = strings.ToLower(strings.TrimSpace(it.Topic))
 	if err := Useful(it.Text); err != nil {
@@ -220,15 +234,17 @@ func (s *Store) Remember(ctx context.Context, it Item) (Item, bool, error) {
 	it.vec = vecs[0]
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.validateDependencies(ctx, it); err != nil {
+		return it, false, err
+	}
 	if dup, ok, err := s.nearest(ctx, it); err != nil {
 		return it, false, err
 	} else if ok {
-		dup.Updated = time.Now().UTC()
-		dup.Utility = min(1, dup.Utility+0.05) // said again: worth a little more
-		if _, err := s.db.ExecContext(ctx, `UPDATE items SET updated=?, utility=? WHERE id=?`, dup.Updated.UnixMilli(), dup.Utility, dup.ID); err != nil {
+		// Repetition is provenance, never evidence of utility.
+		if err := s.recordObservation(ctx, dup.ID, it); err != nil {
 			return it, false, err
 		}
-		s.emit(Event{Type: "merged", Session: it.Session, Items: []Item{dup}})
+
 		return dup, false, nil
 	}
 	now := time.Now().UTC()
@@ -236,10 +252,32 @@ func (s *Store) Remember(ctx context.Context, it Item) (Item, bool, error) {
 	if it.Utility == 0 {
 		it.Utility = 0.5
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO items (id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,pinned,utility,shown,used,embedder,vec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		it.ID, it.Kind, it.Text, it.Scope, it.Topic, strings.Join(it.Merged, ","), it.Session, it.From, it.To, it.Source, now.UnixMilli(), now.UnixMilli(), it.Pinned, it.Utility, it.Shown, it.Used, s.embed.Name(), pack(it.vec)); err != nil {
+	peers, err := s.conflictPeers(ctx, it)
+	if err != nil {
 		return it, false, err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return it, false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO items (id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,pinned,utility,shown,used,embedder,vec,contract) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		it.ID, it.Kind, it.Text, it.Scope, it.Topic, strings.Join(it.Merged, ","), it.Session, it.From, it.To, it.Source, now.UnixMilli(), now.UnixMilli(), it.Pinned, it.Utility, it.Shown, it.Used, s.embed.Name(), pack(it.vec), contractJSON(it.Contract)); err != nil {
+		return it, false, err
+	}
+	for _, peer := range peers {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO memory_conflicts(a,b,reason) VALUES(?,?,?)`, peer.ID, it.ID, "Possible contradiction: ASK the user; neither source wins"); err != nil {
+			return it, false, err
+		}
+		it.Conflicts = append(it.Conflicts, peer.ID)
+	}
+	if err := tx.Commit(); err != nil {
+		return it, false, err
+	}
+	if len(it.Conflicts) > 0 {
+		it.Status = "conflict"
+	}
+
 	s.emit(Event{Type: "remembered", Session: it.Session, Items: []Item{it}})
 	return it, true, nil
 }
@@ -255,6 +293,9 @@ func (s *Store) nearest(ctx context.Context, it Item) (Item, bool, error) {
 	for i, o := range items {
 		// Similar meaning alone cannot prove equality: negations, versions and
 		// numbers often have almost identical model vectors. Keep distinct facts.
+		if it.Subject != o.Subject || it.Property != o.Property || it.Value != o.Value {
+			continue
+		}
 		if c := cosine(it.vec, o.vec); c > best && strings.TrimSuffix(it.Text, ".") == strings.TrimSuffix(o.Text, ".") {
 			best, bi = c, i
 		}
@@ -267,6 +308,9 @@ func (s *Store) nearest(ctx context.Context, it Item) (Item, bool, error) {
 
 // Invalidate stops it from being recalled, with why. It stays in the store.
 func (s *Store) Invalidate(ctx context.Context, id, reason string) (Item, error) {
+	if strings.TrimSpace(reason) == "" || secret.MatchString(reason) {
+		return Item{}, fmt.Errorf("memory: invalidation requires a reason")
+	}
 	return s.change(ctx, id, "invalidated", `UPDATE items SET invalid=?, reason=?, updated=? WHERE id=?`, time.Now().UnixMilli(), reason, time.Now().UnixMilli(), id)
 }
 
@@ -289,6 +333,8 @@ func (s *Store) Edit(ctx context.Context, id, text, kind, scope, topic, source s
 	}
 	if text = strings.TrimSpace(text); text != "" {
 		it.Text = text
+		it.Subject, it.Property, it.Value = "", "", ""
+		it.Status, it.Verified, it.Observed = "unverified", time.Time{}, time.Now().UTC()
 	}
 	for _, f := range []struct {
 		to *string
@@ -304,6 +350,12 @@ func (s *Store) Edit(ctx context.Context, id, text, kind, scope, topic, source s
 
 func (s *Store) change(ctx context.Context, id, event, q string, args ...any) (Item, error) {
 	s.mu.Lock()
+	if event != "feedback" {
+		if err := s.guard(ctx, id); err != nil {
+			s.mu.Unlock()
+			return Item{}, err
+		}
+	}
 	res, err := s.db.ExecContext(ctx, q, args...)
 	s.mu.Unlock()
 	if err != nil {
@@ -361,7 +413,7 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Item, error) {
 	return s.query(ctx, "WHERE "+strings.Join(where, " AND ")+fmt.Sprintf(" ORDER BY updated DESC LIMIT %d", limit), args...)
 }
 
-const cols = `id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,invalid,reason,pinned,utility,shown,used,vec`
+const cols = `id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,invalid,reason,pinned,utility,shown,used,vec,contract`
 
 func (s *Store) query(ctx context.Context, where string, args ...any) ([]Item, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+cols+" FROM items "+where, args...)
@@ -374,8 +426,11 @@ func (s *Store) query(ctx context.Context, where string, args ...any) ([]Item, e
 		var it Item
 		var created, updated, invalid int64
 		var vec []byte
-		var merged string
-		if err := rows.Scan(&it.ID, &it.Kind, &it.Text, &it.Scope, &it.Topic, &merged, &it.Session, &it.From, &it.To, &it.Source, &created, &updated, &invalid, &it.Reason, &it.Pinned, &it.Utility, &it.Shown, &it.Used, &vec); err != nil {
+		var merged, contract string
+		if err := rows.Scan(&it.ID, &it.Kind, &it.Text, &it.Scope, &it.Topic, &merged, &it.Session, &it.From, &it.To, &it.Source, &created, &updated, &invalid, &it.Reason, &it.Pinned, &it.Utility, &it.Shown, &it.Used, &vec, &contract); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(contract), &it.Contract); err != nil {
 			return nil, err
 		}
 		it.Created, it.Updated = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
@@ -388,7 +443,16 @@ func (s *Store) query(ctx context.Context, where string, args ...any) ([]Item, e
 		}
 		out = append(out, it)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+	for i := range out {
+		if err := s.decorate(ctx, &out[i]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // Stats is what the knowledge view heads with.

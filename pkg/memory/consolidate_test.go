@@ -25,8 +25,11 @@ func TestMergeKeepsLineageAndStats(t *testing.T) {
 	s, ctx := open(t), context.Background()
 	a, _, _ := s.Remember(ctx, Item{Text: "Staging database is Postgres 17", Topic: "database", Source: "test"})
 	b, _, _ := s.Remember(ctx, Item{Text: "Staging database listens on port 5433", Topic: "Database", Source: "test"})
+	if len(a.Conflicts) != 0 || len(b.Conflicts) != 0 {
+		t.Fatal("complementary details are not contradictions")
+	}
 	_, _ = s.Pin(ctx, b.ID, true)
-	m, err := s.Merge(ctx, []string{a.ID, b.ID}, Item{Text: "Staging database is Postgres 17 on port 5433", Source: "consolidation"})
+	m, err := s.Merge(ctx, []string{a.ID, b.ID}, Item{Text: "Staging database is Postgres 17 on port 5433", Source: "person"})
 	if err != nil {
 		t.Fatal(err)
 	}

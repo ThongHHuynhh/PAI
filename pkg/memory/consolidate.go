@@ -66,6 +66,20 @@ const MergedInto = "merged into "
 // was, and each of them is invalidated as merged into it. Nothing is lost:
 // the old items stay, invalid, and it names them.
 func (s *Store) Merge(ctx context.Context, ids []string, it Item) (Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(ids) == 0 {
+		return it, fmt.Errorf("memory: replacement requires predecessor IDs")
+	}
+	for _, id := range ids {
+		if err := s.guard(ctx, id); err != nil {
+			return it, err
+		}
+	}
+	if it.Source == "consolidation" || it.Source == "extract" || it.Source == "model" || it.Source == SourceMCP {
+		return it, fmt.Errorf("memory: ASK the user before replacing existing knowledge; automatic consolidation cannot resolve contradictions")
+	}
+
 	if err := Useful(it.Text); err != nil {
 		return it, err
 	}
@@ -77,6 +91,12 @@ func (s *Store) Merge(ctx context.Context, ids []string, it Item) (Item, error) 
 		}
 		if !o.Invalid.IsZero() {
 			return it, fmt.Errorf("memory: %s is already invalid", id)
+		}
+		if it.Scope != "" && it.Scope != o.Scope {
+			return it, fmt.Errorf("memory: replacement cannot cross scopes")
+		}
+		if len(olds) > 0 && olds[0].Scope != o.Scope {
+			return it, fmt.Errorf("memory: replacement cannot cross scopes")
 		}
 		olds = append(olds, o)
 	}
@@ -103,21 +123,34 @@ func (s *Store) Merge(ctx context.Context, ids []string, it Item) (Item, error) 
 		return it, fmt.Errorf("memory: kind %q is not one of %s", it.Kind, strings.Join(kinds, ", "))
 	}
 	it.Text, it.Topic, it.Scope = strings.TrimSpace(it.Text), strings.ToLower(strings.TrimSpace(it.Topic)), scopeOr(it.Scope)
+	if err := prepare(&it); err != nil {
+		return it, err
+	}
+	if err := s.validateDependencies(ctx, it); err != nil {
+		return it, err
+	}
 	vecs, err := s.embed.Embed(ctx, []string{it.Text})
 	if err != nil {
 		return it, err
 	}
 	it.vec = vecs[0]
-	now := time.Now().UTC()
-	it.ID, it.Created, it.Updated = newID(), now, now
-	s.mu.Lock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	peers, err := s.conflictPeers(ctx, it)
 	if err != nil {
-		s.mu.Unlock()
 		return it, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO items (id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,pinned,utility,shown,used,embedder,vec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		it.ID, it.Kind, it.Text, it.Scope, it.Topic, strings.Join(it.Merged, ","), it.Session, it.From, it.To, it.Source, now.UnixMilli(), now.UnixMilli(), it.Pinned, it.Utility, it.Shown, it.Used, s.embed.Name(), pack(it.vec))
+	for _, peer := range peers {
+		if !slices.Contains(ids, peer.ID) {
+			return it, fmt.Errorf("memory: replacement may contradict %s; preserve the candidate with Remember and ASK the user", peer.ID)
+		}
+	}
+	now := time.Now().UTC()
+	it.ID, it.Created, it.Updated = newID(), now, now
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return it, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO items (id,kind,text,scope,topic,merged,session,rec_from,rec_to,source,created,updated,pinned,utility,shown,used,embedder,vec,contract) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		it.ID, it.Kind, it.Text, it.Scope, it.Topic, strings.Join(it.Merged, ","), it.Session, it.From, it.To, it.Source, now.UnixMilli(), now.UnixMilli(), it.Pinned, it.Utility, it.Shown, it.Used, s.embed.Name(), pack(it.vec), contractJSON(it.Contract))
 	for _, o := range olds {
 		if err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE items SET invalid=?, reason=?, updated=? WHERE id=?`, now.UnixMilli(), MergedInto+it.ID, now.UnixMilli(), o.ID)
@@ -128,7 +161,6 @@ func (s *Store) Merge(ctx context.Context, ids []string, it Item) (Item, error) 
 	} else {
 		_ = tx.Rollback()
 	}
-	s.mu.Unlock()
 	if err != nil {
 		return it, err
 	}

@@ -95,11 +95,12 @@ type Tool struct {
 
 // Params are the session's vendor fields, see encode.
 type Request struct {
-	Model   string
-	Key     string // record 1's id, the routing key for prefix caches: a copy shares it with the session it copies, as it shares the prefix
-	Tools   []Tool
-	Context []statefile.Record // statefile.Build output
-	Params  map[string]json.RawMessage
+	MaxAttempts int // zero keeps the default; positive values can only reduce retries
+	Model       string
+	Key         string // record 1's id, the routing key for prefix caches: a copy shares it with the session it copies, as it shares the prefix
+	Tools       []Tool
+	Context     []statefile.Record // statefile.Build output
+	Params      map[string]json.RawMessage
 }
 
 // Cache is the step record's cache header, facts only. Marks are the ids of
@@ -164,9 +165,10 @@ type Health struct {
 // retried: 429, 5xx, a network error, or a stream that errors before emitting.
 // After a block is out the harness holds partial state, so that is terminal.
 const (
-	retries   = 5
-	retryBase = 2 * time.Second // doubles per attempt, plus up to 25% jitter
-	retryCap  = 30 * time.Second
+	retries     = 5
+	retryBase   = 2 * time.Second // doubles per attempt, plus up to 25% jitter
+	retryCap    = 30 * time.Second
+	stepTimeout = 15 * time.Minute // bounds even streams that keep sending bytes forever
 )
 
 // idle bounds the wait for response headers and then the gap between body
@@ -215,17 +217,13 @@ func Exhausted(err error) bool {
 }
 
 func transient(err error) bool {
-	var he *httpError
-	if errors.As(err, &he) {
-		return he.code == http.StatusTooManyRequests || he.code >= 500
-	}
-	return !errors.As(err, new(configError)) // network or early stream failure
+	return classify(err, 0, false).Retryable()
 }
 
 func backoff(attempt int, err error) time.Duration {
 	var he *httpError
 	if errors.As(err, &he) && he.after > 0 {
-		return he.after
+		return min(he.after, retryCap)
 	}
 	d := retryBase << attempt
 	return min(d+time.Duration(rand.Int64N(int64(d/4))), retryCap)
@@ -234,7 +232,7 @@ func backoff(attempt int, err error) time.Duration {
 func retryAfter(h http.Header) time.Duration {
 	v := h.Get("Retry-After")
 	if s, err := strconv.Atoi(v); err == nil {
-		return time.Duration(s) * time.Second
+		return time.Duration(min(max(s, 0), int(retryCap/time.Second))) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
 		return time.Until(t)
@@ -245,18 +243,26 @@ func retryAfter(h http.Header) time.Duration {
 // Step is one LLM call. Blocks are emitted as they complete; the returned
 // header is the step record minus kind, id, and upto.
 func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Record)) (statefile.Header, error) {
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, stepTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return statefile.Header{}, classify(err, 0, false)
+	}
 	body, cache, err := p.Envelope.Compile(req)
 	if err != nil {
-		return statefile.Header{}, err
+		return statefile.Header{}, classify(configError{err}, 0, false)
 	}
 	if p.Run != nil {
 		sent := time.Now().UTC().Truncate(time.Millisecond)
-		h, err := p.Run(ctx, body, emit)
+		partial := false
+		h, err := p.Run(ctx, body, func(r statefile.Record) { partial = true; emit(r) })
 		if err != nil {
-			return statefile.Header{}, err
+			return statefile.Header{}, classify(err, 1, partial)
 		}
 		sum := sha256.Sum256(body)
 		h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
+		h.Attempts, h.DurationMS = 1, time.Since(started).Milliseconds()
 		return h, nil
 	}
 	url := p.URL
@@ -264,7 +270,11 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 		url = p.Endpoint(p.URL, req.Model)
 	}
 	if u, err := neturl.Parse(url); err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" {
-		return statefile.Header{}, fmt.Errorf("bad url %q", url) // configuration, not transient: checked before the retry loop
+		return statefile.Header{}, classify(configError{fmt.Errorf("bad url %q", url)}, 0, false)
+	}
+	maxAttempts := retries + 1
+	if req.MaxAttempts > 0 {
+		maxAttempts = min(maxAttempts, req.MaxAttempts)
 	}
 	for attempt := 0; ; attempt++ {
 		sent := time.Now().UTC().Truncate(time.Millisecond)
@@ -272,15 +282,16 @@ func (p Provider) Step(ctx context.Context, req Request, emit func(statefile.Rec
 		if err == nil {
 			sum := sha256.Sum256(body)
 			h.Provider, h.Model, h.Request, h.Cache, h.Sent = p.Envelope.Name(), req.Model, "sha256:"+hex.EncodeToString(sum[:]), cache, sent
+			h.Attempts, h.DurationMS = attempt+1, time.Since(started).Milliseconds()
 			return h, nil
 		}
-		if emitted || attempt == retries || !transient(err) {
-			return statefile.Header{}, err
+		if emitted || attempt+1 >= maxAttempts || !transient(err) {
+			return statefile.Header{}, classify(err, attempt+1, emitted)
 		}
 		select {
 		case <-time.After(backoff(attempt, err)):
 		case <-ctx.Done():
-			return statefile.Header{}, ctx.Err()
+			return statefile.Header{}, classify(ctx.Err(), attempt+1, false)
 		}
 	}
 }
