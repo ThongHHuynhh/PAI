@@ -11,6 +11,7 @@ import (
 
 	"pai/pkg/provider"
 	"pai/pkg/statefile"
+	"pai/pkg/worker"
 )
 
 // Pages fit a small model turn. Plans are capped to keep previews reviewable.
@@ -52,7 +53,7 @@ func structured(e toolEnvelope) (statefile.Record, int) {
 
 var readPageTool = provider.Tool{Name: "read_page", Description: "Read a bounded UTF-8 file/artifact page. Use next_offset and expected_sha256 on subsequent pages to detect changes. Byte offsets refer to the original file. No shell execution.", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":4096},"expected_sha256":{"type":"string"}},"required":["worker","path"]}`)}
 var planEditTool = provider.Tool{Name: "plan_edit", Description: "Plan a single exact replacement in an existing small UTF-8 file without writing. Returns a reviewable plan with before/after SHA256. Pass that plan unchanged to apply_edit.", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["worker","path","old","new"]}`)}
-var applyEditTool = provider.Tool{Name: "apply_edit", Description: "Apply a reviewed plan after checking the file SHA256, then read back and verify. Detects stale plans and post-write changes; separate Read/Write cannot exclude a concurrent write between precheck and write. Never automatically retry a conflict.", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"plan":{"type":"object","properties":{"path":{"type":"string"},"before_sha256":{"type":"string"},"after_sha256":{"type":"string"},"content":{"type":"string"}},"required":["path","before_sha256","after_sha256","content"]}},"required":["worker","plan"]}`)}
+var applyEditTool = provider.Tool{Name: "apply_edit", Description: "Apply a reviewed plan after checking the file SHA256, then read back and verify. The worker writes atomically and refuses the write if the file changed since it was read. Never automatically retry a conflict.", Schema: schema(`{"type":"object","properties":{"worker":{"type":"string"},"plan":{"type":"object","properties":{"path":{"type":"string"},"before_sha256":{"type":"string"},"after_sha256":{"type":"string"},"content":{"type":"string"}},"required":["path","before_sha256","after_sha256","content"]}},"required":["worker","plan"]}`)}
 
 func structuredFile(ctx context.Context, w Worker, tool string, a args, observe func(string, []byte)) (statefile.Record, int) {
 	fail := func(code, message string) (statefile.Record, int) {
@@ -124,7 +125,7 @@ func structuredFile(ctx context.Context, w Worker, tool string, a args, observe 
 		if hash != p.Before {
 			return fail("precondition_failed", "file changed since planning; ask/replan explicitly")
 		}
-		if err := w.Write(ctx, path, []byte(p.Content)); err != nil {
+		if err := w.Write(ctx, path, []byte(p.Content), worker.Digest(b)); err != nil {
 			return fail("write_failed", err.Error())
 		}
 		actual, err := w.Read(ctx, path)

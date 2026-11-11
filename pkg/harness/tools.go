@@ -79,11 +79,11 @@ Networking:
 
 Context and memory:
 - Every tool result ends with the time since session start and the input context size of the step that made the call: "time 3m12s context 48210"
-- When the context passes 70%% of its limit, PAI compacts it: the oldest records are replaced in your context by a summary system record from source compaction. The records stay in the .state file
+- PAI compacts the context: the oldest records are replaced in your context by a summary system record from source compaction. The records stay in the .state file. In auto mode, the default, it compacts past 70%% of the limit, or past 50%% when a new request arrives; call compact yourself when a task is done and the next is unrelated. In manual mode a system record from source compact asks you to ask the person first; past 90%% it compacts anyway
 - PAI has a long-term memory shared by every session, machine and model. Each item has an id, a kind (fact, preference, decision, todo, procedure, summary) and a scope (global, project:<name>, session:<id>)
 - When a person sends a message, PAI may add a system record from source memory after it with the items it recalled for the turn. A learnt policy decides whether to recall and how much, from whether recalled items get used. Use what helps and ignore the rest
 - Use context_record for typed intent, constraints, evidence and task state with original record references. Declare competing facts with the same key and distinct values. Call context_clarify for contradictions; never silently resolve them. context_view produces a budgeted handoff with originals and unresolved conflicts. Use read_page for incremental artifact expansion and plan_edit/apply_edit for bounded, hash-checked file changes.
-- Call recall to search memory for more. Call remember to save one lasting item as a self-contained sentence: facts about the user and their machines, projects, accounts and paths, preferences, decisions and why, todos, and procedures that worked. Never save secrets
+- Call recall to search memory for more. Call remember to save one lasting item as a self-contained sentence: facts about the user and their machines, projects, accounts and paths, preferences, decisions and why, todos, and procedures that worked. Never save secrets with remember: save addresses, logins, keys and passwords the user wants kept with the credential tool, and use them as {{cred:name}} so you never see the value
 - Call forget with an id when an item is no longer true, with why. Nothing is deleted: it stops being recalled
 - PAI also extracts lasting items from each session by itself, so remember what matters most, not everything
 - When a session ends, its .state file is copied to every worker in its config at <scratch>/logs/<session id>.log. The .log file is a copy of the .state file with media bodies removed
@@ -152,7 +152,7 @@ type Worker interface {
 	Run(ctx context.Context, session, interpreter, code string, timeout int) (Output, error)
 	Job(ctx context.Context, session, interpreter, code, job string, done func(Output, error)) (int, string, error)
 	Read(ctx context.Context, path string) ([]byte, error)
-	Write(ctx context.Context, path string, data []byte) error
+	Write(ctx context.Context, path string, data []byte, expect string) error // expect: worker.Digest of what it replaces, worker.Absent, or "" for anything
 	Kill(ctx context.Context, session string) error
 }
 
@@ -174,12 +174,12 @@ func Tools(name string, input []string) []provider.Tool {
 	if len(input) > 0 {
 		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
 	}
-	defaults := []provider.Tool{run, read, write, edit, ask, recall, remember, forget, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
+	defaults := []provider.Tool{run, read, write, edit, ask, recall, remember, forget, credentialTool, compactTool, diagnoseTool, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
 	switch name {
 	case "default":
 		return defaults
 	case "patch":
-		return []provider.Tool{run, read, patch, ask, recall, remember, forget, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
+		return []provider.Tool{run, read, patch, ask, recall, remember, forget, credentialTool, compactTool, diagnoseTool, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
 	case "orchestrator":
 		return append(defaults, delegate, tell, children, stopChild)
 	case "patch-orchestrator":
@@ -278,7 +278,7 @@ func executeObserved(ctx context.Context, w Worker, session, tool string, a args
 		snapshot(a.Path, b)
 		return ok(string(b))
 	case "write":
-		if err := w.Write(ctx, a.Path, []byte(a.Content)); err != nil {
+		if err := w.Write(ctx, a.Path, []byte(a.Content), ""); err != nil {
 			return fail(err)
 		}
 		snapshot(a.Path, []byte(a.Content))
@@ -292,7 +292,7 @@ func executeObserved(ctx context.Context, w Worker, session, tool string, a args
 			return fail(fmt.Errorf("old matches %d times, need exactly 1", n))
 		}
 		updated := bytes.Replace(b, []byte(a.Old), []byte(a.New), 1)
-		if err := w.Write(ctx, a.Path, updated); err != nil {
+		if err := w.Write(ctx, a.Path, updated, worker.Digest(b)); err != nil {
 			return fail(err)
 		}
 		snapshot(a.Path, updated)

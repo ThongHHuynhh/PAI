@@ -25,7 +25,7 @@ func (h *Harness) rememberRefs(id string, items []memory.Item) error {
 	return h.note(h.session(id), id, statefile.Record{Header: statefile.Header{Kind: statefile.MemoryRef, Type: "application/json"}, Body: body})
 }
 func (h *Harness) memoryBlocked(ctx context.Context, chain []statefile.Record, name string) bool {
-	if h.Memory == nil || slices.Contains([]string{"read", "read_page", "recall", "ask", "memory_clarify", "context_expand", "context_view", "context_record", "context_clarify"}, name) {
+	if h.Memory == nil || slices.Contains([]string{"read", "read_page", "recall", "ask", "diagnose", "compact", "memory_clarify", "context_expand", "context_view", "context_record", "context_clarify"}, name) {
 		return false
 	}
 	seen := map[string]bool{}

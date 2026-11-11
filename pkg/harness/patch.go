@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"pai/pkg/worker"
 )
 
 // The apply_patch format GPT families were trained on:
@@ -167,6 +169,7 @@ func applyPatch(ctx context.Context, w Worker, input string, observe func(string
 		return err
 	}
 	out := make([][]byte, len(secs))
+	expect := make([]string, len(secs))
 	for i, s := range secs {
 		lines := s.add
 		if s.add == nil {
@@ -174,6 +177,7 @@ func applyPatch(ctx context.Context, w Worker, input string, observe func(string
 			if err != nil {
 				return err
 			}
+			expect[i] = worker.Digest(b)
 			if text := strings.ReplaceAll(string(b), "\r\n", "\n"); text != "" {
 				lines = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 			}
@@ -184,7 +188,7 @@ func applyPatch(ctx context.Context, w Worker, input string, observe func(string
 		out[i] = []byte(strings.Join(lines, "\n") + "\n")
 	}
 	for i, s := range secs {
-		if err := w.Write(ctx, s.path, out[i]); err != nil {
+		if err := w.Write(ctx, s.path, out[i], expect[i]); err != nil {
 			return err
 		}
 		if observe != nil {

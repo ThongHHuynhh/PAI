@@ -2,6 +2,8 @@ package worker
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // A root worker reads and writes files as the operator, so a request reaches
@@ -71,12 +74,128 @@ func (s *server) create(path string) (io.WriteCloser, error) {
 	return h, cmd.Start()
 }
 
-func (s *server) file(op, path string) (*exec.Cmd, error) {
+// write replaces path with data, see Replace. Writes to one path from this
+// worker take turns, so two sessions' edits cannot interleave between the
+// check and the rename.
+func (s *server) write(path string, data []byte, expect string) error {
+	mu := pathLock(path)
+	mu.Lock()
+	defer mu.Unlock()
+	if s.Operator == nil {
+		return Replace(path, bytes.NewReader(data), expect)
+	}
+	cmd, err := s.file("write", path, expect)
+	if err != nil {
+		return err
+	}
+	var stderr bytes.Buffer
+	cmd.Stdin, cmd.Stderr = bytes.NewReader(data), &stderr
+	if err := cmd.Run(); err != nil {
+		return fail(err, &stderr)
+	}
+	return nil
+}
+
+var pathLocks sync.Map // cleaned absolute path -> *sync.Mutex
+
+func pathLock(path string) *sync.Mutex {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	mu, _ := pathLocks.LoadOrStore(filepath.Clean(path), new(sync.Mutex))
+	return mu.(*sync.Mutex)
+}
+
+// Absent is the expect of a write whose file must not exist yet.
+const Absent = "absent"
+
+// Digest is the expect of a write over b.
+func Digest(b []byte) string {
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// Replace writes data to a temporary file beside path and renames it over
+// path, so no reader sees a torn file and a failed write leaves the old one.
+// A symlink's target is replaced, not the link. With expect set, the current
+// content must still be what expect names, checked just before the rename: a
+// file changed by another writer since it was read fails the write instead of
+// losing that change. Writers outside PAI do not take the lock, so a change in
+// the last instant before the rename can still be overwritten.
+func Replace(path string, data io.Reader, expect string) error {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".pai-*")
+	if err != nil {
+		return err
+	}
+	done := false
+	defer func() {
+		if !done {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err := io.Copy(tmp, data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), mode); err != nil {
+		return err
+	}
+	if err := check(path, expect); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	done = true
+	return nil
+}
+
+// check is whether path is still what expect names: Absent, a Digest, or
+// anything when expect is empty.
+func check(path, expect string) error {
+	if expect == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if expect == Absent {
+			return nil
+		}
+		return fmt.Errorf("%s was removed since it was read; read it again", path)
+	case err != nil:
+		return err
+	case expect == Absent:
+		return fmt.Errorf("%s exists; read it before replacing it", path)
+	case Digest(b) != expect:
+		return fmt.Errorf("%s changed since it was read; read it again and redo the edit", path)
+	}
+	return nil
+}
+
+func (s *server) file(op, path string, extra ...string) (*exec.Cmd, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(exe, "file", op, path)
+	cmd := exec.Command(exe, append([]string{"file", op, path}, extra...)...)
 	return cmd, prepare(cmd, s.Operator)
 }
 
@@ -104,9 +223,9 @@ func fail(err error, stderr *bytes.Buffer) error {
 }
 
 // File is the helper's side, run as the operator: read copies path to stdout,
-// up to the bytes that tell it over maxRead, write copies stdin to path and
-// makes its directory.
-func File(op, path string) error {
+// up to the bytes that tell it over maxRead, write replaces path with stdin
+// as Replace does, with expect checked.
+func File(op, path, expect string) error {
 	switch op {
 	case "read":
 		f, err := os.Open(path)
@@ -117,15 +236,7 @@ func File(op, path string) error {
 		_, err = io.Copy(os.Stdout, io.LimitReader(f, maxRead+1))
 		return err
 	case "write":
-		f, err := createFile(path)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(f, os.Stdin); err != nil {
-			_ = f.Close()
-			return err
-		}
-		return f.Close()
+		return Replace(path, os.Stdin, expect)
 	}
 	return fmt.Errorf("file: unknown op %q", op)
 }

@@ -81,7 +81,7 @@ func contextBlocked(chain []statefile.Record, name string) bool {
 	}
 	// Shell access can mutate even for commands described as reads. Only narrowly
 	// read-only tools and clarification remain available while facts compete.
-	return !slices.Contains([]string{"read", "read_page", "recall", "ask", "context_record", "context_view", "context_clarify", "context_expand", "memory_clarify"}, name)
+	return !slices.Contains([]string{"read", "read_page", "recall", "ask", "diagnose", "compact", "context_record", "context_view", "context_clarify", "context_expand", "memory_clarify"}, name)
 }
 func (h *Harness) contextCall(ctx context.Context, id string, conf statefile.Conf, call statefile.Record, c provider.Call, chain []statefile.Record, observe func(statefile.Record)) statefile.Record {
 	items, decisions := contextState(chain)

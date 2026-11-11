@@ -36,7 +36,7 @@ const resultLines = 20
 // number.
 var arity = map[string][2]int{
 	"new": {0, 0}, "message": {2, -1}, "tail": {1, 2}, "chat": {0, 1}, "retry": {1, 1}, "stop": {1, 1}, "delete": {1, 1},
-	"info": {1, 1}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "model": {2, 2}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "key": {2, 2}, "signin": {1, 1}, "fallback": {0, 2}, "balance": {0, -1}, "accounts": {0, 0},
+	"info": {1, 1}, "diagnose": {1, 1}, "compact": {1, 2}, "name": {1, -1}, "sessions": {0, 1}, "workers": {0, 0}, "workers set": {2, -1}, "model": {2, 2}, "worker remove": {1, 1}, "worker rename": {2, 2}, "providers": {0, 0}, "provider remove": {1, 1}, "key": {2, 2}, "signin": {1, 1}, "fallback": {0, 2}, "balance": {0, -1}, "accounts": {0, 0},
 }
 
 // cli is the harness API as verbs: one verb, one route, its reply printed.
@@ -144,6 +144,18 @@ func cli(verb string, args []string) {
 		for _, i := range connector.SessionTree(infos) {
 			fmt.Printf("%s%s  %-11s  %-40s  n=%-5d context=%d/%d  %s  %s\n", strings.Repeat("  ", i.Depth), i.ID, i.Status, i.Config.Model, i.N, i.ContextUsed, i.Config.ContextLimit, i.Updated.Local().Format(time.DateTime), i.Name)
 		}
+	case "diagnose":
+		c.raw("/sessions/" + args[0] + "/diagnose")
+	case "compact":
+		if len(args) == 2 {
+			var out struct{ N int }
+			c.call("PUT", "/sessions/"+args[0]+"/compact?via="+via, "text/plain", strings.NewReader(args[1]), &out)
+			fmt.Println(out.N)
+			break
+		}
+		var out struct{ Compacted bool }
+		c.call("POST", "/sessions/"+args[0]+"/compact?via="+via, "", nil, &out)
+		fmt.Println(map[bool]string{true: "compacted", false: "nothing to compact yet"}[out.Compacted])
 	case "name":
 		var out struct{ N int }
 		c.call("PUT", "/sessions/"+args[0]+"/name?via="+via, "text/plain", strings.NewReader(strings.Join(args[1:], " ")), &out)
@@ -180,6 +192,8 @@ func cli(verb string, args []string) {
 		c.call("PUT", "/workers/"+url.PathEscape(args[0])+"/name", "text/plain", strings.NewReader(args[1]), nil)
 	case "providers":
 		c.raw("/providers")
+	case "provider remove":
+		c.call("DELETE", "/providers/"+url.PathEscape(args[0]), "", nil, nil)
 	case "key":
 		c.key(args[0], args[1])
 	case "signin":
