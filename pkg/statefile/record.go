@@ -110,8 +110,16 @@ type Conf struct {
 	ContextLimit int                        `json:"context_limit"`
 	Input        []string                   `json:"input,omitempty"`
 	Params       map[string]json.RawMessage `json:"params,omitempty"`
-	Preset       string                     `json:"preset,omitempty"` // the catalog preset a connector began from; display only
+	Preset       string                     `json:"preset,omitempty"`  // the catalog preset a connector began from; display only
+	Compact      string                     `json:"compact,omitempty"` // compaction mode: "" or CompactAuto, or CompactManual
 }
+
+// Compaction modes. Auto compacts when PAI judges it right; manual asks the
+// person first, and compacts unasked only to keep the session from failing.
+const (
+	CompactAuto   = "auto"
+	CompactManual = "manual"
+)
 
 // Worker is one worker the session may use. Its drives are the harness
 // config's: the session sees what the worker mounts.

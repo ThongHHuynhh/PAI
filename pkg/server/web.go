@@ -103,6 +103,60 @@ func (wa *webAPI) handle(mux *http.ServeMux) {
 	mux.HandleFunc("POST /memory/{id}/restore", wa.restore)
 	mux.HandleFunc("POST /memory/{id}/feedback", wa.feedback)
 	mux.HandleFunc("POST /memory/consolidate", wa.consolidate)
+	mux.HandleFunc("GET /credentials", func(w http.ResponseWriter, r *http.Request) {
+		if !wa.store(w) {
+			return
+		}
+		cs, err := wa.mem.Credentials(r.Context())
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, append([]memory.Credential{}, cs...))
+	})
+	mux.HandleFunc("GET /credentials/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if !wa.store(w) {
+			return
+		}
+		v, err := wa.mem.CredentialValue(r.Context(), r.PathValue("name"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		reply(w, map[string]string{"value": v})
+	})
+	mux.HandleFunc("PUT /credentials/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if !wa.store(w) {
+			return
+		}
+		var c memory.Credential
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&c); err != nil {
+			fail(w, err)
+			return
+		}
+		c.Name, c.Source = r.PathValue("name"), "web"
+		if err := wa.mem.SaveCredential(r.Context(), c); err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /credentials/{name}/forget", func(w http.ResponseWriter, r *http.Request) {
+		if !wa.store(w) {
+			return
+		}
+		var body struct{ Reason string }
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+			fail(w, err)
+			return
+		}
+		if err := wa.mem.ForgetCredential(r.Context(), r.PathValue("name"), body.Reason); err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /accounts", func(w http.ResponseWriter, r *http.Request) { reply(w, wa.h.Accounts()) })
 	mux.HandleFunc("GET /balance", func(w http.ResponseWriter, r *http.Request) {
 		c, err := loadConfig(wa.path)
