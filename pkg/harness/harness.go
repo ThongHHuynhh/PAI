@@ -521,9 +521,6 @@ func rebuilt(p provider.Provider, model string, conf statefile.Conf, chain []sta
 		return ""
 	}
 	records, _ := statefile.Build(chain[:last.Upto])
-	if items, _ := contextState(chain); len(items) > 0 {
-		records = append(records, contextProjection(chain))
-	}
 	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
 	body, _, err := p.Envelope.Compile(provider.Request{Model: model, Key: chain[0].ID, Tools: sessionTools(conf), Context: records, Params: conf.Params})
 	if err != nil || fmt.Sprintf("sha256:%x", sha256.Sum256(body)) == last.Request {
@@ -551,11 +548,10 @@ func (h *Harness) step(ctx context.Context, s *session, id string, conf statefil
 	if err != nil {
 		return "", err
 	}
+	// The context is only what the file holds. A record added here and not
+	// saved would be gone from the next step's prefix, so every step would
+	// miss the provider cache and send the whole context again.
 	records, upto := statefile.Build(chain)
-	records = append(records, protectedOriginals(chain)...)
-	if items, _ := contextState(chain); len(items) > 0 {
-		records = append(records, contextProjection(chain))
-	}
 	records = clock(records, chain[0].Time, conf.ContextLimit, conf.Input)
 	stepID := statefile.NewID()
 	if conf.Routing != nil {

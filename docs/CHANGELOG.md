@@ -4,6 +4,10 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.2
+
+- Fixes a token leak from v0.4.0 and v0.4.1. Once a session had compacted, or the model had recorded typed context, every request ended with a note that was not saved in the session file. The next request then no longer started with the one before it, so the provider cache missed on every step and the whole context was written to the cache again: about 100k tokens per step in a 250k session instead of a few thousand, roughly eight times the cost. The archive note and the typed context now go into the saved compaction record, and a request holds only what the session file holds. Sessions already compacted under v0.4.x get their cache back from their next step.
+
 ## v0.4.1
 
 - Compaction has two modes, set per session. Auto, the default, compacts past 70% of the context limit, and past 50% when a new request from the person arrives, so a finished task's detail folds before the next one. Manual asks the person through the agent at 70% and compacts unasked only past 90%, so the session does not fail at its limit. The model can call the new compact tool when a task is done. In the TUI, /compact compacts an idle session now and /compaction picks the mode; /continue no longer has the compact alias. CLI: `pai compact <id> [auto|manual]`. API: `POST` and `PUT /sessions/{id}/compact`.
