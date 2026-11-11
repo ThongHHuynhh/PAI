@@ -655,7 +655,13 @@ func (h *Harness) compact(ctx context.Context, s *session, id string, conf state
 	if i := strings.Index(out, "## Memory"); i >= 0 {
 		summary = strings.TrimSpace(out[:i])
 	}
-	r := statefile.Record{Header: statefile.Header{Kind: statefile.Compaction, Type: "text/markdown", Source: "compaction", Upto: cut}, Body: []byte("Summary of this session through record " + fmt.Sprint(cut) + ", which stays in the session's .state file:\n\n" + summary)}
+	// The archive locator and the typed context go into the saved record, so
+	// they sit at one place in every later request and keep the cache.
+	body := "Summary of this session through record " + fmt.Sprint(cut) + ", which stays in the session's .state file:\n\n" + summary + "\n\n" + archiveIndex(cut)
+	if items, _ := contextState(chain); len(items) > 0 {
+		body += "\n\nTyped context at this compaction:\n" + string(contextProjection(chain).Body)
+	}
+	r := statefile.Record{Header: statefile.Header{Kind: statefile.Compaction, Type: "text/markdown", Source: "compaction", Upto: cut}, Body: []byte(body)}
 	linkSummary(&r, chain)
 	if err := h.note(s, id, r); err != nil {
 		return false, err

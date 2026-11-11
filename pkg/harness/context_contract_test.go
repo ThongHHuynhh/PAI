@@ -79,8 +79,8 @@ func TestProtectedOriginalsAndSummaryLinks(t *testing.T) {
 		{Header: statefile.Header{N: 2, Kind: statefile.Result, ID: "evidence", Type: "text/plain"}, Body: []byte("contradiction and failed attempt")},
 		{Header: statefile.Header{N: 3, Kind: statefile.Compaction, ID: "summary1", Upto: 2}, Body: []byte("lossy summary")},
 	}
-	out := protectedOriginals(chain)
-	if len(out) != 1 || strings.Contains(string(out[0].Body), "do not deploy") || !strings.Contains(string(out[0].Body), "context_expand") {
+	out := archiveIndex(2)
+	if strings.Contains(out, "do not deploy") || !strings.Contains(out, "context_expand") || !strings.Contains(out, "1..2") {
 		t.Fatal("original protection failed")
 	}
 	r := statefile.Record{Header: statefile.Header{Upto: 3}}

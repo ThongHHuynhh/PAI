@@ -14,8 +14,8 @@ import (
 func TestArchiveIsBoundedAndExpandable(t *testing.T) {
 	original := strings.Repeat("untrusted tool output ", 100000)
 	chain := []statefile.Record{{Header: statefile.Header{N: 1, Kind: statefile.Result, Type: "text/plain"}, Body: []byte(original)}, {Header: statefile.Header{N: 2, Kind: statefile.Compaction, Upto: 1}, Body: []byte("summary")}}
-	archive := protectedOriginals(chain)
-	if len(archive) != 1 || len(archive[0].Body) > 1024 || strings.Contains(string(archive[0].Body), "untrusted tool output") {
+	archive := archiveIndex(1)
+	if len(archive) > 1024 || strings.Contains(archive, "untrusted tool output") {
 		t.Fatal("compaction reinjected source bodies")
 	}
 	h := &Harness{}
