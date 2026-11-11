@@ -38,18 +38,27 @@ const writeStall = 30 * time.Second
 // slow link is bounded by its progress and not its size.
 const writeChunk = 64 << 10
 
+// replyQueue bounds memory per call; a stalled consumer terminates the
+// connection rather than blocking cancellation and unrelated replies.
+const replyQueue = 64
+
+// requestTimeout bounds file/control operations and dispatch queueing.
+const requestTimeout = 30 * time.Second
+
 // Remote is a worker on the far end of a connection. Its hello header says
 // what it is. Requests are multiplexed by id; a call waits for its terminal
 // frame, the connection's end, or ctx: the worker's timeout bounds a run, and
 // a stop cuts it short.
 type Remote struct {
 	worker.Header
-	conn  net.Conn
-	wmu   sync.Mutex
-	cmu   sync.Mutex
-	calls map[string]chan worker.Frame
-	left  map[string]chan struct{} // closed by a call that stopped listening
-	done  chan struct{}            // closed when the connection ends
+	conn      net.Conn
+	writeOnce sync.Once
+	writer    chan struct{}
+	cmu       sync.Mutex
+	calls     map[string]chan worker.Frame
+	left      map[string]chan struct{} // closed by a call that stopped listening
+	done      chan struct{}            // closed when the connection ends
+	onLate    func(string, worker.Frame) error
 }
 
 // Connect reads the worker's hello, checks the connection with admit, whose
@@ -59,6 +68,10 @@ type Remote struct {
 // the error says whether the update began or why it failed. That worker is
 // returned with the error, so the pool can list it.
 func Connect(conn net.Conn, admit func() (string, error)) (*Remote, error) {
+	return connect(conn, admit, nil)
+}
+
+func connect(conn net.Conn, admit func() (string, error), late func(string, worker.Frame) error) (*Remote, error) {
 	br := bufio.NewReader(conn)
 	hello, err := worker.Decode(br)
 	if err != nil {
@@ -73,6 +86,7 @@ func Connect(conn net.Conn, admit func() (string, error)) (*Remote, error) {
 	}
 	r := &Remote{Header: hello.Header, conn: conn, calls: map[string]chan worker.Frame{}, left: map[string]chan struct{}{}, done: make(chan struct{})}
 	r.Name = name
+	r.onLate = late
 	if !version.Match(hello.Version) {
 		return r, fmt.Errorf("worker is version %s, harness is %s: %w", hello.Version, version.V, update(conn, br))
 	}
@@ -129,6 +143,17 @@ func update(conn net.Conn, br *bufio.Reader) error {
 }
 
 func (r *Remote) recv(br *bufio.Reader) {
+	late := make(chan worker.Frame, replyQueue)
+	defer close(late)
+	go func() {
+		for f := range late {
+			if r.onLate != nil && r.onLate(r.Name, f) == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+				_ = r.sendContext(ctx, worker.Frame{Header: worker.Header{ID: f.ID, Kind: worker.Receipt}})
+				cancel()
+			}
+		}
+	}()
 	for {
 		f, err := worker.Decode(br)
 		r.cmu.Lock()
@@ -142,13 +167,25 @@ func (r *Remote) recv(br *bufio.Reader) {
 			close(r.done)
 			return
 		}
-		if ch, ok := r.calls[f.ID]; ok {
+		ch, ok := r.calls[f.ID]
+		if ok {
 			select {
 			case ch <- f:
 			case <-r.gone(f.ID):
+			default:
+				// Never hold cmu while waiting for a consumer. Closing the
+				// connection makes an overflow explicit, never silent loss.
+				_ = r.conn.Close()
 			}
 		}
 		r.cmu.Unlock()
+		if !ok && terminalFrame(f.Kind) && r.onLate != nil {
+			select {
+			case late <- f:
+			default:
+				_ = r.conn.Close()
+			}
+		}
 	}
 }
 
@@ -158,9 +195,9 @@ func (r *Remote) gone(id string) <-chan struct{} { return r.left[id] }
 
 // call sends one request and feeds every reply to on until the terminal one,
 // or until ctx ends.
-func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func(worker.Frame)) error {
+func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func(worker.Frame)) (callErr error) {
 	id := statefile.NewID()
-	ch, left := make(chan worker.Frame), make(chan struct{})
+	ch, left := make(chan worker.Frame, replyQueue), make(chan struct{})
 	r.cmu.Lock()
 	if r.calls == nil {
 		r.cmu.Unlock()
@@ -176,19 +213,83 @@ func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func
 		r.cmu.Unlock()
 	}()
 	h.ID = id
-	r.wmu.Lock()
-	err := r.send(worker.Frame{Header: h, Body: body})
-	r.wmu.Unlock()
-	if err != nil {
+	if deadline, ok := ctx.Deadline(); ok {
+		h.Deadline = deadline.UnixMilli()
+	}
+	if t, ok := ctx.Value(executionKey{}).(executionTrace); ok {
+		h.Session, h.Origin = t.session, t.origin
+	}
+	request := worker.Frame{Header: h, Body: body}
+	if err := trace(ctx, r.Name, "created", request); err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = trace(ctx, r.Name, "cancelled", request)
+		return err
+	}
+	if err := trace(ctx, r.Name, "dispatched", request); err != nil {
+		return err
+	}
+	terminal := false
+	defer func() {
+		if callErr != nil && !terminal {
+			_ = trace(ctx, r.Name, "uncertain", worker.Frame{Header: h, Body: []byte(callErr.Error())})
+		}
+	}()
+	err := r.sendContext(ctx, worker.Frame{Header: h, Body: body})
+	if err != nil {
+		return fmt.Errorf("dispatch failed; outcome uncertain, do not blindly replay: %w", err)
+	}
+	ack := time.NewTimer(requestTimeout)
+	defer ack.Stop()
+	var ackDeadline <-chan time.Time
+	if r.Reliable || h.Job != "" {
+		ackDeadline = ack.C
 	}
 	for {
 		select {
+		case <-ackDeadline:
+			return errors.New("worker acknowledgement deadline exceeded; outcome uncertain, do not replay")
 		case f, ok := <-ch:
 			if !ok {
-				return errors.New("worker connection lost")
+				return errors.New("worker connection lost; outcome uncertain, do not blindly replay")
 			}
-			if f.Kind == worker.Error {
+			if f.Kind == worker.Acknowledged {
+				ackDeadline = nil
+				if h.Job != "" {
+					ack.Reset(requestTimeout)
+					ackDeadline = ack.C
+				}
+				if err := trace(ctx, r.Name, "acknowledged", f); err != nil {
+					return err
+				}
+				continue
+			}
+			if f.Kind == worker.Started {
+				ackDeadline = nil
+				if err := trace(ctx, r.Name, "started", f); err != nil {
+					return err
+				}
+			}
+			if terminalFrame(f.Kind) {
+				state := "completed"
+				if f.Kind == worker.Error {
+					state = "failed"
+				}
+				if f.Kind == worker.Uncertain {
+					state = "uncertain"
+				}
+				if err := trace(ctx, r.Name, state, f); err != nil {
+					return err
+				}
+				terminal = true
+				if _, ok := ctx.Value(executionKey{}).(executionTrace); ok && r.Reliable {
+					if err := r.sendContext(ctx, worker.Frame{Header: worker.Header{ID: id, Kind: worker.Receipt}}); err != nil {
+						// Result is already durable; reconnect can repeat it safely.
+					}
+				}
+			}
+			if f.Kind == worker.Error || f.Kind == worker.Uncertain {
 				return errors.New(string(f.Body))
 			}
 			on(f)
@@ -196,9 +297,43 @@ func (r *Remote) call(ctx context.Context, h worker.Header, body []byte, on func
 				return nil
 			}
 		case <-ctx.Done():
-			return ctx.Err()
+			if r.Reliable {
+				cancelCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				_ = r.sendContext(cancelCtx, worker.Frame{Header: worker.Header{ID: id, Kind: worker.Cancel}})
+				cancel()
+			}
+			return fmt.Errorf("outcome uncertain; cancellation is not confirmed, do not blindly replay: %w", ctx.Err())
 		}
 	}
+}
+
+// sendContext makes both writer admission and the write itself cancellable.
+// A cancelled partial write poisons framing, so send closes the connection.
+func (r *Remote) sendContext(ctx context.Context, f worker.Frame) error {
+	r.writeOnce.Do(func() { r.writer = make(chan struct{}, 1) })
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	select {
+	case r.writer <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.done:
+		return errors.New("worker connection lost")
+	}
+	defer func() { <-r.writer }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = r.conn.Close()
+		close(finished)
+	})
+	err := r.send(f)
+	if !stop() {
+		<-finished
+	}
+	return err
 }
 
 // Job starts code as a background job named job and returns its pid and log
@@ -254,6 +389,11 @@ func (r *Remote) Run(ctx context.Context, session, interpreter, code string, tim
 	if timeout == 0 {
 		timeout = int(runTimeout.Seconds())
 	}
+	if timeout < 0 || timeout > int(maxTimeout/time.Second) {
+		return Output{}, errors.New("invalid run timeout")
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
 	var o Output
 	mid := false // the tail starts inside a line already counted
 	err := r.call(ctx, worker.Header{Kind: worker.Run, Session: session, Interp: interpreter, Timeout: timeout}, []byte(code), func(f worker.Frame) {
@@ -281,20 +421,32 @@ func (r *Remote) Run(ctx context.Context, session, interpreter, code string, tim
 }
 
 func (r *Remote) Read(ctx context.Context, path string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	var b []byte
 	err := r.call(ctx, worker.Header{Kind: worker.Read, Path: path}, nil, func(f worker.Frame) { b = f.Body })
 	return b, err
 }
 
 func (r *Remote) Write(ctx context.Context, path string, data []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	return r.call(ctx, worker.Header{Kind: worker.Write, Path: path}, data, func(worker.Frame) {})
 }
 
 // Update has the worker make cmd beside it release v.
 func (r *Remote) Update(ctx context.Context, cmd, v string) error {
+	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+	defer cancel()
 	return r.call(ctx, worker.Header{Kind: worker.Update, Path: cmd, Version: v}, nil, func(worker.Frame) {})
 }
 
 func (r *Remote) Kill(ctx context.Context, session string) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	return r.call(ctx, worker.Header{Kind: worker.Kill, Session: session}, nil, func(worker.Frame) {})
+}
+
+func terminalFrame(kind string) bool {
+	return kind == worker.Result || kind == worker.Done || kind == worker.Error || kind == worker.Bytes || kind == worker.Uncertain
 }

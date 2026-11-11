@@ -232,7 +232,7 @@ func TestRecallLimitsAndWording(t *testing.T) {
 	if text, _ := call(t, Memory(f), "recall", `{"query":"x"}`); text != "no memory matches" {
 		t.Errorf("empty: %q", text)
 	}
-	if f.asked.K != 8 || !f.asked.NoSummaries {
+	if f.asked.K != memory.RecallK(0) || !f.asked.NoSummaries {
 		t.Errorf("default query: %+v", f.asked)
 	}
 	call(t, Memory(f), "recall", `{"query":"x","k":500,"scope":"project:pai"}`)
@@ -240,7 +240,7 @@ func TestRecallLimitsAndWording(t *testing.T) {
 		t.Errorf("k and scope: %+v", f.asked)
 	}
 	f.items = []memory.Item{item("a", "x marks it", memory.Global)}
-	if text, _ := call(t, Memory(f), "recall", `{"query":"x"}`); text != "- [a] (fact, global) x marks it\n" {
+	if text, _ := call(t, Memory(f), "recall", `{"query":"x"}`); text != memory.Line(f.items[0]) {
 		t.Errorf("line: %q", text)
 	}
 }
@@ -389,16 +389,24 @@ func TestRealStore(t *testing.T) {
 		t.Errorf("another project's item came: %q", text)
 	}
 
-	text, _ = call(t, tools, "edit_memory", `{"id":"`+id+`","text":"The staging database runs Postgres 17 on port 5432"}`)
-	_, rest, _ := strings.Cut(text, "the new version is ")
-	newID, _, _ := strings.Cut(rest, ":")
-	if newID == "" || newID == id {
-		t.Fatalf("edit: %q", text)
+	text, failed = call(t, tools, "edit_memory", `{"id":"`+id+`","text":"The staging database runs Postgres 17 on port 5432"}`)
+	if !failed || !strings.Contains(text, "ASK") {
+		t.Fatalf("MCP silently replaced fact: %q", text)
 	}
-	edited, err := st.Get(context.Background(), newID)
-	if err != nil || edited.Source != memory.SourceMCP {
-		t.Errorf("edited item: %+v %v", edited, err)
+	unchanged, err := st.Get(context.Background(), id)
+	if err != nil || !unchanged.Invalid.IsZero() {
+		t.Fatal("denied edit mutated source")
 	}
+	// Explicit person-side editing remains versioned; MCP cannot self-authorize it.
+	edited, err := st.Edit(context.Background(), id, "The staging database runs Postgres 17 on port 5432", "", "", "", "person")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newID := edited.ID
+	if newID == id || edited.Source != "person" {
+		t.Fatal("person edit not versioned")
+	}
+
 	if text, failed := call(t, tools, "restore_memory", `{"id":"`+id+`"}`); !failed || !strings.Contains(text, newID) {
 		t.Errorf("restoring a replaced item: %q failed=%v", text, failed)
 	}
@@ -423,7 +431,7 @@ func TestRealStore(t *testing.T) {
 		t.Errorf("a forgotten item is listed: %q", text)
 	}
 	text, _ = call(t, tools, "list_memory", `{"include_invalid":true}`)
-	if !strings.Contains(text, newID) || !strings.Contains(text, id) || !strings.Contains(text, "[invalid: the database moved]") {
+	if !strings.Contains(text, newID) || !strings.Contains(text, id) || !strings.Contains(text, "[invalid: \"the database moved\"]") {
 		t.Errorf("nothing is deleted, but got: %q", text)
 	}
 	if text, failed := call(t, tools, "restore_memory", `{"id":"`+newID+`"}`); failed {

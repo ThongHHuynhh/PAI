@@ -23,6 +23,7 @@ type Pool struct {
 	// OnChange, when set, hears each worker that connects or leaves. It must
 	// not block.
 	OnChange func(name string, connected bool)
+	OnResult func(name string, frame worker.Frame) error
 }
 
 // Listed is a worker as GET /workers shows it: its hello, and why its last
@@ -103,7 +104,7 @@ func (p *Pool) Serve(l net.Listener, node func(netip.Addr) (string, bool)) error
 // source is read after the hello: netstack knows it once the handshake ends.
 func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
 	who := ""
-	r, err := Connect(conn, func() (string, error) {
+	r, err := connect(conn, func() (string, error) {
 		a, err := netip.ParseAddrPort(conn.RemoteAddr().String())
 		who = a.Addr().String()
 		n, ok := node(a.Addr())
@@ -111,7 +112,7 @@ func (p *Pool) serve(conn net.Conn, node func(netip.Addr) (string, bool)) {
 			return "", errors.New("not a node of this mesh")
 		}
 		return n, nil
-	})
+	}, p.OnResult)
 	if err != nil {
 		if r != nil {
 			who = r.Name + " at " + who

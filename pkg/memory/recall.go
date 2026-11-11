@@ -35,30 +35,42 @@ const maxPinned = 10
 // Hit is an item a search found, with why: its place in each list and the
 // parts of its score.
 type Hit struct {
-	Item    Item    `json:"item"`
-	Score   float64 `json:"score"`
-	Lexical int     `json:"lexical,omitempty"` // place in the BM25 list, from 1; 0 for absent
-	Vector  int     `json:"vector,omitempty"`  // place by cosine, from 1
-	Cosine  float64 `json:"cosine"`
-	Pinned  bool    `json:"pinned,omitempty"` // here because it is pinned
-	Used    bool    `json:"used,omitempty"`   // once settled: the reply carried its words
+	Item      Item    `json:"item"`
+	Score     float64 `json:"score"`
+	Lexical   int     `json:"lexical,omitempty"` // place in the BM25 list, from 1; 0 for absent
+	Vector    int     `json:"vector,omitempty"`  // place by cosine, from 1
+	Cosine    float64 `json:"cosine"`
+	Pinned    bool    `json:"pinned,omitempty"`    // here because it is pinned
+	Readiness string  `json:"readiness,omitempty"` // reason this is context only, not ready for action
+	Used      bool    `json:"used,omitempty"`      // once settled: the reply carried its words
 }
 
 // Query is what Find looks for and where. The filters apply before items are
 // ranked and cut to K, so a narrow scope still gets its K best.
 type Query struct {
-	Text        string
-	Session     string // favours what was learnt there
-	Scope       string // only this scope and global; none is every scope
-	K           int
-	NoSummaries bool // leave out compactions' accounts of sessions
+	Text              string
+	Session           string // favours what was learnt there
+	Subject, Property string // optional exact identity filters, applied before ranking
+	Scope             string // only this scope and global; none is global plus the current session
+	K                 int
+	NoSummaries       bool // leave out compactions' accounts of sessions
 }
 
 // filter is the query's narrowing as SQL to follow a WHERE, and its arguments.
 func (q Query) filter() (string, []any) {
 	sql, args := "", []any{}
-	if q.Scope != "" {
+	if q.Scope == "" {
+		sql, args = sql+` AND scope IN (?,?)`, append(args, Global, "session:"+q.Session)
+	} else if q.Scope != "" {
 		sql, args = sql+` AND scope IN (?,?)`, append(args, q.Scope, Global)
+	}
+	if q.Subject != "" {
+		sql += " AND json_extract(contract,'$.subject')=?"
+		args = append(args, strings.ToLower(strings.TrimSpace(q.Subject)))
+	}
+	if q.Property != "" {
+		sql += " AND json_extract(contract,'$.property')=?"
+		args = append(args, strings.ToLower(strings.TrimSpace(q.Property)))
 	}
 	if q.NoSummaries {
 		sql, args = sql+` AND kind<>?`, append(args, Summary)
@@ -99,7 +111,11 @@ func (s *Store) Find(ctx context.Context, q Query) ([]Hit, error) {
 		if len(vecs[0]) != len(it.vec) {
 			return nil, fmt.Errorf("memory: embedding dimensions changed for %s; use a versioned model name and reindex before searching", it.ID)
 		}
-		byID[it.ID] = &Hit{Item: it, Cosine: float64(cosine(vecs[0], it.vec))}
+		why, err := s.readiness(ctx, it, map[string]bool{})
+		if err != nil {
+			return nil, err
+		}
+		byID[it.ID] = &Hit{Item: it, Readiness: why, Cosine: float64(cosine(vecs[0], it.vec))}
 	}
 	// vector list
 	vl := make([]*Hit, 0, len(byID))
@@ -235,13 +251,17 @@ func (s *Store) Recall(ctx context.Context, t Turn) (Retrieval, error) {
 	if r.Hits, err = s.Search(ctx, t.Query, t.Session, k); err != nil {
 		return r, err
 	}
-	pinned, err := s.Pinned(ctx, Query{})
+	pinned, err := s.Pinned(ctx, Query{Session: t.Session})
 	if err != nil {
 		return r, err
 	}
 	for _, p := range pinned {
 		if !slices.ContainsFunc(r.Hits, func(h Hit) bool { return h.Item.ID == p.ID }) {
-			r.Hits = append(r.Hits, Hit{Item: p, Pinned: true})
+			why, err := s.readiness(ctx, p, map[string]bool{})
+			if err != nil {
+				return r, err
+			}
+			r.Hits = append(r.Hits, Hit{Item: p, Pinned: true, Readiness: why})
 		}
 	}
 	ids := make([]string, len(r.Hits))
@@ -264,12 +284,9 @@ func (s *Store) Recall(ctx context.Context, t Turn) (Retrieval, error) {
 	return r, nil
 }
 
-// Settle scores a session's open retrievals once the model has answered:
-// reply is everything the model wrote and called since. An item counts as
-// used when the reply carries its distinctive words. The reward is the share
-// used, less a little per item for the context it took; a turn with no recall
-// earns skipReward, unless the model had to call recall itself. Each
-// item's utility follows whether it was used.
+// Settle trains only from explicit retrieval feedback. reply and calledRecall
+// remain for caller compatibility; word overlap and asking for more memory
+// are never evidence of utility or failure. Unreported retrievals stay unscored.
 func (s *Store) Settle(ctx context.Context, session, reply string, calledRecall bool) error {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, arm, features, items FROM retrievals WHERE session=? AND settled=0`, session)
 	if err != nil {
@@ -294,14 +311,19 @@ func (s *Store) Settle(ctx context.Context, session, reply string, calledRecall 
 		opens = append(opens, o)
 	}
 	_ = rows.Close()
-	words := map[string]bool{}
-	for _, w := range Words(reply) {
-		words[w], words[stem(w)] = true, true
-	}
+
 	for _, o := range opens {
-		used, recalled := 0, 0
+		used, recalled, reported := 0, 0, 0
 		for i, h := range o.hits {
-			u := usedIn(h.Item.Text, words)
+			var outcome string
+			err := s.db.QueryRowContext(ctx, `SELECT outcome FROM memory_feedback WHERE retrieval=? AND item=?`, o.id, h.Item.ID).Scan(&outcome)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			u := outcome == "used"
+			if outcome != "" {
+				reported++
+			}
 			o.hits[i].Used = u
 			if h.Pinned {
 				continue // pinned items come whatever the bandit chose, so they are marked but not scored
@@ -309,12 +331,6 @@ func (s *Store) Settle(ctx context.Context, session, reply string, calledRecall 
 			recalled++
 			if u {
 				used++
-			}
-			s.mu.Lock()
-			_, err := s.db.ExecContext(ctx, `UPDATE items SET used=used+?, utility=utility*0.8+? WHERE id=?`, b2i(u), 0.2*b2f(u), h.Item.ID)
-			s.mu.Unlock()
-			if err != nil {
-				return err
 			}
 		}
 		reward := skipReward
@@ -325,8 +341,12 @@ func (s *Store) Settle(ctx context.Context, session, reply string, calledRecall 
 			}
 			reward -= 0.01 * float64(o.arm)
 		}
-		if calledRecall {
-			reward -= 0.3 // what came was not enough
+		// Asking for more memory is encouraged, never penalized.
+		if reported == 0 {
+			if _, err := s.db.ExecContext(ctx, `UPDATE retrievals SET settled=1 WHERE id=?`, o.id); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := s.update(ctx, o.arm, o.x, reward); err != nil {
 			return err

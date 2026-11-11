@@ -38,19 +38,24 @@ const (
 // version from v0.1.0 keeps: they are how a worker of another release becomes
 // this one. Workers from before it do not know update and are reinstalled.
 const (
-	Run    = "run"
-	Read   = "read"
-	Write  = "write"
-	Kill   = "kill"   // end a session's environments and jobs
-	Update = "update" // become release Version, then restart
+	Run       = "run"
+	Read      = "read"
+	Write     = "write"
+	Kill      = "kill"      // end a session's environments and jobs
+	Update    = "update"    // become release Version, then restart
+	Receipt   = "receipt"   // harness durably recorded the terminal frame
+	Reconcile = "reconcile" // inspect a prior call; never execute it again
+	Cancel    = "cancel"    // request cancellation of ID; terminal result confirms outcome
 
-	Hello   = "hello"   // first frame on a connection: what the worker is
-	Output  = "output"  // run: one chunk, in order
-	Result  = "result"  // run: exit code, path of the whole output when spilled; a job's: its log and tail
-	Started = "started" // run of a job: it runs, as pid, its output in path
-	Bytes   = "bytes"   // read: the file
-	Done    = "done"    // write, kill, update; a job a kill ended
-	Error   = "error"   // any request: text the model reads
+	Hello        = "hello"        // first frame on a connection: what the worker is
+	Output       = "output"       // run: one chunk, in order
+	Result       = "result"       // run: exit code, path of the whole output when spilled; a job's: its log and tail
+	Started      = "started"      // run of a job: it runs, as pid, its output in path
+	Bytes        = "bytes"        // read: the file
+	Done         = "done"         // write, kill, update; a job a kill ended
+	Error        = "error"        // any request: text the model reads
+	Acknowledged = "acknowledged" // request durably accepted, not proof of execution
+	Uncertain    = "uncertain"    // execution may have happened; never blindly replay
 )
 
 // maxFrame bounds a frame's body, so a bad header cannot make the reader
@@ -59,9 +64,12 @@ const (
 const maxFrame = 2 * maxRead
 
 type Header struct {
-	ID   string `json:"id,omitempty"`
-	Kind string `json:"kind"`
-	Len  int    `json:"len"`
+	Deadline int64  `json:"deadline,omitempty"` // server deadline, Unix milliseconds; expired work must not start
+	Reliable bool   `json:"reliable,omitempty"` // hello: durable request/result protocol
+	Origin   string `json:"origin,omitempty"`   // originating model call, for late results
+	ID       string `json:"id,omitempty"`
+	Kind     string `json:"kind"`
+	Len      int    `json:"len"`
 
 	Session string `json:"session,omitempty"` // run, kill: environments live per session
 	Interp  string `json:"interp,omitempty"`  // run: empty means the worker's first

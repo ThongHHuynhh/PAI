@@ -329,6 +329,8 @@ func Harness(ctx context.Context, path string) error {
 		Balance:   func() harness.Balance { return *balance.Load() },
 		OnRecord:  func(id string, r statefile.Record) { bus.Publish(recordEvent(id, r)) }}
 	h.SetProviders(ps)
+	pool.OnResult = h.ReconcileResult
+	mem.VerifyResolution = h.VerifyMemoryResolution
 	go watch(ctx, path, func(c Config) error {
 		ps, err := providers(dir, c.Providers)
 		if err == nil {

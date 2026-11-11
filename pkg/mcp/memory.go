@@ -48,7 +48,7 @@ const (
 	idProp     = `"id":{"type":"string","description":"a memory item's id: the one in brackets in what recall lists"}`
 	kindProp   = `"kind":{"type":"string","enum":` + memory.KindEnum + `}`
 	topicProp  = `"topic":{"type":"string","description":"` + memory.TopicDoc + `"}`
-	searchProp = `"scope":{"type":"string","description":"only this scope, such as project:pai, and global; none is every scope"}`
+	searchProp = `"scope":{"type":"string","description":"only this scope, such as project:pai, and global; none is global only"}`
 )
 
 var kProp = `"k":{"type":"integer","description":"` + memory.KDoc + `"}`
@@ -217,7 +217,7 @@ func Memory(st Store) []Tool {
 				}
 				return indented(it)
 			}),
-		tool(st, "edit_memory", "Correct a memory item's text, kind, scope or topic. This makes a new version with a new id, and the old one stays, invalid",
+		tool(st, "edit_memory", "Request a correction. MCP cannot authorize replacing existing knowledge; a person must confirm through PAI. Existing facts stay unchanged on refusal.",
 			object(`"id"`, idProp+`,"text":{"type":"string"},`+kindProp+`,"scope":{"type":"string","description":"`+memory.ScopeDoc+`"},`+topicProp), writes,
 			func(ctx context.Context, st Store, a editArgs) (string, error) {
 				if err := need("id", a.ID); err != nil {

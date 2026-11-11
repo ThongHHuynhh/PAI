@@ -18,6 +18,7 @@ import (
 type Kind string
 
 const (
+	Context     Kind = "context" // immutable typed context event; projected by harness
 	Start       Kind = "start"
 	Config      Kind = "config"
 	System      Kind = "system"
@@ -74,14 +75,18 @@ type Header struct {
 	IdempotencyKey string `json:"idempotency_key,omitempty"` // message: the poster's key; a repost with it appends nothing. job system record: the job's call id
 	Source         string `json:"source,omitempty"`          // system: where the text came from
 
-	Upto    int             `json:"upto,omitempty"`    // step: last record in its context. compaction: last record it summarizes
-	Model   string          `json:"model,omitempty"`   // step
-	Harness string          `json:"harness,omitempty"` // step: version that built the request
-	Request string          `json:"request,omitempty"` // step: sha256 of the request bytes
-	Sent    time.Time       `json:"sent,omitzero"`     // step: when the request that served it went out; cache ttls count from here
-	Usage   *Usage          `json:"usage,omitempty"`   // step
-	Stop    string          `json:"stop,omitempty"`    // step: why the provider ended the output, in its own words
-	Cache   json.RawMessage `json:"cache,omitempty"`   // step: provider cache markers
+	Attempts   int             `json:"attempts,omitempty"`
+	DurationMS int64           `json:"duration_ms,omitempty"`
+	Originals  []int           `json:"originals,omitempty"`
+	Parents    []string        `json:"parents,omitempty"`
+	Upto       int             `json:"upto,omitempty"`    // step: last record in its context. compaction: last record it summarizes
+	Model      string          `json:"model,omitempty"`   // step
+	Harness    string          `json:"harness,omitempty"` // step: version that built the request
+	Request    string          `json:"request,omitempty"` // step: sha256 of the request bytes
+	Sent       time.Time       `json:"sent,omitzero"`     // step: when the request that served it went out; cache ttls count from here
+	Usage      *Usage          `json:"usage,omitempty"`   // step
+	Stop       string          `json:"stop,omitempty"`    // step: why the provider ended the output, in its own words
+	Cache      json.RawMessage `json:"cache,omitempty"`   // step: provider cache markers
 }
 
 type Record struct {
@@ -97,6 +102,7 @@ type Record struct {
 // Params are fields for the model's vendor, set on every request as its
 // envelope decides.
 type Conf struct {
+	Routing      *Routing                   `json:"routing,omitempty"`
 	Parent       string                     `json:"parent,omitempty"`
 	Model        string                     `json:"model"`
 	Tools        string                     `json:"tools"`
