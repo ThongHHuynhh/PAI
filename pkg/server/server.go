@@ -87,7 +87,7 @@ func (c *MemoryConfig) embedder() (memory.Embedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	return memory.NewCached(o), nil
+	return memory.Floor(memory.NewCached(o), o.Model), nil
 }
 
 func (c *MemoryConfig) connection() (memory.OpenAI, error) {
