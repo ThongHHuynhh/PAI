@@ -72,6 +72,9 @@ func bunPath(dir string) string {
 // this process did so, as it does at start unless the operator was not
 // logged in.
 func (s *server) interp(name string) (interp, error) {
+	if name == "pwsh" {
+		return pwshInterp(), nil
+	}
 	if name != "js" {
 		return interps[name], nil
 	}
