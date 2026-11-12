@@ -125,21 +125,36 @@ func (w stallWriter) Write(p []byte) (int, error) {
 
 // update tells a worker to become this release and waits for its answer. The
 // worker downloads before it answers, so the wait is the download's.
+//
+// The request has an id of its own, and only a terminal frame with that id is
+// the answer. A worker spools requests by id and replays unacknowledged
+// results the moment it connects: with no id, every update after the first
+// was refused as a repeat, and a replayed result read as "updated", so the
+// harness hung up before the worker could start, and the worker looped on
+// the old release for good.
 func update(conn net.Conn, br *bufio.Reader) error {
 	if err := conn.SetDeadline(time.Now().Add(updateTimeout)); err != nil {
 		return err
 	}
-	if err := worker.Encode(conn, worker.Frame{Header: worker.Header{Kind: worker.Update, Version: version.V}}); err != nil {
+	id := "update-" + version.V + "-" + statefile.NewID()
+	if err := worker.Encode(conn, worker.Frame{Header: worker.Header{ID: id, Kind: worker.Update, Version: version.V}}); err != nil {
 		return err
 	}
-	f, err := worker.Decode(br)
-	if err != nil {
-		return fmt.Errorf("update: %w", err)
+	for {
+		f, err := worker.Decode(br)
+		if err != nil {
+			return fmt.Errorf("update: %w", err)
+		}
+		switch {
+		case f.ID != id && !(f.ID == "" && f.Kind == worker.Error):
+			continue // a replayed result or another call's frame
+		case f.Kind == worker.Acknowledged:
+			continue
+		case f.Kind != worker.Done:
+			return fmt.Errorf("update failed: %s", f.Body)
+		}
+		return errors.New("updated, restarting")
 	}
-	if f.Kind != worker.Done {
-		return fmt.Errorf("update failed: %s", f.Body)
-	}
-	return errors.New("updated, restarting")
 }
 
 func (r *Remote) recv(br *bufio.Reader) {
