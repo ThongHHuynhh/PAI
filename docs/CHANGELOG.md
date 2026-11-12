@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.3
+
 - Memory conflicts no longer block a session. Before, one memory item marked as conflicting, even with itself, stopped every run, write, remember and forget call in any session that recalled it, and answering the question did not clear it. Now a disputed item carries a one-line note where it is recalled, every tool runs, and forgetting or pinning an item always works.
 - An item can no longer conflict with itself. Automatic memory consolidation made every proposed update or retire a conflict, and a retire of one item paired that item with itself. Opening the store closes those self-conflicts and the v0.4.x proposal flags, as recorded resolutions, so nothing is deleted.
 - Consolidation now does what it proposes, reversibly: merges and updates become new versions that name what they replace, retires invalidate with a reason, and restore undoes either. It may only touch the items it was shown and never a pinned one. A real disagreement that the dates do not settle is marked as disputed.
