@@ -10,6 +10,7 @@ import (
 	"io"
 	"os/exec"
 	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,20 @@ type interp struct {
 var interps = map[string]interp{
 	"bash": {[]string{"bash", "-l"}, nil, `echo "%s $?"`},
 	"pwsh": {[]string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", "-"}, pwshWrap, `"%s $(if($? -and $paiOk){0}else{1})"`},
+}
+
+// pwshInterp is pwsh, or on a Windows machine without PowerShell 7 the
+// Windows PowerShell every Windows has, which runs the same wrapped code: a
+// Windows worker offers pwsh by default (Default), and without this every
+// pwsh run on such a machine failed to start.
+func pwshInterp() interp {
+	it := interps["pwsh"]
+	if _, err := exec.LookPath("pwsh"); err != nil && runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("powershell"); err == nil {
+			it.argv = append([]string{p}, it.argv[1:]...)
+		}
+	}
+	return it
 }
 
 // pwshWrap sends the code as one line of base64 that pwsh decodes as UTF-8

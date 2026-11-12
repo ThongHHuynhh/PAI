@@ -65,7 +65,7 @@ pai-server key revoke claude-laptop
 | `memory_feedback(id, up)` | Say whether an item was useful, which moves its ranking |
 | `memory_stats()` | Counts and how well recall is doing |
 
-A `scope` on `recall` and `get_context` means that scope plus `global`, because what holds everywhere also holds in a project. On `list_memory` it means exactly that scope. `k` defaults to 8, at most 30, and `list_memory` shows 50 by default, at most 200.
+A `scope` on `recall` and `get_context` means that scope plus `global`, because what holds everywhere also holds in a project. On `list_memory` it means exactly that scope. Scopes are case-insensitive: `project:PAI` is `project:pai`. `k` defaults to 8, at most 30, and `list_memory` shows 50 by default, at most 200.
 
 Compaction's summaries of sessions stay out of these tools, since sessions aren't exposed over MCP.
 
@@ -76,6 +76,7 @@ Treat anything connected here as able to write into what your PAI agents read:
 - What a client remembers is recalled into PAI's own sessions, on any model. A client can be tricked by a page it reads, so PAI marks these items `[unverified, from an MCP client]` when it shows them to a model.
 - A pinned item is recalled in every session, whatever it is about, and only the 10 newest pins are carried. So a client's pin can push out one of yours.
 - `memory_feedback` moves how items rank for every session.
+- `edit_memory` replaces an item with a new version marked as from an MCP client; the old one stays, and `restore_memory` brings it back.
 - Text that looks like a credential is refused, here as everywhere in memory.
 
 You can see what clients wrote, and undo it, on the Knowledge page. Performance counts their writes under the source `mcp`.

@@ -49,7 +49,7 @@ func (h *Harness) executeBatch(ctx context.Context, id string, conf statefile.Co
 			}
 			observer := func(r statefile.Record) { out[i].observations = append(out[i].observations, r) }
 			switch {
-			case contextBlocked(latest, parsed.Name) || h.memoryBlocked(ctx, latest, parsed.Name):
+			case contextBlocked(latest, parsed.Name):
 				out[i].record = result(c.ID, "clarification_required: unresolved competing facts; ask the user before dependent actions")
 			case parsed.Name == "context_record" || parsed.Name == "context_view" || parsed.Name == "context_clarify" || parsed.Name == "context_expand":
 				out[i].record = h.contextCall(ctx, id, conf, c, parsed, latest, observer)

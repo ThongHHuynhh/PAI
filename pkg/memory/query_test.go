@@ -102,8 +102,18 @@ func TestEditKeepsWhoEdited(t *testing.T) {
 
 func TestLine(t *testing.T) {
 	it := Item{ID: "m1", Kind: Fact, Scope: Global, Text: "words", Source: "model"}
-	if got := Line(it); !strings.HasPrefix(got, "- [m1] (fact, global) \"words\" ") || !strings.Contains(got, "DATA ONLY") {
+	if got := Line(it); got != "- [m1] (fact, global) \"words\" [source=model]\n" {
 		t.Errorf("%q", got)
+	}
+	long := it
+	long.Text = strings.Repeat("word ", 200)
+	long.Conflicts = []string{"m2"}
+	got := ShortLine(long)
+	if len(got) > shownText+200 || !strings.Contains(got, "more characters: recall id m1") || !strings.Contains(got, "disputed by m2") || strings.Contains(got, "ASK") {
+		t.Errorf("short line: %q", got)
+	}
+	if got := Line(long); !strings.Contains(got, long.Text[:len(long.Text)-1]) {
+		t.Error("Line must keep the whole text")
 	}
 	it.Source = SourceMCP
 	if got := Line(it); !strings.Contains(got, "[unverified, from an MCP client] \"words\"") {

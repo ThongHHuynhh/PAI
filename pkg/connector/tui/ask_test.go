@@ -103,3 +103,19 @@ func TestAskDialogDraws(t *testing.T) {
 		}
 	}
 }
+
+// A question kilobytes long, as a memory conflict once made, keeps its lines
+// apart and is cut, so the options and keys stay on screen.
+func TestAskDialogLongQuestion(t *testing.T) {
+	a, d, _ := dialog(false)
+	d.qs[0].Question = "Which memory holds?\nA (2026-11-11): " + strings.Repeat("The worker runs as a service. ", 120) + "\nB (2026-11-12): short"
+	s := screen(a, d)
+	for _, want := range []string{"Which memory holds?", "Small", "Big", "decline", "… (cut"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("%q missing from:\n%s", want, s)
+		}
+	}
+	if rows, _ := d.rows(0, 60); len(rows) > maxQuestionRows+12 {
+		t.Fatalf("%d rows", len(rows))
+	}
+}

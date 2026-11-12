@@ -8,11 +8,19 @@ import (
 	"pai/pkg/provider"
 	"pai/pkg/statefile"
 	"slices"
+	"strings"
 )
 
-var memoryClarifyTool = provider.Tool{Name: "memory_clarify", Description: "Prepare an ask question for two conflicting memory IDs. Call ask with exact returned arguments, then provide ask_call and the user's exact selected answer. Never invent an answer; source facts are retained.", Schema: schema(`{"type":"object","properties":{"id":{"type":"string"},"peer":{"type":"string"},"ask_call":{"type":"string"},"answer":{"type":"string"}},"required":["id","peer"]}`)}
+var memoryClarifyTool = provider.Tool{Name: "memory_clarify", Description: "Ask the person which of two disputed memory items holds. Call it with id and peer; it returns the exact ask arguments. Call ask with them, then call memory_clarify again with the same id and peer: it reads the answer from that ask and retires the item the person did not choose. Never invent an answer", Schema: schema(`{"type":"object","properties":{"id":{"type":"string"},"peer":{"type":"string"},"ask_call":{"type":"string","description":"optional: the ask call that answered; by default the newest matching ask"},"answer":{"type":"string"}},"required":["id","peer"]}`)}
+
+// clarifyText is the most of an item's text a clarification question shows:
+// enough to tell the two apart in a terminal.
+const clarifyText = 300
 
 func (h *Harness) memoryQuestion(ctx context.Context, a, b string) (Question, error) {
+	if a == b {
+		return Question{}, fmt.Errorf("an item cannot conflict with itself")
+	}
 	x, err := h.Memory.Get(ctx, a)
 	if err != nil {
 		return Question{}, err
@@ -24,7 +32,46 @@ func (h *Harness) memoryQuestion(ctx context.Context, a, b string) (Question, er
 	if x.Scope != y.Scope || !slices.Contains(x.Conflicts, b) {
 		return Question{}, fmt.Errorf("no unresolved conflict between these sources")
 	}
-	return Question{Header: "Memory", Question: fmt.Sprintf("Clarify conflicting memory sources. A [%s]: %s; B [%s]: %s. Which should govern? Originals remain available.", a, x.Text, b, y.Text), Options: []Option{{Label: "Use A", Description: "Use source " + a}, {Label: "Use B", Description: "Use source " + b}, {Label: "Unresolved", Description: "Keep both disputed; no dependent actions"}}}, nil
+	return Question{Header: "Memory", Question: fmt.Sprintf("Which memory holds?\nA (%s): %s\nB (%s): %s", x.Created.Format("2006-01-02"), oneLine(x.Text), y.Created.Format("2006-01-02"), oneLine(y.Text)), Options: []Option{{Label: "Use A", Description: "Keep A, retire B"}, {Label: "Use B", Description: "Keep B, retire A"}, {Label: "Unresolved", Description: "Keep both, marked disputed"}}}, nil
+}
+
+// oneLine is s on one line, cut to clarifyText characters.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > clarifyText {
+		return string(r[:clarifyText]) + "â€¦"
+	}
+	return s
+}
+
+// askedAnswer finds the newest completed ask in chain that asked exactly q,
+// and which of options the person picked: empty when they declined or typed
+// something else.
+func askedAnswer(chain []statefile.Record, q Question, options []string) (call, answer string) {
+	expected, _ := json.Marshal([]Question{q})
+	asked := map[string]bool{}
+	for _, r := range chain {
+		switch r.Kind {
+		case statefile.Call:
+			var c provider.Call
+			if json.Unmarshal(r.Body, &c) == nil && c.Name == "ask" {
+				qs, err := parseQuestions(c.Arguments)
+				actual, _ := json.Marshal(qs)
+				asked[r.ID] = err == nil && string(actual) == string(expected)
+			}
+		case statefile.Result:
+			if !asked[r.For] {
+				continue
+			}
+			call, answer = r.For, ""
+			for _, o := range options {
+				if string(r.Body) == answered([]Question{q}, Reply{Answers: [][]string{{o}}}) {
+					answer = o
+				}
+			}
+		}
+	}
+	return call, answer
 }
 
 // VerifyMemoryResolution accepts only an actual recorded standard ask result.
@@ -81,12 +128,34 @@ func (h *Harness) clarifyMemory(ctx context.Context, id string, call statefile.R
 	if err != nil {
 		return fail(err)
 	}
+	chain, err := h.Sessions.Load(id)
+	if err != nil {
+		return fail(err)
+	}
+	options := []string{"Use A", "Use B", "Unresolved"}
+	found, answer := askedAnswer(chain, q, options)
+	if a.AskCall == "" {
+		a.AskCall = found
+	}
+	if a.Answer == "" || a.AskCall == found {
+		a.Answer = answer
+	}
 	if a.AskCall == "" {
 		b, _ := json.Marshal(map[string]any{"questions": []Question{q}})
-		return result(call.ID, "clarification_required: call ask with these exact arguments: "+string(b))
+		return result(call.ID, "call ask with these exact arguments, then memory_clarify again with the same id and peer: "+string(b))
+	}
+	if a.Answer != "Use A" && a.Answer != "Use B" {
+		return result(call.ID, "the person kept both items; they stay marked as disputed. Go on without relying on either")
 	}
 	if err := h.Memory.ResolveConflict(ctx, a.ID, a.Peer, memory.Resolution{Session: id, Call: a.AskCall, Answer: a.Answer}); err != nil {
 		return fail(err)
 	}
-	return result(call.ID, "User clarification recorded with source ask provenance; originals retained. Only perform the correction the user selected.")
+	keep, drop := a.ID, a.Peer
+	if a.Answer == "Use B" {
+		keep, drop = a.Peer, a.ID
+	}
+	if _, err := h.Memory.Invalidate(ctx, drop, "the person chose "+keep+" over it"); err != nil {
+		return fail(err)
+	}
+	return result(call.ID, fmt.Sprintf("recorded: %s holds; %s is retired and can be restored", keep, drop))
 }
