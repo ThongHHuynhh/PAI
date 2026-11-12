@@ -26,7 +26,7 @@ func (s *Store) Related(ctx context.Context, it Item) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	items, err := s.query(ctx, `WHERE invalid=0 AND scope=? AND kind<>?`, scopeOr(it.Scope), Summary)
+	items, err := s.query(ctx, `WHERE invalid=0 AND scope=? AND kind<>?`, NormScope(it.Scope), Summary)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +57,13 @@ func scopeOr(s string) string {
 	return s
 }
 
+// NormScope is a scope as the store keeps it: trimmed and lower case, global
+// when empty. "project:PAI" and "project:pai" are one project, and a lookup
+// matches scopes exactly.
+func NormScope(s string) string {
+	return scopeOr(strings.ToLower(strings.TrimSpace(s)))
+}
+
 // MergedInto starts the reason of an item that a merge or an edit replaced,
 // and the replacing item's id follows it.
 const MergedInto = "merged into "
@@ -64,22 +71,25 @@ const MergedInto = "merged into "
 // Merge replaces the items ids with one, it, in a single step: it is stored
 // with their history, the best of their utility and counts, pinned when any
 // was, and each of them is invalidated as merged into it. Nothing is lost:
-// the old items stay, invalid, and it names them.
+// the old items stay, invalid, and it names them, so Restore undoes it. Any
+// writer may merge, automatic consolidation included; a replacement that
+// would contradict a structured fact outside ids is refused.
 func (s *Store) Merge(ctx context.Context, ids []string, it Item) (Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var distinct []string
+	for _, id := range ids {
+		if id != "" && !slices.Contains(distinct, id) {
+			distinct = append(distinct, id)
+		}
+	}
+	ids = distinct
 	if len(ids) == 0 {
 		return it, fmt.Errorf("memory: replacement requires predecessor IDs")
 	}
-	for _, id := range ids {
-		if err := s.guard(ctx, id); err != nil {
-			return it, err
-		}
+	if it.Scope != "" {
+		it.Scope = NormScope(it.Scope)
 	}
-	if it.Source == "consolidation" || it.Source == "extract" || it.Source == "model" || it.Source == SourceMCP {
-		return it, fmt.Errorf("memory: ASK the user before replacing existing knowledge; automatic consolidation cannot resolve contradictions")
-	}
-
 	if err := Useful(it.Text); err != nil {
 		return it, err
 	}
@@ -99,6 +109,13 @@ func (s *Store) Merge(ctx context.Context, ids []string, it Item) (Item, error) 
 			return it, fmt.Errorf("memory: replacement cannot cross scopes")
 		}
 		olds = append(olds, o)
+	}
+	// A legacy item longer than maxText may still be re-scoped or re-kinded
+	// as it is; a new text must be one fact.
+	if !slices.ContainsFunc(olds, func(o Item) bool { return o.Text == strings.TrimSpace(it.Text) }) {
+		if err := fits(it.Text); err != nil {
+			return it, err
+		}
 	}
 	for _, o := range olds {
 		it.Merged = append(it.Merged, o.ID)

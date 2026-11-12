@@ -71,13 +71,6 @@ func TestMemoryResolutionRequiresRealAsk(t *testing.T) {
 	if err := h.rememberRefs(id, []memory.Item{a}); err != nil {
 		t.Fatal(err)
 	}
-	refs, _ := h.Sessions.Load(id)
-	if !h.memoryBlocked(ctx, refs, "run") || h.memoryBlocked(ctx, refs, "memory_clarify") {
-		t.Fatal("memory conflict failed to gate mutation")
-	}
-	if h.memoryBlocked(ctx, nil, "run") {
-		t.Fatal("unrelated task blocked")
-	}
 	q, err := h.memoryQuestion(ctx, a.ID, b.ID)
 	if err != nil {
 		t.Fatal(err)

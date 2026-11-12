@@ -52,6 +52,11 @@ const dupCosine = 0.93
 // names nothing a later session could use.
 const minText = 12
 
+// maxText is the longest item memory stores, in characters. An item is one
+// fact; a longer one is several facts glued together, which every recall then
+// pays for in full and which goes stale as a whole when one part changes.
+const maxText = 600
+
 // secret finds text that looks like a credential, which memory never keeps:
 // it would be recalled into any session on any model.
 var secret = regexp.MustCompile(`(?i)(sk-[a-z0-9_-]{16,}|sk-ant-[a-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|xox[abpr]-[A-Za-z0-9-]{10,}|pai_(key|join)_[A-Za-z0-9_.-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(password|passwd|secret|token|api[_ -]?key)\s*[:=]\s*\S{6,})`)
@@ -74,6 +79,14 @@ func Useful(text string) error {
 		return fmt.Errorf("%w: it looks like it holds a secret; save the secret with the credential tool and remember only what it is for", ErrNotUseful)
 	case injection.MatchString(text):
 		return fmt.Errorf("%w: it reads as an instruction planted for agents, not a fact", ErrNotUseful)
+	}
+	return nil
+}
+
+// fits is nil when a new text is short enough to be one fact.
+func fits(text string) error {
+	if n := len([]rune(strings.TrimSpace(text))); n > maxText {
+		return fmt.Errorf("%w: %d characters is more than one fact (at most %d); save each fact as its own item", ErrNotUseful, n, maxText)
 	}
 	return nil
 }
@@ -195,6 +208,10 @@ func Open(dir string, e Embedder) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{db: db, dir: dir, embed: e}
+	if err := s.repair(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := s.reembed(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -226,14 +243,14 @@ func (s *Store) Remember(ctx context.Context, it Item) (Item, bool, error) {
 	if err := Useful(it.Text); err != nil {
 		return it, false, err
 	}
+	if err := fits(it.Text); err != nil {
+		return it, false, err
+	}
 	if it.Kind == "" {
 		it.Kind = Fact
 	}
 	if !valid(it.Kind) {
 		return it, false, fmt.Errorf("memory: kind %q is not one of %s", it.Kind, strings.Join(kinds, ", "))
-	}
-	if it.Scope == "" {
-		it.Scope = Global
 	}
 	vecs, err := s.embed.Embed(ctx, []string{it.Text})
 	if err != nil {
@@ -304,7 +321,7 @@ func (s *Store) nearest(ctx context.Context, it Item) (Item, bool, error) {
 		if it.Subject != o.Subject || it.Property != o.Property || it.Value != o.Value {
 			continue
 		}
-		if c := cosine(it.vec, o.vec); c > best && strings.TrimSuffix(it.Text, ".") == strings.TrimSuffix(o.Text, ".") {
+		if c := cosine(it.vec, o.vec); c > best && sameText(it.Text, o.Text) {
 			best, bi = c, i
 		}
 	}
@@ -312,6 +329,18 @@ func (s *Store) nearest(ctx context.Context, it Item) (Item, bool, error) {
 		return Item{}, false, nil
 	}
 	return items[bi], true, nil
+}
+
+// sameText is whether two statements say the same words: case, spacing,
+// quotes and closing punctuation aside. Numbers, versions and negations
+// still differ, so distinct facts stay distinct.
+func sameText(a, b string) bool {
+	norm := func(s string) string {
+		s = strings.ToLower(strings.Join(strings.Fields(s), " "))
+		s = strings.NewReplacer("“", `"`, "”", `"`, "‘", "'", "’", "'").Replace(s)
+		return strings.TrimRight(s, ".!;: ")
+	}
+	return norm(a) == norm(b)
 }
 
 // Invalidate stops it from being recalled, with why. It stays in the store.
@@ -356,14 +385,10 @@ func (s *Store) Edit(ctx context.Context, id, text, kind, scope, topic, source s
 	return s.Merge(ctx, []string{id}, it)
 }
 
+// change applies one state change to an item. A dispute on the item never
+// blocks it: forgetting or pinning an item is how a person settles one.
 func (s *Store) change(ctx context.Context, id, event, q string, args ...any) (Item, error) {
 	s.mu.Lock()
-	if event != "feedback" {
-		if err := s.guard(ctx, id); err != nil {
-			s.mu.Unlock()
-			return Item{}, err
-		}
-	}
 	res, err := s.db.ExecContext(ctx, q, args...)
 	s.mu.Unlock()
 	if err != nil {

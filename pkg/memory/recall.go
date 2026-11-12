@@ -49,9 +49,10 @@ type Hit struct {
 // ranked and cut to K, so a narrow scope still gets its K best.
 type Query struct {
 	Text              string
-	Session           string // favours what was learnt there
-	Subject, Property string // optional exact identity filters, applied before ranking
-	Scope             string // only this scope and global; none is global plus the current session
+	Session           string   // favours what was learnt there
+	Subject, Property string   // optional exact identity filters, applied before ranking
+	Scope             string   // only this scope and global; none is global plus the current session and Scopes
+	Scopes            []string // more scopes a session may read, such as the projects it works on
 	K                 int
 	NoSummaries       bool // leave out compactions' accounts of sessions
 }
@@ -60,9 +61,15 @@ type Query struct {
 func (q Query) filter() (string, []any) {
 	sql, args := "", []any{}
 	if q.Scope == "" {
-		sql, args = sql+` AND scope IN (?,?)`, append(args, Global, "session:"+q.Session)
-	} else if q.Scope != "" {
-		sql, args = sql+` AND scope IN (?,?)`, append(args, q.Scope, Global)
+		in := []any{Global, "session:" + q.Session}
+		for _, sc := range q.Scopes {
+			if sc = NormScope(sc); !slices.Contains(in, any(sc)) {
+				in = append(in, sc)
+			}
+		}
+		sql, args = sql+` AND scope IN (`+placeholders(len(in))+`)`, append(args, in...)
+	} else {
+		sql, args = sql+` AND scope IN (?,?)`, append(args, NormScope(q.Scope), Global)
 	}
 	if q.Subject != "" {
 		sql += " AND json_extract(contract,'$.subject')=?"
@@ -226,8 +233,29 @@ type Retrieval struct {
 // Turn is what a session tells recall about the turn it recalls for.
 type Turn struct {
 	Session string
-	Query   string  // the new messages' text
-	Fill    float64 // context used over the limit, 0 to 1
+	Query   string   // the new messages' text
+	Fill    float64  // context used over the limit, 0 to 1
+	Scopes  []string // project scopes the session works on, beside global and its own
+	Exclude []string // items already in the session's context: not recalled again
+}
+
+// Projects is the project scopes that hold valid items, such as
+// "project:pai": what a session can be matched against.
+func (s *Store) Projects(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope FROM items WHERE invalid=0 AND scope LIKE 'project:%' ORDER BY scope`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var sc string
+		if err := rows.Scan(&sc); err != nil {
+			return nil, err
+		}
+		out = append(out, sc)
+	}
+	return out, rows.Err()
 }
 
 // Recall is the automatic recall for a new turn: the bandit picks how many
@@ -248,15 +276,26 @@ func (s *Store) Recall(ctx context.Context, t Turn) (Retrieval, error) {
 		return Retrieval{}, err
 	}
 	r.K = k
-	if r.Hits, err = s.Search(ctx, t.Query, t.Session, k); err != nil {
-		return r, err
+	// A session's own summary is already its compaction record, and summaries
+	// of other sessions are out of scope: automatic recall never carries one.
+	var hits []Hit
+	if k > 0 {
+		q := Query{Text: t.Query, Session: t.Session, Scopes: t.Scopes, K: k + len(t.Exclude), NoSummaries: true}
+		if hits, err = s.Find(ctx, q); err != nil {
+			return r, err
+		}
 	}
-	pinned, err := s.Pinned(ctx, Query{Session: t.Session})
+	for _, h := range hits {
+		if len(r.Hits) < k && !slices.Contains(t.Exclude, h.Item.ID) {
+			r.Hits = append(r.Hits, h)
+		}
+	}
+	pinned, err := s.Pinned(ctx, Query{Session: t.Session, Scopes: t.Scopes})
 	if err != nil {
 		return r, err
 	}
 	for _, p := range pinned {
-		if !slices.ContainsFunc(r.Hits, func(h Hit) bool { return h.Item.ID == p.ID }) {
+		if !slices.Contains(t.Exclude, p.ID) && !slices.ContainsFunc(r.Hits, func(h Hit) bool { return h.Item.ID == p.ID }) {
 			why, err := s.readiness(ctx, p, map[string]bool{})
 			if err != nil {
 				return r, err

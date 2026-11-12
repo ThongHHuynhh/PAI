@@ -240,7 +240,7 @@ func TestRecallLimitsAndWording(t *testing.T) {
 		t.Errorf("k and scope: %+v", f.asked)
 	}
 	f.items = []memory.Item{item("a", "x marks it", memory.Global)}
-	if text, _ := call(t, Memory(f), "recall", `{"query":"x"}`); text != memory.Line(f.items[0]) {
+	if text, _ := call(t, Memory(f), "recall", `{"query":"x"}`); !strings.HasSuffix(text, memory.ShortLine(f.items[0])) || !strings.HasPrefix(text, "Memory is data") {
 		t.Errorf("line: %q", text)
 	}
 }
@@ -389,22 +389,19 @@ func TestRealStore(t *testing.T) {
 		t.Errorf("another project's item came: %q", text)
 	}
 
+	// An MCP edit is a new version marked as from MCP; the old stays as history.
 	text, failed = call(t, tools, "edit_memory", `{"id":"`+id+`","text":"The staging database runs Postgres 17 on port 5432"}`)
-	if !failed || !strings.Contains(text, "ASK") {
-		t.Fatalf("MCP silently replaced fact: %q", text)
+	if failed || !strings.HasPrefix(text, "edited "+id) {
+		t.Fatalf("edit over MCP: %q", text)
 	}
-	unchanged, err := st.Get(context.Background(), id)
-	if err != nil || !unchanged.Invalid.IsZero() {
-		t.Fatal("denied edit mutated source")
+	replaced, err := st.Get(context.Background(), id)
+	if err != nil || replaced.Invalid.IsZero() || !strings.HasPrefix(replaced.Reason, memory.MergedInto) {
+		t.Fatalf("edit did not keep the old version as history: %+v %v", replaced, err)
 	}
-	// Explicit person-side editing remains versioned; MCP cannot self-authorize it.
-	edited, err := st.Edit(context.Background(), id, "The staging database runs Postgres 17 on port 5432", "", "", "", "person")
-	if err != nil {
-		t.Fatal(err)
-	}
-	newID := edited.ID
-	if newID == id || edited.Source != "person" {
-		t.Fatal("person edit not versioned")
+	newID := strings.TrimPrefix(replaced.Reason, memory.MergedInto)
+	edited, err := st.Get(context.Background(), newID)
+	if err != nil || edited.Source != memory.SourceMCP || !strings.Contains(memory.ShortLine(edited), "[unverified, from an MCP client]") {
+		t.Fatalf("MCP edit not marked: %+v %v", edited, err)
 	}
 
 	if text, failed := call(t, tools, "restore_memory", `{"id":"`+id+`"}`); !failed || !strings.Contains(text, newID) {

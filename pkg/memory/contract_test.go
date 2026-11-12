@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -18,16 +19,15 @@ func TestStructuredConflictRequiresClarification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(b.Conflicts) != 1 || b.Conflicts[0] != a.ID || !strings.Contains(Line(b), "ASK user") {
+	if len(b.Conflicts) != 1 || b.Conflicts[0] != a.ID || !strings.Contains(Line(b), "disputed by "+a.ID) {
 		t.Fatalf("missing conflict: %s", Line(b))
 	}
-	for _, id := range []string{a.ID, b.ID} {
-		if _, err := s.Invalidate(ctx, id, "prefer other value"); err == nil {
-			t.Fatal("invalidation chose a winner")
-		}
-		if _, err := s.Edit(ctx, id, "Staging database listens on port 9999", "", "", "", "person"); err == nil {
-			t.Fatal("edit chose a winner")
-		}
+	// A dispute is a note, never a lock: pinning still works.
+	if _, err := s.Pin(ctx, a.ID, true); err != nil {
+		t.Fatalf("a disputed item could not be pinned: %v", err)
+	}
+	if _, err := s.Pin(ctx, a.ID, false); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.ResolveConflict(ctx, a.ID, b.ID, Resolution{}); err == nil {
 		t.Fatal("empty clarification accepted")
@@ -144,7 +144,104 @@ func TestSecretEnvelopeAndContractRoundTrip(t *testing.T) {
 	if err != nil || got.Version != ContractVersion || got.Value != "Helix" || got.Observed.IsZero() {
 		t.Fatalf("contract lost: %v", err)
 	}
-	if _, err := s.Merge(ctx, []string{it.ID}, Item{Text: "The editor preference is VS Code", Source: "consolidation"}); err == nil {
-		t.Fatal("automatic consolidation changed a fact")
+	// Consolidation may correct a fact, as a new version that Restore undoes.
+	m, err := s.Merge(ctx, []string{it.ID}, Item{Text: "The editor preference is VS Code", Source: "consolidation"})
+	if err != nil || len(m.Merged) != 1 || m.Merged[0] != it.ID {
+		t.Fatalf("consolidation update: %+v %v", m, err)
+	}
+	if old, _ := s.Get(ctx, it.ID); old.Invalid.IsZero() || old.Text != "The editor preference is Helix" {
+		t.Fatal("old version lost")
+	}
+}
+
+// An item can never conflict with itself, and a peer that is no longer valid
+// does not dispute anything. Opening a store closes the self-conflicts and
+// v0.4.x consolidation flags it holds, and moves capitalised scopes to lower
+// case, all as added rows.
+func TestRepairOnOpen(t *testing.T) {
+	dir, ctx := t.TempDir(), context.Background()
+	s, err := Open(dir, Hash{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _, _ := s.Remember(ctx, Item{Text: "The worker abi-3957 is the user's Windows PC", Source: "test"})
+	b, _, _ := s.Remember(ctx, Item{Text: "The PAI server runs on jetson1", Source: "test"})
+	c, _, _ := s.Remember(ctx, Item{Text: "The PAI server runs on jetson2", Source: "test"})
+	// what v0.4.2 wrote: a self-pair, and a proposal flagged as a conflict
+	for _, row := range [][3]string{{a.ID, a.ID, "Automatic consolidation proposed changing these sources. ASK the user; no source has been replaced."}, {b.ID, c.ID, "Automatic consolidation proposed changing these sources. ASK the user; no source has been replaced."}} {
+		if _, err := s.db.Exec(`INSERT INTO memory_conflicts(a,b,reason) VALUES(?,?,?)`, row[0], row[1], row[2]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// and a scope written before scopes were normalized
+	now := time.Now().UnixMilli()
+	if _, err := s.db.Exec(`INSERT INTO items (id,kind,text,scope,source,created,updated,vec,embedder) VALUES ('mOLD','fact','The PAI repo is on GitHub','project:PAI','test',?,?,NULL,'')`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO items (id,kind,text,scope,source,created,updated,vec,embedder) VALUES ('mDUP','fact','The PAI server runs on jetson1','project:PAI','test',?,?,NULL,'')`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO items (id,kind,text,scope,source,created,updated,vec,embedder) VALUES ('mLOW','fact','the pai server runs on jetson1.','project:pai','test',?,?,NULL,'')`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(ctx, a.ID); len(got.Conflicts) != 0 {
+		t.Fatalf("an item reads as conflicting with itself: %v", got.Conflicts)
+	}
+	_ = s.Close()
+	for range 2 { // opening twice changes nothing more
+		if s, err = Open(dir, Hash{}); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.Get(ctx, b.ID); len(got.Conflicts) != 0 {
+			t.Fatalf("legacy consolidation flag still open: %v", got.Conflicts)
+		}
+		old, _ := s.Get(ctx, "mOLD")
+		if old.Invalid.IsZero() || !strings.HasPrefix(old.Reason, MergedInto) {
+			t.Fatalf("capitalised scope not moved: %+v", old)
+		}
+		moved, err := s.Get(ctx, strings.TrimPrefix(old.Reason, MergedInto))
+		if err != nil || moved.Scope != "project:pai" || moved.Text != old.Text || moved.Merged[0] != "mOLD" {
+			t.Fatalf("moved: %+v %v", moved, err)
+		}
+		if dup, _ := s.Get(ctx, "mDUP"); dup.Reason != MergedInto+"mLOW" {
+			t.Fatalf("a repeat in the lower case scope should merge into it: %q", dup.Reason)
+		}
+		valid, _ := s.List(ctx, Filter{Scope: "project:pai"})
+		if len(valid) != 2 {
+			t.Fatalf("want 2 valid project items, got %d", len(valid))
+		}
+		_ = s.Close()
+	}
+	// A conflict whose peer was retired no longer shows.
+	s, _ = Open(dir, Hash{})
+	defer s.Close()
+	if err := s.FlagConflict(ctx, []string{b.ID, c.ID}, "different hosts"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(ctx, b.ID); len(got.Conflicts) != 1 {
+		t.Fatal("fresh conflict missing")
+	}
+	if _, err := s.Invalidate(ctx, c.ID, "the server moved back to jetson1"); err != nil {
+		t.Fatalf("a disputed item could not be forgotten: %v", err)
+	}
+	if got, _ := s.Get(ctx, b.ID); len(got.Conflicts) != 0 {
+		t.Fatal("a retired peer still disputes")
+	}
+}
+
+func TestOneFactPerItem(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	if _, _, err := s.Remember(ctx, Item{Text: strings.Repeat("The worker runs Windows. ", 40)}); !errors.Is(err, ErrNotUseful) {
+		t.Fatalf("a %d character item was stored: %v", 25*40, err)
+	}
+	a, _, err := s.Remember(ctx, Item{Text: "The Staging   database listens on port 5433."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, fresh, _ := s.Remember(ctx, Item{Text: "the staging database listens on port 5433"}); fresh || b.ID != a.ID {
+		t.Fatal("same words in another case or spacing stored twice")
+	}
+	if _, fresh, _ := s.Remember(ctx, Item{Text: "The staging database listens on port 5434"}); !fresh {
+		t.Fatal("a different number was taken for a repeat")
 	}
 }

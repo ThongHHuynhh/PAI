@@ -4,6 +4,20 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.3
+
+- Memory conflicts no longer block a session. Before, one memory item marked as conflicting, even with itself, stopped every run, write, remember and forget call in any session that recalled it, and answering the question did not clear it. Now a disputed item carries a one-line note where it is recalled, every tool runs, and forgetting or pinning an item always works.
+- An item can no longer conflict with itself. Automatic memory consolidation made every proposed update or retire a conflict, and a retire of one item paired that item with itself. Opening the store closes those self-conflicts and the v0.4.x proposal flags, as recorded resolutions, so nothing is deleted.
+- Consolidation now does what it proposes, reversibly: merges and updates become new versions that name what they replace, retires invalidate with a reason, and restore undoes either. It may only touch the items it was shown and never a pinned one. A real disagreement that the dates do not settle is marked as disputed.
+- memory_clarify and context_clarify find the person's answer in the session by themselves, since a model may not see its own call ids. memory_clarify then retires the item the person did not choose, and its question shows each item cut to 300 characters with the date it was learnt.
+- Project memory is recalled in sessions. Recall used to search only global items and the session's own, so items saved under a project, about half of a typical store, never reached a PAI session. Now a session recalls the projects whose names the person wrote or that the session saved into; the recall tool takes a scope; and a session can read and forget a project's item by id.
+- Scopes are case-insensitive: "project:PAI" and "project:pai" are one project. Opening the store moves items in a capitalised scope to the lower-case one as new versions, merging exact repeats.
+- Recall costs fewer tokens. A recalled line drops the metadata tail and repeats of "data only", shows the date the item was learnt, and cuts text past 400 characters with the id to read the rest. Recall skips items the session's context already holds, and automatic recall never brings back a session's own compaction summary. On real items from a live store, five recalled items went from about 1,570 to 610 tokens.
+- One fact per item: new items over 600 characters are refused with a request to split them, extraction and consolidation ask for at most 300, and repeats that differ only in case, spacing or closing punctuation are stored once.
+- MCP: edit_memory works. It was refused for every MCP client; an edit is now a new version marked as from an MCP client, and the old one stays to restore. Recall, get_context and list_memory over MCP use the shorter lines.
+- A Windows worker without PowerShell 7 runs pwsh code in Windows PowerShell, which every Windows has. Before, every pwsh run on such a machine, including the AGENTS.md scan at session start, failed to start.
+- TUI: a long ask question keeps its line breaks and is cut at 12 lines, so its options and keys stay on screen.
+
 ## v0.4.2
 
 - Fixes a token leak from v0.4.0 and v0.4.1. Once a session had compacted, or the model had recorded typed context, every request ended with a note that was not saved in the session file. The next request then no longer started with the one before it, so the provider cache missed on every step and the whole context was written to the cache again: about 100k tokens per step in a 250k session instead of a few thousand, roughly eight times the cost. The archive note and the typed context now go into the saved compaction record, and a request holds only what the session file holds. Sessions already compacted under v0.4.x get their cache back from their next step.
