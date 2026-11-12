@@ -4,6 +4,11 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.5
+
+- Recall learns from every turn again. Since v0.4.0 a recalled item was scored only when the model reported on it, which it rarely did, so recall learnt almost nothing and the web app showed no helped scores. Now, when memory extraction runs, the session's model judges which recalled items each turn used. Feedback the model gave during the turn is never overwritten. This adds one model call per extraction, after the reply.
+- Recall with embeddinggemma leaves out matches below a cosine of 0.28, in place of 0.12. On 572 past matches, those below it were unrelated items recalled for messages like "ok" or "status?"; no item marked used scored that low. Other embedders keep 0.12.
+
 ## v0.4.4
 
 - Workers update again. Since v0.4.0 a worker could take only one update: the update request had no id, so the worker's request spool refused every later one as a repeat, and a result the worker replayed when it connected read as "updated". The worker then reconnected every five seconds on its old release, refused, and nothing could reach its machine. The update request now has an id of its own, and only the answer with that id counts. A worker stuck this way updates by hand once: install the new `pai` binary and restart its service.
