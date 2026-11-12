@@ -4,6 +4,10 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.4
+
+- Workers update again. Since v0.4.0 a worker could take only one update: the update request had no id, so the worker's request spool refused every later one as a repeat, and a result the worker replayed when it connected read as "updated". The worker then reconnected every five seconds on its old release, refused, and nothing could reach its machine. The update request now has an id of its own, and only the answer with that id counts. A worker stuck this way updates by hand once: install the new `pai` binary and restart its service.
+
 ## v0.4.3
 
 - Memory conflicts no longer block a session. Before, one memory item marked as conflicting, even with itself, stopped every run, write, remember and forget call in any session that recalled it, and answering the question did not clear it. Now a disputed item carries a one-line note where it is recalled, every tool runs, and forgetting or pinning an item always works.
