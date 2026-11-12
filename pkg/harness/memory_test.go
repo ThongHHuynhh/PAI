@@ -108,32 +108,190 @@ func TestApplyOps(t *testing.T) {
 		{Op: "retire", ID: wrong.ID, Reason: "the user moved to Helix"},
 		{Op: "add", New: json.RawMessage(`2`)},
 	}
-	h.apply(ctx, memory.Item{Session: "s1", Source: "extract"}, ops, fresh)
+	h.apply(ctx, memory.Item{Session: "s1", Source: "extract"}, ops, fresh, []memory.Item{old, wrong})
 	valid, _ := st.List(ctx, memory.Filter{})
 	var texts []string
 	for _, it := range valid {
 		texts = append(texts, it.Text)
+		if len(it.Conflicts) > 0 {
+			t.Errorf("apply flagged a conflict nobody asked for: %s", it.Text)
+		}
 	}
 	got := strings.Join(texts, "|")
-	for _, want := range []string{"deploys run through GitHub Actions", "editor is Helix", "DNS for the user's domains"} {
+	// merged, added, and stored though no op named it
+	for _, want := range []string{"Production runs on the VPS atlas and deploys through GitHub Actions", "editor is Helix", "DNS for the user's domains"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %s", want, got)
 		}
 	}
-	for _, preserved := range []string{"Sublime", "thanks", "Production runs on the VPS named atlas"} {
-		if !strings.Contains(got, preserved) {
-			t.Errorf("lost original source %s", preserved)
+	for _, gone := range []string{"Sublime", "thanks", "VPS named atlas"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%q should be retired, merged or skipped: %s", gone, got)
 		}
 	}
-	if len(valid) != 6 {
-		t.Fatalf("want all six original sources, got %d", len(valid))
+	if len(valid) != 3 {
+		t.Fatalf("want 3 valid items, got %d: %s", len(valid), got)
 	}
-	original, err := st.Get(ctx, wrong.ID)
-	if err != nil || len(original.Conflicts) == 0 || !original.Invalid.IsZero() {
-		t.Fatalf("contradiction must remain unresolved: %+v %v", original, err)
+	// Every change is reversible history.
+	retired, err := st.Get(ctx, wrong.ID)
+	if err != nil || retired.Invalid.IsZero() || !strings.Contains(retired.Reason, "moved to Helix") {
+		t.Fatalf("retire: %+v %v", retired, err)
 	}
-	if _, err := st.Invalidate(ctx, wrong.ID, "model prefers newer value"); err == nil {
-		t.Fatal("unresolved contradiction was overridden")
+	if back, err := st.Restore(ctx, wrong.ID); err != nil || !back.Invalid.IsZero() {
+		t.Fatalf("restore: %v", err)
+	}
+	merged, _ := st.Get(ctx, old.ID)
+	if !strings.HasPrefix(merged.Reason, memory.MergedInto) {
+		t.Fatalf("merge lost lineage: %q", merged.Reason)
+	}
+}
+
+// A retire of one item, or an op naming the same id twice, never makes an
+// item conflict with itself: the v0.4.2 bug that blocked every run call.
+func TestApplyNeverSelfConflicts(t *testing.T) {
+	st, err := memory.Open(t.TempDir(), memory.Hash{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	h := &Harness{Memory: st}
+	ctx := context.Background()
+	a, _, _ := st.Remember(ctx, memory.Item{Text: "pai-server on jetson1 runs v0.3.1", Topic: "pai", Source: "test"})
+	b, _, _ := st.Remember(ctx, memory.Item{Text: "The worker abi-3957 runs Windows", Topic: "pai", Source: "test"})
+	ops := []op{
+		{Op: "conflict", IDs: []string{b.ID, b.ID}, Reason: "same id twice"},
+		{Op: "conflict", ID: b.ID, Reason: "one id"},
+		{Op: "retire", ID: a.ID, IDs: []string{a.ID}, Reason: "now v0.4.2"},
+		{Op: "retire", ID: "mNOTSHOWN", Reason: "an id the model was not shown"},
+	}
+	h.apply(ctx, memory.Item{Source: "consolidation"}, ops, nil, []memory.Item{a, b})
+	for _, id := range []string{a.ID, b.ID} {
+		it, _ := st.Get(ctx, id)
+		if len(it.Conflicts) > 0 {
+			t.Fatalf("%s conflicts with %v", id, it.Conflicts)
+		}
+	}
+	if it, _ := st.Get(ctx, a.ID); it.Invalid.IsZero() {
+		t.Fatal("retire did not retire")
+	}
+	if err := st.FlagConflict(ctx, []string{b.ID, b.ID}, "self"); err == nil {
+		t.Fatal("FlagConflict accepted an item against itself")
+	}
+}
+
+// A pinned item stays as the person pinned it, whatever the model proposes.
+func TestApplyLeavesPinned(t *testing.T) {
+	st, err := memory.Open(t.TempDir(), memory.Hash{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	h := &Harness{Memory: st}
+	ctx := context.Background()
+	p, _, _ := st.Remember(ctx, memory.Item{Text: "Always answer in plain English", Kind: memory.Preference, Source: "person"})
+	p, _ = st.Pin(ctx, p.ID, true)
+	h.apply(ctx, memory.Item{Source: "consolidation"}, []op{{Op: "retire", ID: p.ID, Reason: "x"}, {Op: "update", ID: p.ID, Text: "Answer in German"}}, nil, []memory.Item{p})
+	if it, _ := st.Get(ctx, p.ID); !it.Invalid.IsZero() {
+		t.Fatal("a pinned item was changed")
+	}
+}
+
+// Recall carries the projects a session names, skips what its context
+// already holds, and lets a session forget a project's item.
+func TestRecallScopesAndRepeats(t *testing.T) {
+	ctx := context.Background()
+	st, err := memory.Open(t.TempDir(), memory.Hash{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	proj, _, _ := st.Remember(ctx, memory.Item{Text: "The PAI server listens on port 8080 on jetson1", Scope: "project:PAI", Source: "test"})
+	if proj.Scope != "project:pai" {
+		t.Fatalf("scope not normalized: %s", proj.Scope)
+	}
+	other, _, _ := st.Remember(ctx, memory.Item{Text: "The RoboCore server listens on port 8080 on cell4", Scope: "project:robocore", Source: "test"})
+	h := orchestrationHarness(t, func(context.Context, string, func(statefile.Record)) (statefile.Header, error) {
+		return statefile.Header{}, nil
+	})
+	h.Memory = st
+	id := orchestrationSession(t, h, "", "test", "default")
+	msg := statefile.Record{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "test"}, Body: []byte("Which port does the PAI server listen on?")}
+	if err := h.note(h.session(id), id, msg); err != nil {
+		t.Fatal(err)
+	}
+	chain, _ := h.Sessions.Load(id)
+	if got := h.sessionScopes(ctx, chain); len(got) != 1 || got[0] != "project:pai" {
+		t.Fatalf("scopes %v", got)
+	}
+	call := func(name, args string) string {
+		c := provider.Call{Name: name, Arguments: json.RawMessage(args)}
+		body, _ := json.Marshal(c)
+		return string(h.memoryCall(ctx, id, statefile.Record{Header: statefile.Header{ID: statefile.NewID()}, Body: body}, c).Body)
+	}
+	got := call("recall", `{"query":"server port 8080","k":5}`)
+	if !strings.Contains(got, proj.ID) || strings.Contains(got, other.ID) {
+		t.Fatalf("recall: %s", got)
+	}
+	if again := call("recall", `{"query":"server port 8080","k":5}`); strings.Contains(again, "- ["+proj.ID) || !strings.Contains(again, "already in your context: "+proj.ID) {
+		t.Fatalf("an item in context was recalled again: %s", again)
+	}
+	if got := call("forget", `{"id":"`+proj.ID+`","reason":"moved"}`); !strings.HasPrefix(got, "forgot") {
+		t.Fatalf("a project item could not be forgotten: %s", got)
+	}
+}
+
+func TestMentions(t *testing.T) {
+	for _, c := range []struct {
+		text, name string
+		want       bool
+	}{{"what is pai's status", "pai", true}, {"was it paid", "pai", false}, {"abi-twin export", "abi-twin", true}, {"pai", "pai", true}} {
+		if got := mentions(c.text, c.name); got != c.want {
+			t.Errorf("mentions(%q, %q) = %v", c.text, c.name, got)
+		}
+	}
+}
+
+// A clarification finds the person's answer in the session by itself, since
+// a model may not see its own call ids, and retires the item not chosen.
+func TestClarifyFindsAnswer(t *testing.T) {
+	ctx := context.Background()
+	h := orchestrationHarness(t, func(context.Context, string, func(statefile.Record)) (statefile.Header, error) {
+		return statefile.Header{}, nil
+	})
+	st, err := memory.Open(t.TempDir(), memory.Hash{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	h.Memory = st
+	st.VerifyResolution = h.VerifyMemoryResolution
+	id := orchestrationSession(t, h, "", "test", "default")
+	a, _, _ := st.Remember(ctx, memory.Item{Text: "Staging database port is 5432", Contract: memory.Contract{Subject: "staging", Property: "port", Value: "5432"}})
+	b, _, _ := st.Remember(ctx, memory.Item{Text: "Staging database port is 5433", Contract: memory.Contract{Subject: "staging", Property: "port", Value: "5433"}})
+	clarify := func() string {
+		args := json.RawMessage(`{"id":"` + a.ID + `","peer":"` + b.ID + `"}`)
+		return string(h.clarifyMemory(ctx, id, statefile.Record{Header: statefile.Header{ID: statefile.NewID()}}, provider.Call{Name: "memory_clarify", Arguments: args}).Body)
+	}
+	if got := clarify(); !strings.Contains(got, "call ask") {
+		t.Fatalf("first call should hand out the question: %s", got)
+	}
+	q, _ := h.memoryQuestion(ctx, a.ID, b.ID)
+	args, _ := json.Marshal(map[string]any{"questions": []Question{q}})
+	body, _ := json.Marshal(provider.Call{Name: "ask", Arguments: args})
+	askID := "toolu_hidden"
+	if err := h.note(h.session(id), id, statefile.Record{Header: statefile.Header{Kind: statefile.Call, ID: askID}, Body: body}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.note(h.session(id), id, result(askID, answered([]Question{q}, Reply{Answers: [][]string{{"Use B"}}}))); err != nil {
+		t.Fatal(err)
+	}
+	if got := clarify(); !strings.Contains(got, b.ID+" holds") {
+		t.Fatalf("answer not applied: %s", got)
+	}
+	x, _ := st.Get(ctx, a.ID)
+	y, _ := st.Get(ctx, b.ID)
+	if x.Invalid.IsZero() || !y.Invalid.IsZero() || len(y.Conflicts) != 0 {
+		t.Fatalf("want A retired, B valid and undisputed: %+v %+v", x, y)
 	}
 }
 

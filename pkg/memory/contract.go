@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -102,7 +103,8 @@ func prepare(it *Item) error {
 	if it.Status == "verified" && (it.Source == "model" || it.Source == "extract" || it.Source == "consolidation" || it.Source == SourceMCP) {
 		return fmt.Errorf("memory: untrusted writers cannot self-verify")
 	}
-	scope := scopeOr(it.Scope)
+	it.Scope = NormScope(it.Scope)
+	scope := it.Scope
 	if scope != Global && !(strings.HasPrefix(scope, "project:") && len(scope) > 8) && !(strings.HasPrefix(scope, "session:") && len(scope) > 8) {
 		return fmt.Errorf("memory: invalid scope")
 	}
@@ -135,16 +137,27 @@ func (s *Store) conflictPeers(ctx context.Context, it Item) ([]Item, error) {
 	return peers, nil
 }
 
-// FlagConflict preserves an advisory model finding. It cannot retire or select
-// sources, and refuses cross-scope links. A singleton flags a challenged claim.
+// FlagConflict records an advisory finding that two or more different items
+// disagree. It never retires or selects a source, never blocks anything, and
+// refuses cross-scope links. An item cannot conflict with itself: repeated ids
+// count once, and fewer than two different items is refused.
 func (s *Store) FlagConflict(ctx context.Context, ids []string, reason string) error {
-	if len(ids) == 0 || strings.TrimSpace(reason) == "" || secret.MatchString(reason) {
-		return fmt.Errorf("memory: conflict needs sources and a non-secret reason")
+	if strings.TrimSpace(reason) == "" || secret.MatchString(reason) {
+		return fmt.Errorf("memory: conflict needs a non-secret reason")
+	}
+	var distinct []string
+	for _, id := range ids {
+		if id != "" && !slices.Contains(distinct, id) {
+			distinct = append(distinct, id)
+		}
+	}
+	if len(distinct) < 2 {
+		return fmt.Errorf("memory: a conflict needs two different items")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var items []Item
-	for _, id := range ids {
+	for _, id := range distinct {
 		it, err := s.Get(ctx, id)
 		if err != nil {
 			return err
@@ -159,12 +172,15 @@ func (s *Store) FlagConflict(ctx context.Context, ids []string, reason string) e
 		return err
 	}
 	defer tx.Rollback()
-	peers := items[1:]
-	if len(peers) == 0 {
-		peers = items
-	}
-	for _, it := range peers {
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO memory_conflicts(a,b,reason) VALUES(?,?,?)`, items[0].ID, it.ID, reason); err != nil {
+	for _, it := range items[1:] {
+		// The newest finding's reason replaces an older one, so a pair repair
+		// closed is not closed again for its old reason.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO memory_conflicts(a,b,reason) VALUES(?,?,?) ON CONFLICT(a,b) DO UPDATE SET reason=excluded.reason`, items[0].ID, it.ID, reason); err != nil {
+			return err
+		}
+		// A pair closed automatically (repair) opens again on a new finding;
+		// a pair a person settled stays settled.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM memory_resolutions WHERE a=? AND b=? AND json_extract(clarification,'$.auto') IS NOT NULL`, items[0].ID, it.ID); err != nil {
 			return err
 		}
 	}
@@ -187,8 +203,14 @@ func (s *Store) validateDependencies(ctx context.Context, it Item) error {
 	return nil
 }
 
+// decorate fills an item's open conflicts: the valid other items it was
+// flagged against with no recorded resolution. A pair of one item with itself
+// is never a conflict, and a peer that was invalidated no longer disputes it.
 func (s *Store) decorate(ctx context.Context, it *Item) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT CASE WHEN c.a=? THEN c.b ELSE c.a END FROM memory_conflicts c WHERE (c.a=? OR c.b=?) AND NOT EXISTS(SELECT 1 FROM memory_resolutions r WHERE r.a=c.a AND r.b=c.b)`, it.ID, it.ID, it.ID)
+	rows, err := s.db.QueryContext(ctx, `SELECT CASE WHEN c.a=? THEN c.b ELSE c.a END AS peer FROM memory_conflicts c
+		WHERE (c.a=? OR c.b=?) AND c.a<>c.b
+		AND NOT EXISTS(SELECT 1 FROM memory_resolutions r WHERE r.a=c.a AND r.b=c.b)
+		AND EXISTS(SELECT 1 FROM items p WHERE p.id=(CASE WHEN c.a=? THEN c.b ELSE c.a END) AND p.invalid=0)`, it.ID, it.ID, it.ID, it.ID)
 	if err != nil {
 		return err
 	}
@@ -207,22 +229,9 @@ func (s *Store) decorate(ctx context.Context, it *Item) error {
 	return rows.Err()
 }
 
-func (s *Store) guard(ctx context.Context, id string) error {
-	it, err := s.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	if len(it.Conflicts) > 0 {
-		return fmt.Errorf("memory: ASK the user to clarify conflict involving %s; no dependent mutation is allowed", id)
-	}
-	for _, dep := range it.Dependencies {
-		if err := s.guardDependency(ctx, dep, map[string]bool{}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
+// guardDependency refuses a dependency that is invalid or part of a cycle. A
+// dispute on a dependency is shown where it is recalled; it never blocks a
+// write.
 func (s *Store) guardDependency(ctx context.Context, id string, seen map[string]bool) error {
 	if seen[id] {
 		return fmt.Errorf("memory: dependency cycle")
@@ -233,8 +242,8 @@ func (s *Store) guardDependency(ctx context.Context, id string, seen map[string]
 	if err != nil {
 		return err
 	}
-	if len(it.Conflicts) > 0 || !it.Invalid.IsZero() {
-		return fmt.Errorf("memory: dependency %s is unresolved or invalid; ASK user before mutation", id)
+	if !it.Invalid.IsZero() {
+		return fmt.Errorf("memory: dependency %s is no longer valid", id)
 	}
 	for _, dep := range it.Dependencies {
 		if err := s.guardDependency(ctx, dep, seen); err != nil {
@@ -335,9 +344,8 @@ func (s *Store) readiness(ctx context.Context, it Item, seen map[string]bool) (s
 	}
 	seen[it.ID] = true
 	defer delete(seen, it.ID)
-	if len(it.Conflicts) > 0 {
-		return "unresolved conflict: ASK user before any dependent action", nil
-	}
+	// A dispute is shown on the item's own line (Line); it does not make the
+	// item or what depends on it unready.
 	if !it.Invalid.IsZero() {
 		return "invalid: " + it.Reason, nil
 	}

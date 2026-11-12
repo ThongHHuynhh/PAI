@@ -33,7 +33,7 @@ func TestContextClarificationGate(t *testing.T) {
 		t.Fatal("unsafe gate")
 	}
 	r, _ := invoke(`{"key":"target"}`)
-	_, raw, ok := strings.Cut(string(r.Body), "ID: ")
+	_, raw, ok := strings.Cut(string(r.Body), "same key: ")
 	if !ok {
 		t.Fatalf("no ask arguments: %s", r.Body)
 	}
@@ -51,7 +51,8 @@ func TestContextClarificationGate(t *testing.T) {
 		}
 	}
 	chain = append(chain, statefile.Record{Header: statefile.Header{Kind: statefile.Result, For: "ask1"}, Body: []byte(answered(qs, Reply{Answers: [][]string{{"beta"}}}))})
-	_, added := invoke(`{"key":"target","ask_call":"ask1"}`)
+	// No ask_call: a model may not see its call ids; the matching ask is found.
+	_, added := invoke(`{"key":"target"}`)
 	if len(added) != 1 {
 		t.Fatal("explicit user answer not recorded")
 	}

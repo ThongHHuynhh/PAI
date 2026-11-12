@@ -201,7 +201,12 @@ func (h *Harness) contextCall(ctx context.Context, id string, conf statefile.Con
 			}
 			raw, _ := json.Marshal(map[string]any{"questions": []Question{q}})
 			if a.AskCall == "" {
-				return result(call.ID, "clarification_required: call ask with these exact arguments, then context_clarify with ask_call ID: "+string(raw))
+				// The model may not see its own call ids: the newest ask that
+				// asked exactly this question is the one meant.
+				a.AskCall, _ = askedAnswer(chain, q, values)
+			}
+			if a.AskCall == "" {
+				return result(call.ID, "clarification_required: call ask with these exact arguments, then context_clarify again with the same key: "+string(raw))
 			}
 			var asked bool
 			var answer *statefile.Record
