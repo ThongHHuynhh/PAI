@@ -8,6 +8,10 @@ import (
 	"pai/pkg/harness"
 )
 
+// maxQuestionRows bounds a question's text in the dialog, so its options and
+// keys stay on screen however long an agent made it.
+const maxQuestionRows = 12
+
 // askDialog is the questions of an ask call, one tab each and a last tab to
 // review and submit. Each question lists its options and an Other row that
 // takes typed text. Esc declines.
@@ -115,7 +119,14 @@ func (d *askDialog) rows(tab, w int) (out []Line, hits [][2]int) {
 		}
 	} else {
 		q := d.qs[tab]
-		add(flow(run(q.Question, bold), w, nil, nil), -1, -1)
+		var ql []Line
+		for _, para := range strings.Split(q.Question, "\n") {
+			ql = append(ql, flow(run(strings.TrimSpace(para), bold), w, nil, nil)...)
+		}
+		if len(ql) > maxQuestionRows {
+			ql = append(ql[:maxQuestionRows-1], flow(run("… (cut: ask the agent for the whole question)", muted), w, nil, nil)...)
+		}
+		add(ql, -1, -1)
 		if q.MultiSelect {
 			add(flow(run("Pick any number.", muted), w, nil, nil), -1, -1)
 		}
