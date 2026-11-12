@@ -17,7 +17,7 @@ import (
 const (
 	rrfK         = 10
 	candidates   = 40   // from each list before fusion
-	minCosine    = 0.12 // below this, a vector match is noise
+	minCosine    = 0.12 // below this, a vector match is noise, for an embedder with no Floor of its own
 	utilityWeigh = 0.6
 	recencyWeigh = 0.1
 	recencyDays  = 30.0
@@ -104,7 +104,7 @@ func (s *Store) Find(ctx context.Context, q Query) ([]Hit, error) {
 	if k <= 0 || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
-	vecs, err := s.embed.Embed(ctx, []string{query})
+	qv, floor, err := embedQuery(ctx, s.embed, query)
 	if err != nil {
 		return nil, err
 	}
@@ -115,19 +115,19 @@ func (s *Store) Find(ctx context.Context, q Query) ([]Hit, error) {
 	}
 	byID := map[string]*Hit{}
 	for _, it := range items {
-		if len(vecs[0]) != len(it.vec) {
+		if len(qv) != len(it.vec) {
 			return nil, fmt.Errorf("memory: embedding dimensions changed for %s; use a versioned model name and reindex before searching", it.ID)
 		}
 		why, err := s.readiness(ctx, it, map[string]bool{})
 		if err != nil {
 			return nil, err
 		}
-		byID[it.ID] = &Hit{Item: it, Readiness: why, Cosine: float64(cosine(vecs[0], it.vec))}
+		byID[it.ID] = &Hit{Item: it, Readiness: why, Cosine: float64(cosine(qv, it.vec))}
 	}
 	// vector list
 	vl := make([]*Hit, 0, len(byID))
 	for _, h := range byID {
-		if h.Cosine >= minCosine {
+		if h.Cosine >= floor {
 			vl = append(vl, h)
 		}
 	}
@@ -327,7 +327,22 @@ func (s *Store) Recall(ctx context.Context, t Turn) (Retrieval, error) {
 // remain for caller compatibility; word overlap and asking for more memory
 // are never evidence of utility or failure. Unreported retrievals stay unscored.
 func (s *Store) Settle(ctx context.Context, session, reply string, calledRecall bool) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, arm, features, items FROM retrievals WHERE session=? AND settled=0`, session)
+	return s.score(ctx, session, `settled=0`)
+}
+
+// Rescore scores session's retrievals ids that were settled with no
+// feedback, now that feedback came after the turn.
+func (s *Store) Rescore(ctx context.Context, session string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.score(ctx, session, `reward IS NULL AND id IN (`+placeholders(len(ids))+`)`, anys(ids)...)
+}
+
+// score settles session's retrievals that match where: those with feedback
+// get a reward and train the bandit, the rest stay unscored.
+func (s *Store) score(ctx context.Context, session, where string, args ...any) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, arm, features, items FROM retrievals WHERE session=? AND `+where, append([]any{session}, args...)...)
 	if err != nil {
 		return err
 	}

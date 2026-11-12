@@ -174,6 +174,39 @@ func (o OpenAI) Embed(ctx context.Context, texts []string) ([][]float32, error) 
 	return out, nil
 }
 
+// Floored is an embedder with the cosine below which a query match is noise
+// for its model.
+type Floored struct {
+	Embedder
+	Floor float64
+}
+
+// Floor gives a known embedding model its noise floor, and leaves others as
+// they are. embeddinggemma's: of 572 hits recalled before 2026-11-12, those
+// below 0.28 answered "ok", "status?" or "Reply with only DONE" with
+// unrelated items, while the one marked used scored 0.41. Task prompts were
+// tried on the same data and dropped: they lost a relevant update procedure.
+func Floor(e Embedder, model string) Embedder {
+	if strings.HasPrefix(model, "embeddinggemma") {
+		return Floored{Embedder: e, Floor: 0.28}
+	}
+	return e
+}
+
+// embedQuery is a search query's vector and the cosine below which a match
+// is noise.
+func embedQuery(ctx context.Context, e Embedder, text string) ([]float32, float64, error) {
+	v, err := e.Embed(ctx, []string{text})
+	if err != nil {
+		return nil, 0, err
+	}
+	floor := minCosine
+	if f, ok := e.(Floored); ok {
+		floor = f.Floor
+	}
+	return v[0], floor, nil
+}
+
 // embedCacheSize bounds retained texts and vectors; the cache is process-local
 // and model-specific. Stored item vectors remain in SQLite across restarts.
 const embedCacheSize = 256

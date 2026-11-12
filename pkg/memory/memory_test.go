@@ -138,3 +138,36 @@ func TestRecallSettleUpdatesUtility(t *testing.T) {
 		t.Fatalf("the used item is not marked used: %+v", rs[0].Hits)
 	}
 }
+
+func TestRescoreScoresLateFeedback(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	it, _, _ := s.Remember(ctx, Item{Text: "The release signing key is stored in the RELEASE_SIGNING_KEY secret", Source: "test"})
+	r, err := s.Recall(ctx, Turn{Session: "s1", Query: "where is the release signing key stored?"})
+	if err != nil || len(r.Hits) == 0 {
+		t.Fatalf("recall: %v %+v", err, r)
+	}
+	if err := s.Settle(ctx, "s1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if rs, _ := s.Retrievals(ctx, "s1", 10); rs[0].Reward != nil {
+		t.Fatal("a retrieval with no feedback was scored")
+	}
+	if err := s.RetrievalFeedback(ctx, "s1", r.ID, it.ID, "used", "auto: graded"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Rescore(ctx, "s1", []string{r.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if rs, _ := s.Retrievals(ctx, "s1", 10); rs[0].Reward == nil || *rs[0].Reward <= 0 {
+		t.Fatalf("late feedback did not score the retrieval: %+v", rs[0])
+	}
+}
+
+func TestFloorDropsNoiseForKnownModels(t *testing.T) {
+	if f, ok := Floor(Hash{}, "embeddinggemma:latest").(Floored); !ok || f.Floor <= minCosine || f.Name() != (Hash{}).Name() {
+		t.Fatalf("embeddinggemma needs its own floor and the same name: %+v", f)
+	}
+	if _, ok := Floor(Hash{}, "nomic-embed-text").(Floored); ok {
+		t.Fatal("a floor for a model that was not measured")
+	}
+}

@@ -282,6 +282,7 @@ func (h *Harness) afterTurn(ctx context.Context, id string) {
 		if err := h.Memory.SetExtracted(ctx, id, tip); err != nil {
 			log.Printf("session %s: extract: %v", id, err)
 		}
+		h.grade(ctx, conf, id, chain, from, tip)
 		h.consolidateSoon(ctx, conf)
 	}()
 }
