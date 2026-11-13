@@ -4,6 +4,16 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.4.6
+
+- The TUI keeps its one-line status layout: provider/model, then a context meter, then a 5-hour provider usage meter. Cost and the commands hint stay on the right. Provider usage refreshes once a minute when available.
+- Open /trace (Ctrl+T) to see the current turn's model and tool timings, running calls, workers and deadlines. The panel stays hidden until requested.
+- /recover offers cancel one call, stop, retry or resume, change model, narrow the task, fork, and restart from before a message. Restarting history does not undo actions already taken.
+- A message sent while the model is planning holds changing calls planned before that message, so the model can read the correction first. Calls already running are not undone; read-only calls can continue.
+- /auto-switch-model enables model suggestions per session. It is off by default. PAI asks before switching and applies an approved switch from the next step.
+- Workers recover sooner after waking or moving between Ethernet and Wi-Fi: a stalled mesh is rebuilt after two minutes following a network change, and a fresh service starts with a two-second reconnect delay.
+- Existing settings and sessions are kept. No manual data migration is needed. The new TUI layout still needs a visual check on narrow terminals.
+
 - A Windows worker comes back about 2 minutes after its PC wakes on another network, as a laptop that leaves its dock for Wi-Fi, not after 12. A worker off the harness rebuilt its mesh link after 10 minutes when the link's map poll was silent too, which reads as a harness that is down; a changed network now counts as the link being stuck. And the worker service now sets its restart delay to 2 seconds each time it starts: one installed by an older release kept that release's 30 seconds to 2 minutes through every update.
 
 ## v0.4.5
