@@ -93,15 +93,13 @@ type session struct {
 	dlg        *asking               // the dialog that asks it
 	declined   string                // the ask call the person declined
 	trace      turnTrace             // the newest turn, for /trace and the info bar
-	accounts   []harness.Account     // the providers' usage, for the bar under the info bar
-	usageText  *Text                 // that bar
-	usageRow   *Node
+	accounts   []harness.Account     // the providers' usage, for its bar on the status line
 }
 
 func newSession(a *App, l *sessionList, id string) *session {
 	s := &session{
 		c: l.c, list: l, id: id, transcript: NewScrollbox(), input: NewInput(), status: &Text{}, outbox: make(chan string, outboxSize), calls: map[string]*callBlock{},
-		meta: &Glyphs{}, busy: &Glyphs{}, usageText: &Text{},
+		meta: &Glyphs{}, busy: &Glyphs{},
 	}
 	s.transcript.Gap = func(prev, next Block) bool {
 		return !isCall(prev) || !isCall(next)
@@ -121,12 +119,11 @@ func newSession(a *App, l *sessionList, id string) *session {
 	s.body = &Node{Grow: 1, View: s.transcript}
 	s.empty = []*Node{{Grow: 1}, {View: Wordmark{}}, {Fixed: 1}, {Grow: 1}}
 	s.statusRow = Box(&Node{Dir: Row, Min: 1, Max: 3}, &Node{Grow: 1, View: s.status}, &Node{View: s.meta})
-	s.usageRow = &Node{Fixed: 1, View: s.usageText}
 	s.busyRow = &Node{Fixed: 2, Pad: [4]int{0, 1, 0, 0}, View: s.busy}
 	s.orbit = &orbit{on: func() bool { return s.blank }, nodes: func() int { return l.nodes }}
 	s.sidebar = &Node{Fixed: sidebarWidth, Paint: PaintPanel, Pad: [4]int{0, 1, 0, 1}, View: l}
 	main := Box(&Node{Dir: Col, Grow: 1, Over: s.orbit},
-		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, s.usageRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
+		s.empty[0], s.empty[1], s.empty[2], s.body, s.busyRow, s.slashRow, s.inputRow, s.statusRow, &Node{Fixed: 1}, s.empty[3]) // a blank row under the status, as opencode
 	s.root = Box(&Node{Dir: Row, Paint: PaintScreen}, s.sidebar, main)
 	a.Focus(s.box.Kids[1])
 	if d, ok := l.drafts[id]; ok {
@@ -181,7 +178,6 @@ func (s *session) Size(a *App, w, h int) {
 		s.inputRow.Pad[1] = 0
 	}
 	s.statusRow.Pad = [4]int{pad + 2, 0, pad, 0} // under the input's text, to the box's right edge
-	s.usageRow.Pad = s.statusRow.Pad
 	if empty {
 		left := pad + (main-2*pad-s.box.Fixed)/2
 		s.statusRow.Pad = [4]int{left + 2, 0, main - left - s.box.Fixed, 0}
@@ -208,12 +204,7 @@ func (s *session) Size(a *App, w, h int) {
 		if a.Status.S == "" && s.info.Config.AutoModel {
 			s.status.S += " · auto-switch"
 		}
-		if bar := s.infoBar(); a.Status.S == "" && bar != "" {
-			s.status.S += " · " + bar
-		}
 	}
-	*s.usageText = Text{S: s.usageBar(), Ink: InkMuted}
-	s.usageRow.Hidden = empty || s.usageText.S == ""
 	s.meta.Gs = nil
 	switch {
 	case !empty:
@@ -255,9 +246,12 @@ func (s *session) metaLine(a *App, hint bool) []Glyph {
 	if s.id != "" && s.info.ID == s.id {
 		c := tokens(s.info.ContextUsed)
 		if l := s.info.Config.ContextLimit; l > 0 {
-			c += "/" + tokens(l)
+			c = meter(float64(s.info.ContextUsed)/float64(l)) + " " + c + "/" + tokens(l)
 		}
 		parts = append(parts, run(c, muted))
+		if p, u, ok := s.usageNow(); ok {
+			parts = append(parts, run(fmt.Sprintf("%s 5h %s %.0f%%", p, meter(u), u*100), muted))
+		}
 		if c, ok := s.cost(); ok {
 			parts = append(parts, run(fmt.Sprintf("$%.2f", c), muted))
 		}

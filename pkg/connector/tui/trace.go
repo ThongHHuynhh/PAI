@@ -12,7 +12,7 @@ import (
 
 // The trace (11.1, 11.2) is where the newest turn's time goes, step by step,
 // read from the records alone: no progress is made up. /trace opens it, so
-// the transcript stays clean; the info bar under the input sums it up (11.3).
+// the transcript stays clean.
 
 // span is one model step or one tool call of the newest turn.
 type span struct {
@@ -131,25 +131,6 @@ func cached(u statefile.Usage) string {
 	return fmt.Sprintf("cache %d%%", u.CacheRead*100/u.Prompt())
 }
 
-// infoBar is the turn in one line: how long, on what, and the cache.
-func (s *session) infoBar() string {
-	t := &s.trace
-	if t.start.IsZero() {
-		return ""
-	}
-	now := time.Now()
-	end := t.mark
-	if s.stepping() {
-		end = now
-	}
-	model, tools, _, u := t.totals(now)
-	parts := []string{fmt.Sprintf("turn %s (model %s, tools %s)", dur(end.Sub(t.start)), dur(model), dur(tools))}
-	if c := cached(u); c != "" {
-		parts = append(parts, c)
-	}
-	return strings.Join(parts, " · ")
-}
-
 // traceText is the trace panel: every span of the turn, what runs now and
 // until when, then the totals.
 func (s *session) traceText() string {
@@ -238,16 +219,21 @@ func (s *session) traceDialog(a *App) {
 // usageEvery is how often the provider usage bar is read again.
 const usageEvery = time.Minute
 
-// usageBar is the session's provider account: whether it is limited, and how
-// much of its 5 hour and 7 day windows is used.
-func (s *session) usageBar() string {
+// usageNow is the session's provider and how much of its 5 hour window is used.
+func (s *session) usageNow() (string, float64, bool) {
 	p, _, _ := strings.Cut(s.info.Config.Model, "/")
 	for _, ac := range s.accounts {
-		if ac.Name == p || strings.HasPrefix(ac.Name, p+"/") {
-			return p + " · " + usageHint(ac)
+		if (ac.Name == p || strings.HasPrefix(ac.Name, p+"/")) && ac.UtilFiveHour != nil {
+			return p, *ac.UtilFiveHour, true
 		}
 	}
-	return ""
+	return "", 0, false
+}
+
+// meter is f, from 0 to 1, as a bar of eight cells.
+func meter(f float64) string {
+	n := min(8, max(0, int(f*8+0.5)))
+	return strings.Repeat("█", n) + strings.Repeat("░", 8-n)
 }
 
 // readAccounts reads the accounts' usage now and then while the screen is
