@@ -193,6 +193,9 @@ func (s *session) Size(a *App, w, h int) {
 	*s.status = *a.Status
 	if s.status.S == "" {
 		s.status.S, s.status.Style = cf.Model, a.Theme.muted()
+		if s.id != "" && s.info.ID == s.id {
+			s.status.S += s.meters()
+		}
 	}
 	if s.id != "" && s.info.ID == s.id {
 		if s.info.Parent != "" {
@@ -237,21 +240,12 @@ func (s *session) askHome(a *App) {
 // hintFrom is the width of the status line from which it shows the commands key.
 const hintFrom = 60
 
-// metaLine is the right of the status line: the context used of its limit,
-// the cost once the catalog is loaded, and the commands key.
+// metaLine is the right of the status line: the cost once the catalog is loaded, and the commands key.
 func (s *session) metaLine(a *App, hint bool) []Glyph {
 	muted := a.Theme.muted()
 	key := term.Style{FG: a.Theme.Text, Attr: term.Bold}
 	var parts [][]Glyph
 	if s.id != "" && s.info.ID == s.id {
-		c := tokens(s.info.ContextUsed)
-		if l := s.info.Config.ContextLimit; l > 0 {
-			c = meter(float64(s.info.ContextUsed)/float64(l)) + " " + c + "/" + tokens(l)
-		}
-		parts = append(parts, run(c, muted))
-		if p, u, ok := s.usageNow(); ok {
-			parts = append(parts, run(fmt.Sprintf("%s 5h %s %.0f%%", p, meter(u), u*100), muted))
-		}
 		if c, ok := s.cost(); ok {
 			parts = append(parts, run(fmt.Sprintf("$%.2f", c), muted))
 		}

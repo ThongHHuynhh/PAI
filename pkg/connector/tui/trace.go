@@ -219,6 +219,18 @@ func (s *session) traceDialog(a *App) {
 // usageEvery is how often the provider usage bar is read again.
 const usageEvery = time.Minute
 
+// meters is the context used and the provider's 5 hour usage, as bars.
+func (s *session) meters() string {
+	m := " · ctx " + tokens(s.info.ContextUsed)
+	if l := s.info.Config.ContextLimit; l > 0 {
+		m = " · ctx " + meter(float64(s.info.ContextUsed)/float64(l)) + " " + tokens(s.info.ContextUsed) + "/" + tokens(l)
+	}
+	if _, u, ok := s.usageNow(); ok {
+		m += fmt.Sprintf(" · 5h %s %.0f%%", meter(u), u*100)
+	}
+	return m
+}
+
 // usageNow is the session's provider and how much of its 5 hour window is used.
 func (s *session) usageNow() (string, float64, bool) {
 	p, _, _ := strings.Cut(s.info.Config.Model, "/")
