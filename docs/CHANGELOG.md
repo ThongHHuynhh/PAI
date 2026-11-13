@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- A Windows worker comes back about 2 minutes after its PC wakes on another network, as a laptop that leaves its dock for Wi-Fi, not after 12. A worker off the harness rebuilt its mesh link after 10 minutes when the link's map poll was silent too, which reads as a harness that is down; a changed network now counts as the link being stuck. And the worker service now sets its restart delay to 2 seconds each time it starts: one installed by an older release kept that release's 30 seconds to 2 minutes through every update.
+
 ## v0.4.5
 
 - Recall learns from every turn again. Since v0.4.0 a recalled item was scored only when the model reported on it, which it rarely did, so recall learnt almost nothing and the web app showed no helped scores. Now, when memory extraction runs, the session's model judges which recalled items each turn used. Feedback the model gave during the turn is never overwritten. This adds one model call per extraction, after the reply.
