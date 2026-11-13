@@ -800,6 +800,9 @@ func (h *Harness) execute(ctx context.Context, id string, conf statefile.Conf, c
 	if c.Name == "diagnose" {
 		return h.diagnoseCall(ctx, call, c)
 	}
+	if c.Name == "switch_model" {
+		return h.switchModel(id, conf, call, c)
+	}
 	if c.Name == "credential" {
 		return h.credentialCall(ctx, id, call, c)
 	}

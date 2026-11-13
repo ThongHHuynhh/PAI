@@ -139,6 +139,11 @@ func (s service) Execute(_ []string, reqs <-chan svc.ChangeRequest, status chan<
 	if err != nil {
 		log.Fatalf("mesh: %v", err)
 	}
+	// A worker installed by an older release keeps that release's recovery,
+	// as 30 s, 1 and 2 minutes, through every update (2026-11-13).
+	if err := recovery(); err != nil {
+		log.Printf("service recovery: %v", err)
+	}
 	Dial(m, s.l)
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	for r := range reqs {
@@ -361,11 +366,30 @@ func register() error {
 		return err
 	}
 	defer func() { _ = s.Close() }()
-	// one action, which repeats, so the failure count never matters
-	if err := s.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: restartDelay}}, 0); err != nil {
+	if err := setRecovery(s); err != nil {
 		return err
 	}
 	return s.Start()
+}
+
+// one action, which repeats, so the failure count never matters
+func setRecovery(s *mgr.Service) error {
+	return s.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: restartDelay}}, 0)
+}
+
+// recovery sets the running service's recovery actions to setRecovery's.
+func recovery() error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = m.Disconnect() }()
+	s, err := m.OpenService(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+	return setRecovery(s)
 }
 
 // stop stops the service and waits until its process has ended, which can be

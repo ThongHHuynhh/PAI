@@ -92,6 +92,8 @@ type session struct {
 	askCall    *statefile.Record     // the newest ask call with no result yet
 	dlg        *asking               // the dialog that asks it
 	declined   string                // the ask call the person declined
+	trace      turnTrace             // the newest turn, for /trace and the info bar
+	accounts   []harness.Account     // the providers' usage, for its bar on the status line
 }
 
 func newSession(a *App, l *sessionList, id string) *session {
@@ -191,6 +193,9 @@ func (s *session) Size(a *App, w, h int) {
 	*s.status = *a.Status
 	if s.status.S == "" {
 		s.status.S, s.status.Style = cf.Model, a.Theme.muted()
+		if s.id != "" && s.info.ID == s.id {
+			s.status.S += s.meters()
+		}
 	}
 	if s.id != "" && s.info.ID == s.id {
 		if s.info.Parent != "" {
@@ -198,6 +203,9 @@ func (s *session) Size(a *App, w, h int) {
 		}
 		if children, stepping := s.list.children(s.id); children > 0 {
 			s.status.S += fmt.Sprintf(" · %d children (%d stepping)", children, stepping)
+		}
+		if a.Status.S == "" && s.info.Config.AutoModel {
+			s.status.S += " · auto-switch"
 		}
 	}
 	s.meta.Gs = nil
@@ -232,18 +240,12 @@ func (s *session) askHome(a *App) {
 // hintFrom is the width of the status line from which it shows the commands key.
 const hintFrom = 60
 
-// metaLine is the right of the status line: the context used of its limit,
-// the cost once the catalog is loaded, and the commands key.
+// metaLine is the right of the status line: the cost once the catalog is loaded, and the commands key.
 func (s *session) metaLine(a *App, hint bool) []Glyph {
 	muted := a.Theme.muted()
 	key := term.Style{FG: a.Theme.Text, Attr: term.Bold}
 	var parts [][]Glyph
 	if s.id != "" && s.info.ID == s.id {
-		c := tokens(s.info.ContextUsed)
-		if l := s.info.Config.ContextLimit; l > 0 {
-			c += "/" + tokens(l)
-		}
-		parts = append(parts, run(c, muted))
 		if c, ok := s.cost(); ok {
 			parts = append(parts, run(fmt.Sprintf("$%.2f", c), muted))
 		}
@@ -373,6 +375,7 @@ func (s *session) title(a *App) {
 // the app ends. Each batch lands on the loop with the status after it.
 func (s *session) follow(a *App) {
 	id := s.id
+	s.readAccounts(a)
 	a.Go(func() {
 		after, wait := 0, ""
 		for s.ctx.Err() == nil {
@@ -446,6 +449,9 @@ func (s *session) put(b Block) {
 
 // show puts a record in the transcript, or a result in its call's block.
 func (s *session) show(r statefile.Record) {
+	if r.Kind != statefile.Call {
+		s.trace.add(r, nil)
+	}
 	switch r.Kind {
 	case statefile.Start, statefile.Config:
 		var conf statefile.Conf
@@ -475,6 +481,7 @@ func (s *session) show(r statefile.Record) {
 		s.put(&errBlock{string(r.Body)})
 	case statefile.Call:
 		b := newCall(s, r)
+		s.trace.add(r, b)
 		s.calls[r.ID] = b
 		if b.name == "ask" {
 			s.askCall = &r
@@ -511,6 +518,9 @@ func (s *session) send(a *App, text string) {
 		delete(s.list.drafts, "") // home's draft is sent: the next home starts empty
 	}
 	s.started = true
+	if s.stepping() {
+		a.Say("Sent while working: PAI reads it before its next change, and holds the changes it planned before it")
+	}
 	if s.id != "" {
 		s.outbox <- text
 		return
