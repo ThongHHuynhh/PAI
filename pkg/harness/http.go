@@ -53,6 +53,11 @@ const MaxPost = 8 << 20
 //	                                  record; empty removes the name
 //	PUT  /sessions/{id}/compact       auto or manual as text; ?via= required. a   -> {"n"}
 //	                                  config record with that compaction mode
+//	PUT  /sessions/{id}/automodel     on or off as text; ?via= required. auto     -> 204
+//	                                  model switching: the model proposes a
+//	                                  model per task, the person approves each
+//	POST /sessions/{id}/calls/{call}/cancel  ?via= required. cancel one       -> 204
+//	                                  running call; the step goes on
 //	POST /sessions/{id}/compact       ?via= required. compact an idle session now -> {"compacted"}
 //	GET  /sessions/{id}/diagnose      -> working, waiting or stuck, and on what
 //	DELETE /sessions/{id}             ?via= required. the file is gone for good;   -> 204
@@ -215,6 +220,40 @@ func Handler(ctx context.Context, h *Harness) http.Handler {
 			return
 		}
 		reply(w, map[string]int{"n": n})
+	})
+	handle("PUT /sessions/{id}/automodel", func(w http.ResponseWriter, r *http.Request) {
+		via, err := via(r)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxName))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		on := strings.TrimSpace(string(b))
+		if on != "on" && on != "off" {
+			fail(w, fmt.Errorf("auto model switching %q: it is on or off", on))
+			return
+		}
+		if err := h.SetAutoModel(r.PathValue("id"), via, on == "on"); err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handle("POST /sessions/{id}/calls/{call}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		via, err := via(r)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if err := h.CancelCall(r.PathValue("id"), r.PathValue("call"), via); err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	handle("GET /sessions/{id}/diagnose", func(w http.ResponseWriter, r *http.Request) {
 		d, err := h.Diagnose(r.PathValue("id"))
