@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"pai/pkg/mesh"
@@ -24,6 +26,9 @@ import (
 // new node mends it. With the coordinator answering, 2 minutes without a
 // connection is that; with it silent too, the harness may just be down, and a
 // restart every 10 minutes is cheap enough to cover a map poll that wedged.
+// A machine whose network changed, as a laptop that wakes and leaves its dock
+// for Wi-Fi, wedges the map poll too, and the harness is not down: it waits
+// as if polling (2026-11-13: 12 minutes off every morning).
 const (
 	redialMin    = 200 * time.Millisecond
 	redialMax    = 5 * time.Second
@@ -51,7 +56,7 @@ func Dial(m *mesh.Mesh, l Local) {
 }
 
 func dial(m *mesh.Mesh, l Local) {
-	wait, connected := redialMin, time.Now()
+	wait, connected, local := redialMin, time.Now(), addrs()
 	d := net.Dialer{Timeout: dialTimeout, KeepAliveConfig: net.KeepAliveConfig{Enable: true, Idle: keepAlive, Interval: keepAlive, Count: keepAliveCnt}}
 	for {
 		err := errors.New("no harness in the mesh map yet")
@@ -59,6 +64,7 @@ func dial(m *mesh.Mesh, l Local) {
 			var conn net.Conn
 			at := netip.AddrPortFrom(a, Port).String()
 			if conn, err = d.Dial("tcp", at); err == nil {
+				local = addrs()
 				log.Printf("connected to the harness at %s as %s", at, l.Name)
 				start, done := time.Now(), make(chan struct{})
 				go hangUpOnMove(m, conn, done)
@@ -78,7 +84,7 @@ func dial(m *mesh.Mesh, l Local) {
 				log.Printf("mesh: reroute: %v", err)
 			}
 		}
-		if off := time.Since(connected); stuck(off, m.Polling()) {
+		if off := time.Since(connected); stuck(off, m.Polling(), addrs() != local) {
 			exe, err := os.Executable()
 			if err != nil {
 				log.Fatalf("no connection to the harness in %s, and no restart: %v", off.Round(time.Second), err)
@@ -98,9 +104,20 @@ func dial(m *mesh.Mesh, l Local) {
 }
 
 // stuck is whether a worker off the harness for off, with the map poll up or
-// not, should make its mesh node anew.
-func stuck(off time.Duration, polling bool) bool {
-	return off > stuckSilent || polling && off > stuckPolling
+// not and its network moved or not, should make its mesh node anew.
+func stuck(off time.Duration, polling, moved bool) bool {
+	return off > stuckSilent || (polling || moved) && off > stuckPolling
+}
+
+// addrs is this machine's interface addresses, which change with its network.
+func addrs() string {
+	as, _ := net.InterfaceAddrs()
+	s := make([]string, len(as))
+	for i, a := range as {
+		s[i] = a.String()
+	}
+	slices.Sort(s)
+	return strings.Join(s, " ")
 }
 
 // hangUpOnMove closes conn once this node's address is no longer the one
