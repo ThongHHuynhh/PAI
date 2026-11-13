@@ -110,8 +110,9 @@ type Conf struct {
 	ContextLimit int                        `json:"context_limit"`
 	Input        []string                   `json:"input,omitempty"`
 	Params       map[string]json.RawMessage `json:"params,omitempty"`
-	Preset       string                     `json:"preset,omitempty"`  // the catalog preset a connector began from; display only
-	Compact      string                     `json:"compact,omitempty"` // compaction mode: "" or CompactAuto, or CompactManual
+	Preset       string                     `json:"preset,omitempty"`     // the catalog preset a connector began from; display only
+	Compact      string                     `json:"compact,omitempty"`    // compaction mode: "" or CompactAuto, or CompactManual
+	AutoModel    bool                       `json:"auto_model,omitempty"` // the model proposes a model per task; the person approves each switch
 }
 
 // Compaction modes. Auto compacts when PAI judges it right; manual asks the

@@ -358,6 +358,21 @@ func (c *Client) SetCompact(ctx context.Context, id, via, mode string) error {
 	return c.Call(ctx, "PUT", "/sessions/"+id+"/compact?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(mode), nil)
 }
 
+// SetAutoModel turns auto model switching on or off from the next step.
+func (c *Client) SetAutoModel(ctx context.Context, id, via string, on bool) error {
+	return c.Call(ctx, "PUT", "/sessions/"+id+"/automodel?via="+url.QueryEscape(via), "text/plain; charset=utf-8", strings.NewReader(map[bool]string{true: "on", false: "off"}[on]), nil)
+}
+
+// CancelCall cancels one running call; the step goes on.
+func (c *Client) CancelCall(ctx context.Context, id, call, via string) error {
+	return c.Call(ctx, "POST", "/sessions/"+id+"/calls/"+call+"/cancel?via="+url.QueryEscape(via), "", nil, nil)
+}
+
+// Retry steps a failed or idle session again from its tip.
+func (c *Client) Retry(ctx context.Context, id string) error {
+	return c.Call(ctx, "POST", "/sessions/"+id+"/retry", "", nil, nil)
+}
+
 // Compact compacts an idle session now; false when there was too little to.
 func (c *Client) Compact(ctx context.Context, id, via string) (bool, error) {
 	var out struct{ Compacted bool }

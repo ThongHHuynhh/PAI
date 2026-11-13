@@ -26,12 +26,13 @@ import (
 type session struct {
 	id      string
 	mu      sync.Mutex
-	f       *statefile.File // the file, while a step holds it
-	changed chan struct{}   // closed and replaced on every append
-	retry   bool            // a run asked to step past a failed tip
-	stopped string          // who asked for the stop, while one is in flight
-	logs    sync.Mutex      // held by copyLogs from Load to the last Write, so an older copy never lands last
-	exports atomic.Int64    // copyLogs calls asked for; a waiting one leaves to a newer one
+	f       *statefile.File                    // the file, while a step holds it
+	changed chan struct{}                      // closed and replaced on every append
+	retry   bool                               // a run asked to step past a failed tip
+	stopped string                             // who asked for the stop, while one is in flight
+	logs    sync.Mutex                         // held by copyLogs from Load to the last Write, so an older copy never lands last
+	exports atomic.Int64                       // copyLogs calls asked for; a waiting one leaves to a newer one
+	calls   map[string]context.CancelCauseFunc // running calls by id, under mu, for CancelCall
 
 	// under Harness.mu
 	running  bool               // a runner goroutine is stepping this session

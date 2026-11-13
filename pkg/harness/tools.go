@@ -174,12 +174,12 @@ func Tools(name string, input []string) []provider.Tool {
 	if len(input) > 0 {
 		read.Description = "Read a file on a worker. A file of type " + strings.Join(input, ", ") + " is returned as media, any other file as text"
 	}
-	defaults := []provider.Tool{run, read, write, edit, ask, recall, remember, forget, credentialTool, compactTool, diagnoseTool, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
+	defaults := []provider.Tool{run, read, write, edit, ask, recall, remember, forget, credentialTool, compactTool, diagnoseTool, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool, switchModelTool}
 	switch name {
 	case "default":
 		return defaults
 	case "patch":
-		return []provider.Tool{run, read, patch, ask, recall, remember, forget, credentialTool, compactTool, diagnoseTool, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool}
+		return []provider.Tool{run, read, patch, ask, recall, remember, forget, credentialTool, compactTool, diagnoseTool, memoryClarifyTool, contextRecordTool, contextViewTool, contextClarifyTool, contextExpandTool, readPageTool, planEditTool, applyEditTool, switchModelTool}
 	case "orchestrator":
 		return append(defaults, delegate, tell, children, stopChild)
 	case "patch-orchestrator":
