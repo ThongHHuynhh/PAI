@@ -378,3 +378,96 @@ func TestDiff(t *testing.T) {
 		t.Fatal("diff of equal text")
 	}
 }
+
+func TestPlantedJournalCannotEscape(t *testing.T) {
+	p, _ := fixture(t)
+	outside := filepath.Join(filepath.Dir(p.Root), "victim-"+filepath.Base(p.Root)+".txt")
+	write(t, outside, "keep me")
+	write(t, p.Path(pendingDir, "1"), "planted")
+	write(t, p.Path(pendingDir, planFile), `{"writes":[{"target":"../outside.txt","staged":"1"}],"deletes":["../`+filepath.Base(outside)+`"]}`)
+	write(t, p.Path(pendingDir, commitMark), "1\n")
+	if _, err := Open(p.Root); err == nil {
+		t.Fatal("unsafe journal accepted")
+	}
+	if b, _ := os.ReadFile(outside); string(b) != "keep me" {
+		t.Fatal("journal deleted a file outside the project")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(p.Root), "outside.txt")); err == nil {
+		t.Fatal("journal wrote outside the project")
+	}
+}
+
+func TestApplyFinishesACommittedJournal(t *testing.T) {
+	p, _ := fixture(t)
+	write(t, p.Path(pendingDir, "1"), "# from the committed apply\n")
+	write(t, p.Path(pendingDir, planFile), `{"writes":[{"target":"AGENTS.md","staged":"1"}]}`)
+	write(t, p.Path(pendingDir, commitMark), "1\n")
+	s := p.Begin()
+	s.SetExecutor("codex")
+	if _, err := s.Apply(); !errors.Is(err, ErrConflict) {
+		t.Fatalf("apply over a committed journal: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(p.Root, "AGENTS.md")); !strings.Contains(string(b), "committed apply") {
+		t.Fatal("committed journal discarded")
+	}
+}
+
+func TestHandEditAfterStagingConflicts(t *testing.T) {
+	p, _ := fixture(t)
+	write(t, filepath.Join(p.Root, "AGENTS.md"), "original\n")
+	s := p.Begin()
+	if err := s.SetFile(filepath.Join(p.Root, "AGENTS.md"), []byte("staged\n")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(p.Root, "AGENTS.md"), "someone else's edit\n")
+	if _, err := s.Apply(); !errors.Is(err, ErrConflict) {
+		t.Fatalf("overwrote a concurrent hand edit: %v", err)
+	}
+}
+
+func TestPrecedenceMustBeAPermutation(t *testing.T) {
+	m := Manifest{Precedence: []string{"override", "override", "project", "profile", "package"}}
+	if !Blocking(m.Validate()) {
+		t.Fatal("duplicate precedence accepted")
+	}
+	if !slices.Equal(m.Order(), DefaultPrecedence) {
+		t.Fatal("invalid precedence used")
+	}
+}
+
+func TestHandEditedManifestIsFlagged(t *testing.T) {
+	p, _ := fixture(t)
+	apply(t, func() *Stage { s := p.Begin(); s.Enable(KindSkill, "go-testing", ""); return s }())
+	b, _ := os.ReadFile(p.Path(ManifestFile))
+	write(t, p.Path(ManifestFile), string(b)+"profiles: [go-service]\n")
+	p2, err := Open(p.Root)
+	if err != nil || !p2.ManifestEdited {
+		t.Fatalf("hand edit not flagged: %v", err)
+	}
+}
+
+func TestLockWithUnsafeHashIsRejected(t *testing.T) {
+	p, _ := fixture(t)
+	write(t, p.Path(LockFile), `{"version":1,"revision":1,"packages":[{"kind":"rule","name":"no-push","source":"user","sha256":"../../etc","files":[{"path":"../x","sha256":"y"}]}]}`)
+	write(t, p.Path(ManifestFile), "version: 1\nrules:\n  - name: no-push\n")
+	p2, err := Open(p.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	en, _ := p2.Resolve().Find(KindRule, "no-push")
+	if en.Status != StatusMissing && en.Status != StatusUpdate {
+		t.Fatalf("unsafe lock entry used: %s", en.Status)
+	}
+}
+
+func TestDisableKeepsSettings(t *testing.T) {
+	p, _ := fixture(t)
+	s := p.Begin()
+	s.Enable(KindSkill, "go-testing", "")
+	s.SetPaths(KindSkill, "go-testing", []string{"pkg/**"})
+	s.Disable(KindSkill, "go-testing")
+	s.Enable(KindSkill, "go-testing", "")
+	if e := s.Manifest.Skills[0]; e.Disabled || len(e.Paths) != 1 {
+		t.Fatalf("settings lost across disable/enable: %+v", e)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,6 +47,7 @@ type Stage struct {
 	baseManifest string
 	Manifest     Manifest
 	files        map[string][]byte // absolute path -> new content; nil deletes
+	base         map[string]string // absolute path -> hash of its content when first staged
 	accept       map[string]bool
 	Log          []string // what each edit did, in order, for review
 }
@@ -55,7 +57,7 @@ func (p *Project) Begin() *Stage {
 	m := p.Manifest
 	m.Skills, m.Rules, m.Profiles = slices.Clone(m.Skills), slices.Clone(m.Rules), slices.Clone(m.Profiles)
 	m.Libraries, m.Criteria = slices.Clone(m.Libraries), slices.Clone(m.Criteria)
-	return &Stage{p: p, baseRev: p.Lock.Revision, baseManifest: hashBytes(p.manifestRaw), Manifest: m, files: map[string][]byte{}, accept: map[string]bool{}}
+	return &Stage{p: p, baseRev: p.Lock.Revision, baseManifest: hashBytes(p.manifestRaw), Manifest: m, files: map[string][]byte{}, base: map[string]string{}, accept: map[string]bool{}}
 }
 
 // Dirty is whether anything is staged.
@@ -103,11 +105,20 @@ func (s *Stage) Disable(kind, name string) {
 		viaProfile = true
 	}
 	l := s.list(kind)
-	*l = slices.DeleteFunc(*l, func(e Entry) bool { return e.Name == name })
-	if viaProfile || s.fromProfile(kind, name) {
+	i := slices.IndexFunc(*l, func(e Entry) bool { return e.Name == name })
+	switch {
+	case i >= 0 && (hasSettings((*l)[i]) || viaProfile || s.fromProfile(kind, name)):
+		(*l)[i].Disabled = true // keep its settings for a later Enable
+	case i >= 0:
+		*l = slices.Delete(*l, i, i+1)
+	case viaProfile || s.fromProfile(kind, name):
 		*l = append(*l, Entry{Name: name, Disabled: true})
 	}
 	s.logf("disable %s %s", kind, name)
+}
+
+func hasSettings(e Entry) bool {
+	return e.Source != "" || e.Version != "" || e.Activation != "" || len(e.Paths) > 0 || e.Mandatory != nil
 }
 
 func (s *Stage) fromProfile(kind, name string) bool {
@@ -183,23 +194,61 @@ func projectOwned(rel string) bool {
 	case "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md":
 		return true
 	}
+	if strings.Contains(rel, `\`) || slices.Contains(strings.Split(rel, "/"), "..") {
+		return false
+	}
 	for _, pre := range []string{Dir + "/rules/", Dir + "/overrides/", Dir + "/library/"} {
-		if strings.HasPrefix(rel, pre) && !strings.Contains(rel, "..") {
+		if strings.HasPrefix(rel, pre) {
 			return true
 		}
 	}
 	return false
 }
 
-// SetFile stages new content for a project-owned file; nil deletes it.
+// journalTarget is whether an apply journal may write rel: the manifest,
+// the lock, .pai/.gitignore, or a project-owned file.
+func journalTarget(rel string) bool {
+	switch rel {
+	case Dir + "/" + ManifestFile, Dir + "/" + LockFile, Dir + "/.gitignore":
+		return true
+	}
+	return projectOwned(rel)
+}
+
+// insideRoot is whether path, with symbolic links in its existing part
+// resolved, lies under the project root: a linked .pai/rules cannot carry a
+// write outside the project.
+func (p *Project) insideRoot(path string) bool {
+	root, err := filepath.EvalSymlinks(p.Root)
+	if err != nil {
+		return false
+	}
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			rel, err := filepath.Rel(root, r)
+			return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		}
+		if filepath.Dir(dir) == dir {
+			return false
+		}
+	}
+}
+
+// SetFile stages new content for a project-owned file; nil deletes it. The
+// file's current content is remembered: if someone changes it before Apply,
+// Apply refuses rather than overwrite their edit.
 func (s *Stage) SetFile(path string, content []byte) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
 	rel, err := filepath.Rel(s.p.Root, abs)
-	if err != nil || !projectOwned(filepath.ToSlash(rel)) {
+	if err != nil || !projectOwned(filepath.ToSlash(rel)) || !s.p.insideRoot(abs) {
 		return fmt.Errorf("%w: %s", ErrReadOnly, path)
+	}
+	if _, ok := s.base[abs]; !ok {
+		before, _ := os.ReadFile(abs)
+		s.base[abs] = hashBytes(before)
 	}
 	s.files[abs] = content
 	if content == nil {
@@ -238,6 +287,7 @@ type Preview struct {
 	Lock     Lock
 	Revision int // the revision Apply would make
 	manifest []byte
+	resolved Resolved // what the lock was made from; Apply caches exactly this
 }
 
 // Preview resolves the staged configuration without writing anything.
@@ -247,7 +297,7 @@ func (s *Stage) Preview() (Preview, error) {
 		return Preview{}, err
 	}
 	r := s.p.resolve(s.Manifest, s.p.Lock, s.accept, s.files)
-	pv := Preview{Problems: r.Problems, Lock: r.Lock, Revision: s.baseRev + 1, manifest: mb}
+	pv := Preview{Problems: r.Problems, Lock: r.Lock, Revision: s.baseRev + 1, manifest: mb, resolved: r}
 	pv.Lock.Revision, pv.Lock.ManifestHash = pv.Revision, hashBytes(mb)
 	old := string(s.p.manifestRaw)
 	if d := Diff(old, string(mb)); d != "" {
@@ -331,11 +381,30 @@ func (s *Stage) Apply() (int, error) {
 		return 0, err
 	}
 	defer release()
+	pend := s.p.Path(pendingDir)
+	// Another apply committed but did not finish (a crash, a failed rename):
+	// finish it, never discard it, and let the person review the result.
+	if _, err := os.Stat(filepath.Join(pend, commitMark)); err == nil {
+		if err := s.p.rollForward(); err != nil {
+			return 0, err
+		}
+		if err := s.p.reload(); err != nil {
+			return 0, err
+		}
+		return 0, ErrConflict
+	}
 	if err := s.p.reload(); err != nil {
 		return 0, err
 	}
 	if s.p.Lock.Revision != s.baseRev || hashBytes(s.p.manifestRaw) != s.baseManifest {
 		return 0, ErrConflict
+	}
+	for abs, h := range s.base {
+		now, _ := os.ReadFile(abs)
+		if hashBytes(now) != h {
+			rel, _ := filepath.Rel(s.p.Root, abs)
+			return 0, fmt.Errorf("%w: %s was edited since it was staged", ErrConflict, filepath.ToSlash(rel))
+		}
 	}
 	pv, err := s.Preview()
 	if err != nil {
@@ -344,9 +413,9 @@ func (s *Stage) Apply() (int, error) {
 	if Blocking(pv.Problems) {
 		return 0, &InvalidError{pv.Problems}
 	}
-	// Cache every locked package's exact bytes before the lock names them.
-	r := s.p.resolve(s.Manifest, s.p.Lock, s.accept, s.files)
-	for _, en := range r.Enabled {
+	// Cache every locked package's exact bytes before the lock names them,
+	// from the same resolution the lock was made from.
+	for _, en := range pv.resolved.Enabled {
 		if en.Status == StatusNew || (en.Status == StatusLocked && en.Installed != nil && en.Installed.Hash == en.Pkg.Hash) {
 			if err := cachePut(en.Pkg); err != nil {
 				return 0, fmt.Errorf("cache %s %s: %w", en.Kind, en.Pkg.Name, err)
@@ -358,8 +427,7 @@ func (s *Stage) Apply() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	pend := s.p.Path(pendingDir)
-	if err := os.RemoveAll(pend); err != nil {
+	if err := os.RemoveAll(pend); err != nil { // an uncommitted leftover
 		return 0, err
 	}
 	var pl plan
@@ -403,7 +471,7 @@ func (s *Stage) Apply() (int, error) {
 	if err := s.p.reload(); err != nil {
 		return 0, err
 	}
-	s.Log, s.files, s.accept = nil, map[string][]byte{}, map[string]bool{}
+	s.Log, s.files, s.base, s.accept = nil, map[string][]byte{}, map[string]string{}, map[string]bool{}
 	s.baseRev, s.baseManifest = s.p.Lock.Revision, hashBytes(s.p.manifestRaw)
 	return s.p.Lock.Revision, nil
 }
@@ -433,12 +501,35 @@ func (p *Project) recoverApply() error {
 	return p.rollForward()
 }
 
+var stagedName = regexp.MustCompile(`^[0-9]+$`)
+
+// checkPlan refuses a journal that names anything but project-owned files
+// inside the root. A repository could ship its own .pai/.pending; opening it
+// must not write or delete outside what ULTRA itself would.
+func (p *Project) checkPlan(pl plan) error {
+	for _, w := range pl.Writes {
+		if !stagedName.MatchString(w.Staged) || !journalTarget(w.Target) || !p.insideRoot(filepath.Join(p.Root, filepath.FromSlash(w.Target))) {
+			return fmt.Errorf("apply journal names an unsafe write %q", w.Target)
+		}
+	}
+	for _, d := range pl.Deletes {
+		if !projectOwned(d) || !p.insideRoot(filepath.Join(p.Root, filepath.FromSlash(d))) {
+			return fmt.Errorf("apply journal names an unsafe delete %q", d)
+		}
+	}
+	return nil
+}
+
 // rollForward moves every staged file into place. It is safe to repeat: a
-// staged file already moved is skipped.
+// staged file already moved is skipped. An unsafe journal is refused whole
+// and left for a person to inspect.
 func (p *Project) rollForward() error {
 	pend := p.Path(pendingDir)
 	var pl plan
 	if err := atomicfile.ReadJSON(filepath.Join(pend, planFile), &pl); err != nil {
+		return err
+	}
+	if err := p.checkPlan(pl); err != nil {
 		return err
 	}
 	for _, w := range pl.Writes {

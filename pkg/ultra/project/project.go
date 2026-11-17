@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -29,7 +30,11 @@ type Project struct {
 	// HasManifest is false for a project not yet initialized for ULTRA:
 	// everything works on the zero manifest, nothing is written until an apply.
 	HasManifest bool
-	manifestRaw []byte
+	// ManifestEdited is true when project.yaml no longer matches the lock: a
+	// person edited it by hand. The lock still pins content; the next apply
+	// re-locks from the edited manifest.
+	ManifestEdited bool
+	manifestRaw    []byte
 }
 
 // Path is a path inside the project's .pai directory.
@@ -48,7 +53,7 @@ func Open(dir string) (*Project, error) {
 	if err := p.recoverApply(); err != nil {
 		return nil, fmt.Errorf("finish an interrupted apply: %w", err)
 	}
-	return p, p.reload()
+	return p, p.readConsistent()
 }
 
 func (p *Project) reload() error {
@@ -72,7 +77,27 @@ func (p *Project) reload() error {
 	if p.Lock.Version > LockVersion {
 		return fmt.Errorf("%s: version %d is newer than this PAI understands", LockFile, p.Lock.Version)
 	}
+	p.ManifestEdited = p.HasManifest && p.Lock.Revision > 0 && p.Lock.ManifestHash != hashBytes(raw)
 	return nil
+}
+
+// readConsistent reloads, and when the manifest and lock disagree while an
+// apply is pending (a reader raced its renames), waits for that apply and
+// reads again.
+func (p *Project) readConsistent() error {
+	if err := p.reload(); err != nil {
+		return err
+	}
+	if !p.ManifestEdited {
+		return nil
+	}
+	if _, err := os.Stat(p.Path(pendingDir)); err != nil {
+		return nil // a hand edit, not an apply in flight
+	}
+	if err := p.recoverApply(); err != nil {
+		return err
+	}
+	return p.reload()
 }
 
 // Revision is the applied configuration revision.
@@ -108,11 +133,25 @@ func (p *Project) Installed() ([]Package, []Problem) {
 // cacheDir holds locked package content by hash, so a lock still means the
 // same bytes after a library is updated.
 func cacheDir(hash string) (string, error) {
+	if !lockHash.MatchString(hash) {
+		return "", fmt.Errorf("bad content hash %q", hash)
+	}
 	home, err := mode.Home()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(home, "cache", strings.TrimPrefix(hash, "sha256:")), nil
+}
+
+var lockHash = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// safeLockPath is whether a lock's file path is relative and stays inside
+// its package: a lockfile comes with the repository and is not trusted.
+func safeLockPath(p string) bool {
+	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, `\`) || strings.Contains(p, ":") {
+		return false
+	}
+	return !slices.ContainsFunc(strings.Split(p, "/"), func(s string) bool { return s == ".." || s == "." || s == "" })
 }
 
 // cachePut copies a package's files into the cache.
@@ -150,7 +189,13 @@ func cacheGet(l Locked) (Package, error) {
 	if l.Kind != KindSkill && len(l.Files) == 1 {
 		main = l.Files[0].Path
 	}
+	if hashFiles(l.Files) != l.Hash {
+		return Package{}, fmt.Errorf("lock entry %s does not match its file list", l.Name)
+	}
 	for _, f := range l.Files {
+		if !safeLockPath(f.Path) {
+			return Package{}, fmt.Errorf("lock entry %s names an unsafe path %q", l.Name, f.Path)
+		}
 		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f.Path)))
 		if err != nil {
 			return Package{}, err
@@ -162,6 +207,9 @@ func cacheGet(l Locked) (Package, error) {
 	pk, ps := parsePackage(l.Kind, l.Source, filepath.Join(dir, filepath.FromSlash(main)))
 	if l.Kind == KindSkill {
 		pk.Files, pk.Hash, _ = hashDir(dir) // .complete is a dot file and skipped
+		if pk.Hash != l.Hash {
+			return Package{}, fmt.Errorf("cached %s holds files the lock does not name", l.Name)
+		}
 	}
 	if Blocking(ps) {
 		return pk, errors.New(ps[0].Message)
@@ -237,7 +285,7 @@ type Resolved struct {
 // Find is the enabled package kind/name.
 func (r Resolved) Find(kind, name string) (Enabled, bool) {
 	for _, e := range r.Enabled {
-		if e.Kind == kind && e.Pkg.Name == name {
+		if e.Kind == kind && (e.Pkg.Name == name || e.Entry.Name == name) {
 			return e, true
 		}
 	}

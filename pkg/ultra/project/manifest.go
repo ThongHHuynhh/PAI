@@ -153,10 +153,23 @@ func (m Manifest) Attempts() int {
 
 // Order is the precedence in effect.
 func (m Manifest) Order() []string {
-	if len(m.Precedence) > 0 {
+	if validOrder(m.Precedence) {
 		return m.Precedence
 	}
 	return DefaultPrecedence
+}
+
+// validOrder is whether o lists every source exactly once.
+func validOrder(o []string) bool {
+	if len(o) != len(DefaultPrecedence) {
+		return false
+	}
+	for _, s := range DefaultPrecedence {
+		if !slices.Contains(o, s) {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseManifest reads a manifest strictly: unknown keys are errors, so a typo
@@ -223,8 +236,8 @@ func (m Manifest) Validate() []Problem {
 			ps = append(ps, errorf("manifest", "precedence", "unknown source %q", p))
 		}
 	}
-	if len(m.Precedence) > 0 && len(m.Precedence) != len(DefaultPrecedence) {
-		ps = append(ps, errorf("manifest", "precedence", "must list all of %s", strings.Join(DefaultPrecedence, ", ")))
+	if len(m.Precedence) > 0 && !validOrder(m.Precedence) {
+		ps = append(ps, errorf("manifest", "precedence", "must list each of %s exactly once", strings.Join(DefaultPrecedence, ", ")))
 	}
 	switch m.Executor.Default {
 	case "", "pai", "claude", "codex":

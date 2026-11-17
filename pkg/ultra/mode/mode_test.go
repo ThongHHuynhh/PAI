@@ -117,3 +117,21 @@ func TestProjectsAreIsolated(t *testing.T) {
 		t.Fatal("one project's default leaked into another")
 	}
 }
+
+func TestConcurrentLinksAllKept(t *testing.T) {
+	isolate(t)
+	p, _ := Find(t.TempDir())
+	done := make(chan error)
+	for i := range 8 {
+		go func() { done <- p.AddLink(Link{From: "classic:s", To: "ultra:" + string(rune('a'+i))}) }()
+	}
+	for range 8 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	pr, _ := p.LoadPrefs()
+	if len(pr.Links) != 8 {
+		t.Fatalf("%d of 8 links kept", len(pr.Links))
+	}
+}

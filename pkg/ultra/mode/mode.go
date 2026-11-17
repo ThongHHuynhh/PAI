@@ -18,11 +18,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
 	"pai/pkg/statefile"
 	"pai/pkg/ultra/internal/atomicfile"
+	"pai/pkg/ultra/internal/lockfile"
 )
 
 // Mode is how a session runs.
@@ -105,7 +107,11 @@ func Find(dir string) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	sum := sha256.Sum256([]byte(strings.ToLower(filepath.Clean(root))))
+	key := filepath.Clean(root)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		key = strings.ToLower(key) // case-insensitive file systems: one project, one id
+	}
+	sum := sha256.Sum256([]byte(key))
 	id := unsafeID.ReplaceAllString(filepath.Base(root), "-") + "-" + hex.EncodeToString(sum[:])[:10]
 	return Project{Root: root, ID: id, State: filepath.Join(home, "projects", id)}, nil
 }
@@ -170,6 +176,11 @@ func Default(dir string) (Mode, error) {
 // SetDefault records m as the project's default for new sessions. Running
 // sessions keep the mode they were made in.
 func (p Project) SetDefault(m Mode) error {
+	release, err := p.lockPrefs()
+	if err != nil {
+		return err
+	}
+	defer release()
 	pr, err := p.LoadPrefs()
 	if err != nil {
 		return err
@@ -180,6 +191,11 @@ func (p Project) SetDefault(m Mode) error {
 
 // AddLink records that from's work continues in to.
 func (p Project) AddLink(l Link) error {
+	release, err := p.lockPrefs()
+	if err != nil {
+		return err
+	}
+	defer release()
 	pr, err := p.LoadPrefs()
 	if err != nil {
 		return err
@@ -201,4 +217,15 @@ func (pr Prefs) LinksOf(ref string) []Link {
 		}
 	}
 	return out
+}
+
+// prefsWait and prefsStale bound the lock around a prefs read-modify-write.
+const (
+	prefsWait  = 5 * time.Second
+	prefsStale = time.Minute
+)
+
+// lockPrefs serializes changes to mode.json across processes.
+func (p Project) lockPrefs() (func(), error) {
+	return lockfile.Acquire(filepath.Join(p.State, "mode.lock"), prefsWait, prefsStale)
 }

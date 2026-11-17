@@ -241,6 +241,9 @@ func parseRaw(kind, lib, file string, raw []byte) (Package, []Problem) {
 
 // hashDir hashes every regular file under dir, skipping dot files.
 func hashDir(dir string) ([]LockedFile, string, error) {
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real // walk a linked skill directory, not the link
+	}
 	var files []LockedFile
 	var total int64
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -298,7 +301,7 @@ func Scan(lib Library, root string) ([]Package, []Problem) {
 	if es, err := os.ReadDir(filepath.Join(dir, "skills")); err == nil {
 		for _, e := range es {
 			f := filepath.Join(dir, "skills", e.Name(), skillFile)
-			if _, err := os.Stat(f); e.IsDir() && err == nil {
+			if st, err := os.Stat(f); err == nil && st.Mode().IsRegular() { // a linked skill directory counts
 				add(parsePackage(KindSkill, lib.Name, f))
 			}
 		}
