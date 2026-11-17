@@ -100,7 +100,8 @@ func (c *Coordinator) Create(nt NewTask) (*task.Task, error) {
 	if strings.TrimSpace(nt.Objective) == "" {
 		return nil, errors.New("a task needs an objective")
 	}
-	m := c.Project.Manifest
+	p := c.current()
+	m := p.Manifest
 	crit := slices.Clone(nt.Criteria)
 	if !nt.NoDefaults {
 		for _, d := range m.Criteria {
@@ -130,8 +131,8 @@ func (c *Coordinator) Create(nt NewTask) (*task.Task, error) {
 	}
 	t := &task.Task{
 		ID: nt.ID, Objective: nt.Objective, Criteria: crit, Constraints: nt.Constraints, Paths: nt.Paths, Skills: nt.Skills,
-		Parent: nt.Parent, DependsOn: nt.DependsOn, Workspace: c.Project.Root, Worktree: nt.Worktree, Links: nt.Links,
-		Executor: executor, MaxAttempts: m.Attempts(), ConfigRev: c.Project.Revision(), Mode: "ultra",
+		Parent: nt.Parent, DependsOn: nt.DependsOn, Workspace: p.Root, Worktree: nt.Worktree, Links: nt.Links,
+		Executor: executor, MaxAttempts: m.Attempts(), ConfigRev: p.Revision(), Mode: "ultra",
 	}
 	return t, c.Store.Create(t)
 }
@@ -139,7 +140,7 @@ func (c *Coordinator) Create(nt NewTask) (*task.Task, error) {
 // DefaultExecutor is the manifest's choice, else the first available of
 // claude, codex, pai.
 func (c *Coordinator) DefaultExecutor() string {
-	if d := c.Project.Manifest.Executor.Default; d != "" {
+	if d := c.current().Manifest.Executor.Default; d != "" {
 		return d
 	}
 	for _, n := range []string{"claude", "codex", "pai"} {
@@ -165,7 +166,6 @@ func (c *Coordinator) Context(t *task.Task, executor string) (ctxsel.Context, *t
 	if err != nil {
 		return ctxsel.Context{}, nil, err
 	}
-	c.Project = p
 	ad, ok := c.Adapters[executor]
 	if !ok {
 		return ctxsel.Context{}, nil, fmt.Errorf("unknown executor %q", executor)
@@ -210,9 +210,20 @@ type Outcome struct {
 
 // permissions are the person's executor settings from the manifest. Skills,
 // rules, memory and handoffs cannot set them.
-func (c *Coordinator) permissions() exec.Permissions {
-	s := c.Project.Manifest.Executor.Settings
-	return exec.Permissions{ClaudePermissionMode: s["claude.permission_mode"], CodexSandbox: s["codex.sandbox"]}
+func permissions(p *project.Project) exec.Permissions {
+	s := p.Manifest.Executor.Settings
+	return exec.Permissions{ClaudePermissionMode: s["claude.permission_mode"], CodexSandbox: s["codex.sandbox"],
+		AllowedTools: strings.Fields(s["claude.allowed_tools"])}
+}
+
+// current is the project as it is on disk now. Each use opens it afresh, so
+// an apply elsewhere (the TUI, the CLI) is seen, and no two goroutines share
+// one Project. c.Project is only the project's identity and paths.
+func (c *Coordinator) current() *project.Project {
+	if p, err := project.Open(c.Project.Root); err == nil {
+		return p
+	}
+	return c.Project
 }
 
 // Run works on task id with executor until it is accepted, blocked, failed
@@ -311,10 +322,11 @@ func (c *Coordinator) attempt(ctx context.Context, id, executor string, ad exec.
 	if err != nil {
 		return false, err
 	}
-	model := c.Project.Manifest.Executor.Model
+	p := c.current()
+	model := p.Manifest.Executor.Model
 	rec.Model = model
 	exStart := time.Now()
-	run, err := ad.Start(runCtx, exec.Assignment{TaskID: id, Workdir: workdir(t), Prompt: cx.Prompt, Model: model, Resume: native, Permissions: c.permissions()})
+	run, err := ad.Start(runCtx, exec.Assignment{TaskID: id, Workdir: workdir(t), Prompt: cx.Prompt, Model: model, Resume: native, Permissions: permissions(p)})
 	if err != nil {
 		var unc *exec.UncertainError
 		if errors.As(err, &unc) {
@@ -374,10 +386,9 @@ func (c *Coordinator) attempt(ctx context.Context, id, executor string, ad exec.
 		c.finish(&rec, out, began, exStart, exEnd, 0)
 		return false, errors.Join(ctx.Err(), uerr, rerr, cerr)
 	}
+	// Every claim, "blocked" included, is checked: an executor that could not
+	// verify its own work may still have done it.
 	nextState := task.Reported
-	if res.Status == "blocked" {
-		nextState = task.Blocked
-	}
 	t, err = c.Store.Update(id, task.Guard{Epoch: epoch}, func(t *task.Task) (task.Event, error) {
 		t.Report = report
 		if t.Native == nil {
@@ -389,21 +400,11 @@ func (c *Coordinator) attempt(ctx context.Context, id, executor string, ad exec.
 		if res.Summary != "" {
 			t.Completed = append(t.Completed, fmt.Sprintf("attempt %d (%s, claimed %s): %s", t.Attempts, executor, res.Status, res.Summary))
 		}
-		if nextState == task.Blocked {
-			t.Blockers = append(t.Blockers, "executor reported blocked: "+strings.Join(append([]string{res.Summary}, res.Open...), "; "))
-		}
 		t.State = nextState
 		return task.Event{Type: "report", Actor: executor, Note: "claimed " + res.Status}, nil
 	})
 	if err != nil {
 		return false, err
-	}
-	if nextState == task.Blocked {
-		rerr := release(task.Blocked, "executor blocked")
-		_, cerr := c.Store.Checkpoint(id)
-		rec.Outcome = "blocked"
-		c.finish(&rec, out, began, exStart, exEnd, 0)
-		return false, errors.Join(fmt.Errorf("%w: the executor reported it is blocked", ErrBlocked), rerr, cerr)
 	}
 	// The coordinator, not the executor, decides. Checks run under the
 	// lease; if the criteria change while they run, they run again.
@@ -455,8 +456,11 @@ func (c *Coordinator) attempt(ctx context.Context, id, executor string, ad exec.
 	}
 	again := false
 	var decision error
+	// With no criteria the checks pass vacuously: the executor's claim is all
+	// there is, so only "done" is accepted, and it stays unverified.
+	vacuous := len(t.Criteria) == 0 && res.Status != "done"
 	switch {
-	case val.Passed && !val.NeedsReview:
+	case val.Passed && !val.NeedsReview && !vacuous:
 		decision = c.decide(id, epoch, val, task.Accepted, "all criteria passed", out)
 		rec.Outcome = "accepted"
 	case len(failing) == 0 && val.NeedsReview:
@@ -464,6 +468,13 @@ func (c *Coordinator) attempt(ctx context.Context, id, executor string, ad exec.
 		rec.Outcome = "blocked"
 		if decision == nil {
 			decision = fmt.Errorf("%w: review needed", ErrBlocked)
+		}
+	case res.Status == "blocked":
+		// The executor needs a person and the checks do not pass: no retry.
+		decision = c.decide(id, epoch, val, task.Blocked, "executor reported blocked: "+strings.Join(append([]string{res.Summary}, res.Open...), "; "), out)
+		rec.Outcome = "blocked"
+		if decision == nil {
+			decision = fmt.Errorf("%w: the executor reported it is blocked", ErrBlocked)
 		}
 	case t.Attempts < t.MaxAttempts:
 		decision = c.decide(id, epoch, val, task.Pending, "retry after failed checks", out)

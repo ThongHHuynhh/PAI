@@ -326,3 +326,17 @@ func TestUnreadableCheckpointPreventsNativeResume(t *testing.T) {
 		t.Fatal("resumed a native session without a readable checkpoint")
 	}
 }
+
+func TestBlockedClaimIsStillChecked(t *testing.T) {
+	dir := repo(t)
+	s := &script{step: func(n int, a exec.Assignment) string {
+		os.WriteFile(filepath.Join(a.Workdir, "out.txt"), []byte("hello"), 0o644)
+		return "```pai-result\n{\"status\":\"blocked\",\"summary\":\"could not run the tests\"}\n```"
+	}}
+	c := open(t, dir, s, exec.Capabilities{})
+	tk, _ := c.Create(NewTask{Objective: "x", Criteria: []task.Criterion{fileCrit("out.txt", "hello")}, Executor: "fake"})
+	out, err := c.Run(context.Background(), tk.ID, "", nil)
+	if err != nil || out.Task.State != task.Accepted {
+		t.Fatalf("work done but claimed blocked: %v %s", err, out.Task.State)
+	}
+}
