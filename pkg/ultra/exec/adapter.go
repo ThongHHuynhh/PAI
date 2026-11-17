@@ -168,3 +168,14 @@ func tail(s string, n int) string {
 
 // firstLine is the first line of s, trimmed.
 func firstLine(s string) string { return strings.TrimSpace(strings.SplitN(s, "\n", 2)[0]) }
+
+// UncertainError is a start that may or may not have reached the executor:
+// a request whose reply was lost. Ref names what to inspect. The
+// coordinator records the operation as unknown rather than retrying it.
+type UncertainError struct {
+	Ref string
+	Err error
+}
+
+func (e *UncertainError) Error() string { return "uncertain start (" + e.Ref + "): " + e.Err.Error() }
+func (e *UncertainError) Unwrap() error { return e.Err }

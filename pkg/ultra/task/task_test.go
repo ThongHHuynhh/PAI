@@ -418,3 +418,19 @@ func TestRestoreRefusesUnsafePaths(t *testing.T) {
 		t.Fatal("partial restore succeeded silently")
 	}
 }
+
+func TestReportedWithDeadOwnerIsRecovered(t *testing.T) {
+	s, c := newStore(t)
+	tk := mk(t, s)
+	a, _ := s.Claim(tk.ID, Owner{ID: "a"}, DefaultLease)
+	s.StartAttempt(tk.ID, a.Epoch, "x", 0)
+	s.Move(tk.ID, Guard{Epoch: a.Epoch}, Reported, "a", "done")
+	c.add(2 * DefaultLease)
+	if ids, _ := s.Recover(); len(ids) != 1 {
+		t.Fatal("reported task with a dead owner not recovered")
+	}
+	got, _ := s.Get(tk.ID)
+	if got.State != Pending || got.Owner != nil {
+		t.Fatalf("after recovery: %s", got.State)
+	}
+}

@@ -707,3 +707,8 @@ func EnvFingerprint(command string) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+// Inside is whether path lies under base once symbolic links in its
+// existing part are resolved: a link or junction cannot carry a read or a
+// write outside base.
+func Inside(base, path string) bool { return within(base, path) }

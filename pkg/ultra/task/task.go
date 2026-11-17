@@ -56,6 +56,10 @@ func (s State) Terminal() bool { return len(transitions[s]) == 0 }
 // Active is whether an owner is (or was) working on it.
 func (s State) Active() bool { return s == Claimed || s == Running }
 
+// Held is whether an owner holds the task in this state: active, or
+// reported and not yet decided.
+func (s State) Held() bool { return s.Active() || s == Reported }
+
 // Criterion kinds.
 const (
 	CriterionCommand = "command" // run Command in the workspace; exit 0 passes
@@ -178,6 +182,7 @@ type Task struct {
 	Parent       string      `json:"parent,omitempty"`
 	Workspace    string      `json:"workspace"`
 	Worktree     string      `json:"worktree,omitempty"` // an isolated workspace, for delegated work
+	Base         string      `json:"base,omitempty"`     // the commit a delegated worktree started from
 
 	State       State             `json:"state"`
 	Rev         int               `json:"rev"`

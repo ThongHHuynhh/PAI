@@ -347,7 +347,7 @@ func (s *Store) Move(id string, g Guard, to State, actor, note string) (*Task, e
 // paused with its dependencies accepted. An owner whose lease ran out is
 // recovered first, by the same rules as Recover.
 func (s *Store) Claim(id string, o Owner, lease time.Duration) (*Task, error) {
-	if t, err := s.Get(id); err == nil && t.State.Active() && t.Owner != nil && s.now().After(t.Owner.Until) {
+	if t, err := s.Get(id); err == nil && t.State.Held() && t.Owner != nil && s.now().After(t.Owner.Until) {
 		if err := s.recoverOne(t); err != nil && !errors.Is(err, ErrRevision) {
 			return nil, err
 		}
@@ -355,7 +355,7 @@ func (s *Store) Claim(id string, o Owner, lease time.Duration) (*Task, error) {
 	return s.Update(id, Guard{}, func(t *Task) (Event, error) {
 		switch {
 		case t.State == Pending || t.State == Paused:
-		case t.State.Active():
+		case t.State.Held():
 			return Event{}, fmt.Errorf("%w: %s until %s", ErrHeld, t.Owner.ID, t.Owner.Until.Format(time.RFC3339))
 		default:
 			return Event{}, fmt.Errorf("%w: %s cannot be claimed", ErrTransition, t.State)
@@ -450,7 +450,7 @@ func (s *Store) Recover() ([]string, error) {
 	var out []string
 	now := s.now()
 	for _, t := range ts {
-		if !t.State.Active() || t.Owner == nil || !now.After(t.Owner.Until) {
+		if !t.State.Held() || t.Owner == nil || !now.After(t.Owner.Until) {
 			continue
 		}
 		err := s.recoverOne(t)
@@ -474,6 +474,11 @@ func (s *Store) recoverOne(seen *Task) error {
 		markUnknown(t, "owner "+owner+" stopped renewing its lease")
 		t.Owner = nil
 		t.State = Paused
+		if t.State == Paused && seen.State == Reported {
+			// The executor finished; only the decision was lost. Validation is
+			// repeatable, so the task goes back to be validated by a new attempt.
+			t.State = Pending
+		}
 		if o := unresolved(t); o != nil {
 			t.State = Blocked
 			for _, o := range t.Ops {
