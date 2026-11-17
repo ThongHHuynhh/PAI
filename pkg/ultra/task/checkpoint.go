@@ -578,21 +578,57 @@ type Handoff struct {
 // constraints, decisions, blockers, unknown operations and the next action
 // are always kept whole; history fills what budget is left, newest first.
 func (cp *Checkpoint) Render(budget int, drift *Drift) Handoff {
+	mustText, opt := cp.Parts(drift, true)
+	h := Handoff{Budget: budget}
+	text := mustText
+	used := tokens(text)
+	if used > budget {
+		h.Overrun = true
+	}
+	// Reserve room for the footer that says how much was left out.
+	footer := fmt.Sprintf("(%d older entries omitted; full checkpoint: %s)\n", len(opt), filepath.Join(cp.Dir, "checkpoint.json"))
+	reserve := tokens(footer)
+	var kept []string
+	for _, o := range opt {
+		if t := tokens(o + "\n"); used+t+reserve <= budget {
+			kept = append(kept, o)
+			used += t
+		} else {
+			h.Truncated++
+		}
+	}
+	if len(kept) > 0 {
+		text += strings.Join(kept, "\n") + "\n"
+	}
+	if h.Truncated > 0 {
+		text += fmt.Sprintf("(%d older entries omitted; full checkpoint: %s)\n", h.Truncated, filepath.Join(cp.Dir, "checkpoint.json"))
+	}
+	h.Text, h.Tokens = text, tokens(text)
+	return h
+}
+
+// Parts splits the checkpoint into what a resume must carry whole and its
+// history, newest first, one line each. Without contract it leaves out the
+// objective, criteria, constraints and decisions, for a caller that states
+// those itself.
+func (cp *Checkpoint) Parts(drift *Drift, contract bool) (string, []string) {
 	var must strings.Builder
 	line := func(b *strings.Builder, format string, a ...any) { fmt.Fprintf(b, format+"\n", a...) }
 	line(&must, "## Task %s (checkpoint %s, task rev %d, config r%d)", cp.TaskID, cp.ID, cp.TaskRev, cp.ConfigRev)
-	line(&must, "Objective: %s", cp.Objective)
-	if len(cp.Criteria) > 0 {
-		line(&must, "Acceptance criteria (checked by PAI, not by you; do not change them):")
-		for _, c := range cp.Criteria {
-			line(&must, "- [%s] %s", c.ID, c.Describe())
+	if contract {
+		line(&must, "Objective: %s", cp.Objective)
+		if len(cp.Criteria) > 0 {
+			line(&must, "Acceptance criteria (checked by PAI, not by you; do not change them):")
+			for _, c := range cp.Criteria {
+				line(&must, "- [%s] %s", c.ID, c.Describe())
+			}
 		}
-	}
-	for _, c := range cp.Constraints {
-		line(&must, "Constraint: %s", c)
-	}
-	for _, d := range cp.Decisions {
-		line(&must, "Decision: %s", d)
+		for _, c := range cp.Constraints {
+			line(&must, "Constraint: %s", c)
+		}
+		for _, d := range cp.Decisions {
+			line(&must, "Decision: %s", d)
+		}
 	}
 	ws := cp.Workspace
 	if ws.Git {
@@ -619,13 +655,6 @@ func (cp *Checkpoint) Render(budget int, drift *Drift) Handoff {
 	if cp.NextAction != "" {
 		line(&must, "Next action: %s", cp.NextAction)
 	}
-	h := Handoff{Budget: budget}
-	text := must.String()
-	used := tokens(text)
-	if used > budget {
-		h.Overrun = true
-	}
-	// Optional history, newest first, while it fits.
 	var opt []string
 	if cp.Report != nil && cp.Report.Summary != "" {
 		opt = append(opt, fmt.Sprintf("Last executor report (%s, unverified): %s", cp.Report.Status, cp.Report.Summary))
@@ -642,26 +671,7 @@ func (cp *Checkpoint) Render(budget int, drift *Drift) Handoff {
 	for _, c := range slices.Backward(cp.Completed) {
 		opt = append(opt, "Done: "+c)
 	}
-	// Reserve room for the footer that says how much was left out.
-	footer := fmt.Sprintf("(%d older entries omitted; full checkpoint: %s)\n", len(opt), filepath.Join(cp.Dir, "checkpoint.json"))
-	reserve := tokens(footer)
-	var kept []string
-	for _, o := range opt {
-		if t := tokens(o + "\n"); used+t+reserve <= budget {
-			kept = append(kept, o)
-			used += t
-		} else {
-			h.Truncated++
-		}
-	}
-	if len(kept) > 0 {
-		text += strings.Join(kept, "\n") + "\n"
-	}
-	if h.Truncated > 0 {
-		text += fmt.Sprintf("(%d older entries omitted; full checkpoint: %s)\n", h.Truncated, filepath.Join(cp.Dir, "checkpoint.json"))
-	}
-	h.Text, h.Tokens = text, tokens(text)
-	return h
+	return must.String(), opt
 }
 
 func tokens(s string) int {
