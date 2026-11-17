@@ -113,6 +113,9 @@ type Conf struct {
 	Preset       string                     `json:"preset,omitempty"`     // the catalog preset a connector began from; display only
 	Compact      string                     `json:"compact,omitempty"`    // compaction mode: "" or CompactAuto, or CompactManual
 	AutoModel    bool                       `json:"auto_model,omitempty"` // the model proposes a model per task; the person approves each switch
+	// Mode pins the session to the mode it was made in: "" or "classic" is
+	// PAI Classic, "ultra" a session an ULTRA task made. See pkg/ultra/mode.
+	Mode string `json:"mode,omitempty"`
 }
 
 // Compaction modes. Auto compacts when PAI judges it right; manual asks the
