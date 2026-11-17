@@ -162,7 +162,7 @@ func TestCrashRecoveryAndResumeWithChangedWorkspace(t *testing.T) {
 	tk, _ := c.Create(NewTask{Objective: "write", Criteria: []task.Criterion{fileCrit("out.txt", "hello")}, Executor: "fake"})
 	// A previous process claimed, started an executor run, and died.
 	dead := task.Owner{ID: "dead"}
-	got, _ := c.Store.Claim(tk.ID, dead, 100*time.Millisecond)
+	got, _ := c.Store.Claim(tk.ID, dead, 2*time.Second)
 	c.Store.StartAttempt(tk.ID, got.Epoch, "fake", 0)
 	op, _ := c.Store.BeginOp(tk.ID, got.Epoch, task.Op{Kind: "executor_run", Desc: "fake attempt 1"})
 	c.Store.SetOp(tk.ID, got.Epoch, op.ID, task.OpStarted, "native-1", "")
@@ -173,7 +173,7 @@ func TestCrashRecoveryAndResumeWithChangedWorkspace(t *testing.T) {
 	c.Store.Checkpoint(tk.ID)
 	// It may have written part of its work.
 	os.WriteFile(filepath.Join(dir, "partial.txt"), []byte("half"), 0o644)
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(2200 * time.Millisecond)
 	// Recovery does not replay the uncertain run.
 	if ids, _ := c.Recover(); len(ids) != 1 {
 		t.Fatalf("recover: %v", ids)
