@@ -329,6 +329,14 @@ func TestTornTailDoesNotSwallowNextEvent(t *testing.T) {
 	if err != nil || got.State != Blocked {
 		t.Fatalf("event after a torn tail lost: %+v %v", got, err)
 	}
+	if evs, err := s.Events(tk.ID); err != nil || len(evs) != 2 {
+		t.Fatalf("a recovered tear read as corruption: %v (%d events)", err, len(evs))
+	}
+	// A bad line without the marker is still corruption.
+	f, _ = os.OpenFile(filepath.Join(s.dir(tk.ID), eventsFile), os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("garbage\n")
+	f.Close()
+	s.Move(tk.ID, Guard{}, Pending, "x", "")
 	if _, err := s.Events(tk.ID); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("interior bad line not reported: %v", err)
 	}
@@ -432,5 +440,35 @@ func TestReportedWithDeadOwnerIsRecovered(t *testing.T) {
 	got, _ := s.Get(tk.ID)
 	if got.State != Pending || got.Owner != nil {
 		t.Fatalf("after recovery: %s", got.State)
+	}
+}
+
+func TestExpiredLeaseAuthorizesNothing(t *testing.T) {
+	s, c := newStore(t)
+	tk := mk(t, s)
+	a, _ := s.Claim(tk.ID, Owner{ID: "a"}, DefaultLease)
+	c.add(2 * DefaultLease) // suspended past the lease; nobody has recovered yet
+	if err := s.Renew(tk.ID, a.Epoch, DefaultLease); !errors.Is(err, ErrStaleOwner) {
+		t.Fatalf("renewed an expired lease: %v", err)
+	}
+	if _, err := s.Move(tk.ID, Guard{Epoch: a.Epoch}, Running, "a", ""); !errors.Is(err, ErrStaleOwner) {
+		t.Fatalf("wrote on an expired lease: %v", err)
+	}
+}
+
+func TestAmendRefusedOnFinishedTask(t *testing.T) {
+	s, _ := newStore(t)
+	tk := mk(t, s)
+	s.Update(tk.ID, Guard{}, func(t *Task) (Event, error) {
+		t.Validation = &Validation{Passed: true}
+		return Event{Type: "test"}, nil
+	})
+	got, err := s.AmendCriteria(tk.ID, Guard{}, nil, "person", "drop the tests")
+	if err != nil || got.Validation != nil {
+		t.Fatalf("amend on a pending task: %v, validation kept: %v", err, got.Validation != nil)
+	}
+	s.Move(tk.ID, Guard{}, Cancelled, "x", "")
+	if _, err := s.AmendCriteria(tk.ID, Guard{}, nil, "person", "late"); err == nil {
+		t.Fatal("amended a cancelled task")
 	}
 }

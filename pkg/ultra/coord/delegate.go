@@ -53,11 +53,12 @@ func (c *Coordinator) Delegate(parentID string, nt NewTask) (*task.Task, error) 
 }
 
 // Integrate applies an accepted child's work to its parent's workspace. It
-// takes the work as it was accepted, from the checkpoint the decision was
-// made on, relative to the recorded base: commits the child made, then its
-// uncommitted changes, then its untracked files. Edits made after acceptance
-// are not carried. Patches apply all or nothing (git apply --check first);
-// untracked files must not exist in the parent and cannot be written
+// takes the work exactly as accepted: the checkpoint the acceptance was
+// decided on, not whatever the child's tree holds now. The child's result
+// (its commits since the recorded base, then its uncommitted changes) is
+// rebuilt in a temporary worktree at the base and becomes one patch, which
+// git checks against the parent before applying it all or nothing.
+// Untracked files must not exist in the parent and cannot be written
 // through a link out of it. It returns the files changed.
 func (c *Coordinator) Integrate(ctx context.Context, childID string) ([]string, error) {
 	child, err := c.Store.Get(childID)
@@ -70,14 +71,12 @@ func (c *Coordinator) Integrate(ctx context.Context, childID string) ([]string, 
 	if child.Parent == "" || child.Worktree == "" || child.Base == "" {
 		return nil, errors.New("not a delegated task with a recorded base")
 	}
-	cp, err := c.Store.LoadCheckpoint(childID, "")
+	if child.AcceptedCheckpoint == "" {
+		return nil, errors.New("the child records no accepted checkpoint")
+	}
+	cp, err := c.Store.LoadCheckpoint(childID, child.AcceptedCheckpoint)
 	if err != nil {
 		return nil, fmt.Errorf("accepted checkpoint: %w", err)
-	}
-	for _, r := range cp.Verification {
-		if r.Status != "pass" {
-			return nil, fmt.Errorf("the newest checkpoint was not the accepted state (%s: %s)", r.Criterion, r.Status)
-		}
 	}
 	parent, err := c.Store.Get(child.Parent)
 	if err != nil {
@@ -85,21 +84,6 @@ func (c *Coordinator) Integrate(ctx context.Context, childID string) ([]string, 
 	}
 	dst := workdir(parent)
 	ws := cp.Workspace
-	var patches []string
-	if ws.Head != "" && ws.Head != child.Base {
-		committed, err := gitRun(child.Worktree, "diff", "--binary", child.Base, ws.Head)
-		if err != nil {
-			return nil, err
-		}
-		f := filepath.Join(cp.Dir, "committed.diff")
-		if err := os.WriteFile(f, []byte(committed), 0o644); err != nil {
-			return nil, err
-		}
-		patches = append(patches, f)
-	}
-	if ws.Patch != "" {
-		patches = append(patches, filepath.Join(cp.Dir, ws.Patch))
-	}
 	for _, f := range ws.Untracked {
 		if f.Artifact == "" {
 			return nil, fmt.Errorf("untracked %s was not kept: %s", f.Path, f.Omitted)
@@ -112,25 +96,59 @@ func (c *Coordinator) Integrate(ctx context.Context, childID string) ([]string, 
 			return nil, fmt.Errorf("%s already exists in the parent workspace", f.Path)
 		}
 	}
-	for _, p := range patches {
-		if _, err := gitRun(dst, "apply", "--check", "--binary", p); err != nil {
-			return nil, fmt.Errorf("the child's work does not apply cleanly: %w", err)
+	// Rebuild the accepted result on the base, in a scratch worktree.
+	scratch, err := os.MkdirTemp("", "pai-ultra-integrate-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(scratch)
+	tree := filepath.Join(scratch, "tree")
+	if _, err := gitRun(child.Worktree, "worktree", "add", "--detach", tree, child.Base); err != nil {
+		return nil, err
+	}
+	defer gitRun(child.Worktree, "worktree", "remove", "--force", tree)
+	if ws.Head != "" && ws.Head != child.Base {
+		committed, err := gitRun(child.Worktree, "diff", "--binary", child.Base, ws.Head)
+		if err != nil {
+			return nil, err
 		}
+		if err := applyText(tree, filepath.Join(scratch, "committed.diff"), committed); err != nil {
+			return nil, fmt.Errorf("the child's commits: %w", err)
+		}
+	}
+	if ws.Patch != "" {
+		if _, err := gitRun(tree, "apply", "--binary", filepath.Join(cp.Dir, ws.Patch)); err != nil {
+			return nil, fmt.Errorf("the child's uncommitted changes: %w", err)
+		}
+	}
+	if _, err := gitRun(tree, "add", "-A"); err != nil {
+		return nil, err
+	}
+	combined, err := gitRun(tree, "diff", "--binary", "--cached", child.Base)
+	if err != nil {
+		return nil, err
+	}
+	names, err := gitRun(tree, "diff", "--name-only", "--cached", child.Base)
+	if err != nil {
+		return nil, err
 	}
 	var files []string
-	for _, p := range patches {
-		if _, err := gitRun(dst, "apply", "--binary", p); err != nil {
-			return files, err
+	if combined != "" {
+		patch := filepath.Join(scratch, "accepted.diff")
+		if err := os.WriteFile(patch, []byte(combined), 0o644); err != nil {
+			return nil, err
 		}
-	}
-	names, _ := gitRun(child.Worktree, "diff", "--name-only", child.Base, ws.Head)
-	for n := range strings.Lines(names) {
-		if n = strings.TrimSpace(n); n != "" {
-			files = append(files, n)
+		if _, err := gitRun(dst, "apply", "--check", "--binary", patch); err != nil {
+			return nil, fmt.Errorf("the child's work does not apply cleanly to the parent: %w", err)
 		}
-	}
-	for _, f := range ws.Changed {
-		files = append(files, f.Path)
+		if _, err := gitRun(dst, "apply", "--binary", patch); err != nil {
+			return nil, err
+		}
+		for n := range strings.Lines(names) {
+			if n = strings.TrimSpace(n); n != "" {
+				files = append(files, n)
+			}
+		}
 	}
 	for _, f := range ws.Untracked {
 		b, err := os.ReadFile(filepath.Join(cp.Dir, filepath.FromSlash(f.Artifact)))
@@ -158,10 +176,22 @@ func (c *Coordinator) Integrate(ctx context.Context, childID string) ([]string, 
 		files = append(files, f.Path)
 	}
 	_, err = c.Store.Update(parent.ID, task.Guard{}, func(t *task.Task) (task.Event, error) {
-		t.Completed = append(t.Completed, fmt.Sprintf("integrated child %s (checkpoint %s): %s", childID, cp.ID, strings.Join(files, ", ")))
+		t.Completed = append(t.Completed, fmt.Sprintf("integrated child %s (accepted checkpoint %s): %s", childID, cp.ID, strings.Join(files, ", ")))
 		return task.Event{Type: "integrated", Note: childID}, nil
 	})
 	return files, err
+}
+
+// applyText writes a patch to path and applies it in dir.
+func applyText(dir, path, patch string) error {
+	if patch == "" {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(patch), 0o644); err != nil {
+		return err
+	}
+	_, err := gitRun(dir, "apply", "--binary", path)
+	return err
 }
 
 func gitRun(dir string, args ...string) (string, error) {

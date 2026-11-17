@@ -159,7 +159,6 @@ func TestCrashRecoveryAndResumeWithChangedWorkspace(t *testing.T) {
 		return done
 	}}
 	c := open(t, dir, s, exec.Capabilities{Resume: true})
-	c.Lease = 200 * time.Millisecond
 	tk, _ := c.Create(NewTask{Objective: "write", Criteria: []task.Criterion{fileCrit("out.txt", "hello")}, Executor: "fake"})
 	// A previous process claimed, started an executor run, and died.
 	dead := task.Owner{ID: "dead"}
@@ -340,3 +339,54 @@ func TestBlockedClaimIsStillChecked(t *testing.T) {
 		t.Fatalf("work done but claimed blocked: %v %s", err, out.Task.State)
 	}
 }
+
+func TestIntegrateUsesTheAcceptedCheckpointNotANewerOne(t *testing.T) {
+	dir := repo(t)
+	s := &script{step: func(n int, a exec.Assignment) string {
+		os.WriteFile(filepath.Join(a.Workdir, "lib.txt"), []byte("v1\n"), 0o644)
+		gitRun(a.Workdir, "add", "lib.txt")
+		gitRun(a.Workdir, "commit", "-qm", "c1")
+		os.WriteFile(filepath.Join(a.Workdir, "lib.txt"), []byte("v2\n"), 0o644) // uncommitted, on top of the commit
+		return done
+	}}
+	c := open(t, dir, s, exec.Capabilities{})
+	parent, _ := c.Create(NewTask{Objective: "parent", Executor: "fake"})
+	child, _ := c.Delegate(parent.ID, NewTask{Objective: "child", Criteria: []task.Criterion{fileCrit("lib.txt", "v2")}})
+	if _, err := c.Run(context.Background(), child.ID, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	// After acceptance the child's tree changes and a newer checkpoint exists.
+	os.WriteFile(filepath.Join(child.Worktree, "lib.txt"), []byte("tampered\n"), 0o644)
+	if _, err := c.Store.Checkpoint(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Integrate(context.Background(), child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "lib.txt")); string(b) != "v2\n" {
+		t.Fatalf("integrated %q, want the accepted v2 (commit then uncommitted change on top)", b)
+	}
+}
+
+func TestAmendedReviewNeedsNewApproval(t *testing.T) {
+	dir := repo(t)
+	s := &script{step: func(int, exec.Assignment) string { return done }}
+	c := open(t, dir, s, exec.Capabilities{})
+	tk, _ := c.Create(NewTask{Objective: "x", Criteria: []task.Criterion{{ID: "ux", Kind: task.CriterionReview, Text: "looks right"}}, Executor: "fake"})
+	c.Run(context.Background(), tk.ID, "", nil)
+	got, _ := c.Store.Get(tk.ID)
+	if !approvedFor(got) {
+		// Approve, then amend the same criterion id: the old approval must not count.
+		c.Store.Update(tk.ID, task.Guard{}, func(t *task.Task) (task.Event, error) {
+			t.Decisions = append(t.Decisions, approvalPrefix("ux", t.Attempts, t.CriteriaHash)+" by person: ok")
+			return task.Event{Type: "test"}, nil
+		})
+	}
+	c.Store.AmendCriteria(tk.ID, task.Guard{}, []task.Criterion{{ID: "ux", Kind: task.CriterionReview, Text: "now also accessible"}}, "person", "stricter")
+	got, _ = c.Store.Get(tk.ID)
+	if approved(got, "ux") {
+		t.Fatal("an approval survived an amendment of the criterion")
+	}
+}
+
+func approvedFor(t *task.Task) bool { return approved(t, "ux") }

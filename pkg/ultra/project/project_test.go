@@ -471,3 +471,21 @@ func TestDisableKeepsSettings(t *testing.T) {
 		t.Fatalf("settings lost across disable/enable: %+v", e)
 	}
 }
+
+func TestPlantedSymlinkInJournalIsRefused(t *testing.T) {
+	p, _ := fixture(t)
+	outside := t.TempDir()
+	os.MkdirAll(p.Path(pendingDir), 0o755)
+	if err := os.Symlink(outside, p.Path(pendingDir, "1")); err != nil {
+		t.Skip("symlinks not available: ", err)
+	}
+	write(t, p.Path(pendingDir, "2"), "planted")
+	write(t, p.Path(pendingDir, planFile), `{"writes":[{"target":".pai/rules/link","staged":"1"},{"target":".pai/rules/link/victim.md","staged":"2"}]}`)
+	write(t, p.Path(pendingDir, commitMark), "1\n")
+	if _, err := Open(p.Root); err == nil {
+		t.Fatal("journal with a staged link accepted")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "victim.md")); err == nil {
+		t.Fatal("wrote through a planted link")
+	}
+}

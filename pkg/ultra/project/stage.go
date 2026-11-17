@@ -532,23 +532,49 @@ func (p *Project) rollForward() error {
 	if err := p.checkPlan(pl); err != nil {
 		return err
 	}
+	// The journal itself must be a plain directory, not a link elsewhere.
+	if st, err := os.Lstat(pend); err != nil || !st.IsDir() {
+		return fmt.Errorf("apply journal %s is not a plain directory", pend)
+	}
 	for _, w := range pl.Writes {
 		src := filepath.Join(pend, w.Staged)
-		if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
-			continue
+		st, err := os.Lstat(src)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // moved before a crash
+		}
+		if err != nil || !st.Mode().IsRegular() {
+			// A link or a directory staged in a planted journal could make a
+			// later write land outside the project.
+			return fmt.Errorf("apply journal entry %s is not a regular file", w.Staged)
 		}
 		dst := filepath.Join(p.Root, filepath.FromSlash(w.Target))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
+		}
+		// Checked again at the moment of the write: an earlier step cannot
+		// have redirected it.
+		if !p.insideRoot(dst) || isLink(dst) {
+			return fmt.Errorf("apply journal write %q leads outside the project", w.Target)
 		}
 		if err := os.Rename(src, dst); err != nil {
 			return err
 		}
 	}
 	for _, d := range pl.Deletes {
-		if err := os.Remove(filepath.Join(p.Root, filepath.FromSlash(d))); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		dst := filepath.Join(p.Root, filepath.FromSlash(d))
+		if !p.insideRoot(dst) {
+			return fmt.Errorf("apply journal delete %q leads outside the project", d)
+		}
+		if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
 	return os.RemoveAll(pend)
+}
+
+// isLink is whether path itself is a symbolic link (a rename onto it would
+// replace the link, but a later write through its name would follow it).
+func isLink(path string) bool {
+	st, err := os.Lstat(path)
+	return err == nil && st.Mode()&fs.ModeSymlink != 0
 }

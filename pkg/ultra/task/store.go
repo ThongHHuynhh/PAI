@@ -48,6 +48,12 @@ var (
 	ErrCorrupt    = errors.New("the task log is corrupt")
 )
 
+// tornType marks where a crash tore the log's last write; the line before
+// it is that tear, not corruption.
+const tornType = "torn_tail"
+
+var tornMarker = `{"type":"` + tornType + `"}`
+
 // Event is one change to a task. It carries the snapshot after the change,
 // so the log alone rebuilds the task.
 type Event struct {
@@ -144,7 +150,9 @@ func (s *Store) commit(t *Task, e Event) error {
 			return err
 		}
 		if last[0] != '\n' {
-			b = append([]byte{'\n'}, b...)
+			// A crash tore the last write. End it, and say so in the log, so a
+			// reader can tell this recovered tear from corruption.
+			b = append([]byte("\n"+tornMarker+"\n"), b...)
 		}
 	}
 	if _, err := f.Write(append(b, '\n')); err != nil {
@@ -237,6 +245,10 @@ func (s *Store) Events(id string) ([]Event, error) {
 			bad++
 			continue
 		}
+		if e.Type == tornType {
+			bad = 0 // the bad line before was a recovered tear
+			continue
+		}
 		if bad > 0 {
 			return out, fmt.Errorf("%w: %s: an unreadable line before event %d", ErrCorrupt, id, e.Rev)
 		}
@@ -302,6 +314,11 @@ func (s *Store) Update(id string, g Guard, fn func(t *Task) (Event, error)) (*Ta
 	}
 	if g.Epoch != 0 && (t.Owner == nil || t.Owner.Epoch != g.Epoch || t.Epoch != g.Epoch) {
 		return nil, ErrStaleOwner
+	}
+	// An expired lease authorizes nothing, even before anyone recovers the
+	// task: an owner that was suspended past it must stop.
+	if g.Epoch != 0 && s.now().After(t.Owner.Until) {
+		return nil, fmt.Errorf("%w: the lease expired at %s", ErrStaleOwner, t.Owner.Until.Format(time.RFC3339))
 	}
 	before, criteria := t.State, t.CriteriaHash
 	e, err := fn(t)
@@ -556,7 +573,11 @@ func (s *Store) AmendCriteria(id string, g Guard, cs []Criterion, actor, reason 
 		return nil, errors.New("an amendment needs a reason")
 	}
 	return s.Update(id, g, func(t *Task) (Event, error) {
+		if t.State == Accepted || t.State.Terminal() || t.State.Held() {
+			return Event{}, fmt.Errorf("%w: criteria of a %s task cannot change; reopen it or make a new task", ErrTransition, t.State)
+		}
 		old, _ := json.Marshal(t.Criteria)
+		t.Validation = nil // a check of other criteria proves nothing about these
 		t.Criteria = cs
 		t.CriteriaHash = HashCriteria(cs)
 		t.Decisions = append(t.Decisions, "criteria amended by "+actor+": "+reason)

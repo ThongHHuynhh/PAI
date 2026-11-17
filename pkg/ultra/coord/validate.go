@@ -117,13 +117,19 @@ func checkFile(dir string, cr task.Criterion) task.CheckResult {
 	return r
 }
 
-// approvalPrefix marks a person's approval of a review criterion, per attempt.
-func approvalPrefix(id string, attempt int) string {
-	return fmt.Sprintf("review %s approved for attempt %d", id, attempt)
+// approvalPrefix marks a person's approval of a review criterion: for one
+// attempt and one version of the criteria, so an amendment (even one that
+// keeps the criterion's id) needs a new approval.
+func approvalPrefix(id string, attempt int, criteriaHash string) string {
+	h := criteriaHash
+	if len(h) > 12 {
+		h = h[:12]
+	}
+	return fmt.Sprintf("review %s approved for attempt %d criteria %s", id, attempt, h)
 }
 
 func approved(t *task.Task, id string) bool {
-	p := approvalPrefix(id, t.Attempts)
+	p := approvalPrefix(id, t.Attempts, t.CriteriaHash)
 	for _, d := range t.Decisions {
 		if strings.HasPrefix(d, p) {
 			return true
@@ -133,8 +139,10 @@ func approved(t *task.Task, id string) bool {
 }
 
 // Approve records a person's approval of review criterion id for the task's
-// current attempt, then re-checks: a blocked task whose criteria now all
-// pass is accepted. Only a person approves; the executor has no path here.
+// current attempt and criteria, then re-checks. When every criterion now
+// passes, the workspace is checkpointed and the task accepted on that
+// checkpoint, in a write that refuses if the criteria changed meanwhile.
+// Only a person approves; the executor has no path here.
 func (c *Coordinator) Approve(ctx context.Context, id, criterion, actor, note string) (*task.Task, error) {
 	if actor == "" || strings.HasPrefix(strings.ToLower(actor), "model") || strings.HasPrefix(strings.ToLower(actor), "executor") {
 		return nil, errors.New("only a person approves a review")
@@ -150,36 +158,51 @@ func (c *Coordinator) Approve(ctx context.Context, id, criterion, actor, note st
 		if t.State != task.Blocked {
 			return task.Event{}, fmt.Errorf("the task is %s; reviews are approved while it waits", t.State)
 		}
-		t.Decisions = append(t.Decisions, fmt.Sprintf("%s by %s: %s", approvalPrefix(criterion, t.Attempts), actor, note))
+		t.Decisions = append(t.Decisions, fmt.Sprintf("%s by %s: %s", approvalPrefix(criterion, t.Attempts, t.CriteriaHash), actor, note))
 		return task.Event{Type: "review_approved", Actor: actor, Note: criterion}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	// Re-check against the task as approved; accept only if nothing changed
-	// in between (the revision guard), so a stale check never accepts.
 	v := c.Validate(ctx, t)
 	got, err := c.Store.Update(id, task.Guard{Rev: t.Rev}, func(t *task.Task) (task.Event, error) {
 		if t.CriteriaHash != v.CriteriaHash {
 			return task.Event{}, errCriteriaChanged
 		}
 		t.Validation = &v
-		if v.Passed && !v.NeedsReview && t.State == task.Blocked && len(t.Unknown()) == 0 {
-			t.Blockers = nil
-			t.State = task.Accepted
-		}
 		return task.Event{Type: "validated", Actor: actor, Note: fmt.Sprintf("passed=%v review=%v", v.Passed, v.NeedsReview)}, nil
 	})
-	if err == nil {
-		outcome := "blocked"
-		if got.State == task.Accepted {
-			outcome = "accepted"
+	if err != nil || !v.Passed || v.NeedsReview || got.State != task.Blocked || len(got.Unknown()) > 0 {
+		c.recordReview(got, actor, v, "blocked")
+		return got, err
+	}
+	// Checkpoint exactly what was judged, then accept on it.
+	cp, err := c.Store.Checkpoint(id)
+	if err != nil {
+		return got, fmt.Errorf("checkpoint: %w", err)
+	}
+	got, err = c.Store.Update(id, task.Guard{}, func(t *task.Task) (task.Event, error) {
+		if t.CriteriaHash != v.CriteriaHash || t.State != task.Blocked {
+			return task.Event{}, errCriteriaChanged
 		}
-		now := time.Now().UTC()
-		_ = c.Metrics.Append(metrics.Attempt{Task: id, Attempt: got.Attempts, Mode: "ultra", Executor: "review:" + actor, ConfigRev: got.ConfigRev,
-			Started: now, Ended: now, ValidationPassed: v.Passed, Outcome: outcome})
+		t.Blockers = nil
+		t.State = task.Accepted
+		t.AcceptedCheckpoint = cp.ID
+		return task.Event{Type: "decided", Actor: actor, Note: "accepted after review, on " + cp.ID}, nil
+	})
+	if err == nil {
+		c.recordReview(got, actor, v, "accepted")
 	}
 	return got, err
+}
+
+func (c *Coordinator) recordReview(t *task.Task, actor string, v task.Validation, outcome string) {
+	if t == nil {
+		return
+	}
+	now := time.Now().UTC()
+	_ = c.Metrics.Append(metrics.Attempt{Task: t.ID, Attempt: t.Attempts, Mode: "ultra", Executor: "review:" + actor, ConfigRev: t.ConfigRev,
+		Started: now, Ended: now, ValidationPassed: v.Passed, Outcome: outcome})
 }
 
 func tail(s string, n int) string {

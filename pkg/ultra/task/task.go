@@ -183,6 +183,9 @@ type Task struct {
 	Workspace    string      `json:"workspace"`
 	Worktree     string      `json:"worktree,omitempty"` // an isolated workspace, for delegated work
 	Base         string      `json:"base,omitempty"`     // the commit a delegated worktree started from
+	// AcceptedCheckpoint is the checkpoint the acceptance was decided on:
+	// exactly what was checked, for integration and audit.
+	AcceptedCheckpoint string `json:"accepted_checkpoint,omitempty"`
 
 	State       State             `json:"state"`
 	Rev         int               `json:"rev"`

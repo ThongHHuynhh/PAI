@@ -451,7 +451,8 @@ func (c *Coordinator) attempt(ctx context.Context, id, executor string, ad exec.
 	if err != nil {
 		return false, err
 	}
-	if _, err := c.Store.Checkpoint(id); err != nil {
+	judged, err := c.Store.Checkpoint(id)
+	if err != nil {
 		return false, errors.Join(fmt.Errorf("checkpoint: %w", err), release(task.Paused, "checkpoint failed"))
 	}
 	again := false
@@ -461,26 +462,26 @@ func (c *Coordinator) attempt(ctx context.Context, id, executor string, ad exec.
 	vacuous := len(t.Criteria) == 0 && res.Status != "done"
 	switch {
 	case val.Passed && !val.NeedsReview && !vacuous:
-		decision = c.decide(id, epoch, val, task.Accepted, "all criteria passed", out)
+		decision = c.decide(id, epoch, val, task.Accepted, "all criteria passed", out, judged.ID)
 		rec.Outcome = "accepted"
 	case len(failing) == 0 && val.NeedsReview:
-		decision = c.decide(id, epoch, val, task.Blocked, "review needed: "+strings.Join(reviewIDs(val), ", "), out)
+		decision = c.decide(id, epoch, val, task.Blocked, "review needed: "+strings.Join(reviewIDs(val), ", "), out, "")
 		rec.Outcome = "blocked"
 		if decision == nil {
 			decision = fmt.Errorf("%w: review needed", ErrBlocked)
 		}
 	case res.Status == "blocked":
 		// The executor needs a person and the checks do not pass: no retry.
-		decision = c.decide(id, epoch, val, task.Blocked, "executor reported blocked: "+strings.Join(append([]string{res.Summary}, res.Open...), "; "), out)
+		decision = c.decide(id, epoch, val, task.Blocked, "executor reported blocked: "+strings.Join(append([]string{res.Summary}, res.Open...), "; "), out, "")
 		rec.Outcome = "blocked"
 		if decision == nil {
 			decision = fmt.Errorf("%w: the executor reported it is blocked", ErrBlocked)
 		}
 	case t.Attempts < t.MaxAttempts:
-		decision = c.decide(id, epoch, val, task.Pending, "retry after failed checks", out)
+		decision = c.decide(id, epoch, val, task.Pending, "retry after failed checks", out, "")
 		rec.Outcome, again = "retry", decision == nil
 	default:
-		decision = c.decide(id, epoch, val, task.Failed, "attempts exhausted", out)
+		decision = c.decide(id, epoch, val, task.Failed, "attempts exhausted", out, "")
 		rec.Outcome = "failed"
 		if decision == nil {
 			decision = fmt.Errorf("task failed after %d attempts: %s", t.Attempts, strings.Join(failing, "; "))
@@ -498,13 +499,16 @@ var errCriteriaChanged = errors.New("the criteria changed after they were checke
 
 // decide releases the task to its decided state in one guarded write: only
 // if the validation was of the task's current criteria.
-func (c *Coordinator) decide(id string, epoch int, val task.Validation, to task.State, note string, out *Outcome) error {
+func (c *Coordinator) decide(id string, epoch int, val task.Validation, to task.State, note string, out *Outcome, judged string) error {
 	got, err := c.Store.Update(id, task.Guard{Epoch: epoch}, func(t *task.Task) (task.Event, error) {
 		if t.CriteriaHash != val.CriteriaHash {
 			return task.Event{}, errCriteriaChanged
 		}
 		if to == task.Blocked {
 			t.Blockers = append(t.Blockers, note)
+		}
+		if to == task.Accepted {
+			t.AcceptedCheckpoint = judged
 		}
 		actor := t.Owner.ID
 		t.Owner = nil
