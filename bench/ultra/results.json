@@ -1,0 +1,97 @@
+{
+  "when": "2026-11-17T23:02:04.4977863Z",
+  "fixture": "strutil Reverse, 4 cases (bench/ultra/main.go)",
+  "objective": "The tests in package strutil fail for non-ASCII input. Fix Reverse so that `go test ./...` passes. Do not change the tests.",
+  "checks": [
+    "go test ./...",
+    "git diff --exit-code -- strutil/strutil_test.go"
+  ],
+  "permissions": "claude --permission-mode acceptEdits --allowedTools Bash(go test:*) Bash(git diff:*); codex --sandbox workspace-write",
+  "results": [
+    {
+      "mode": "bare-claude",
+      "run": 1,
+      "model": "haiku",
+      "success": false,
+      "claimed": "unknown",
+      "elapsed_s": 34.1754741,
+      "input_tokens": 29515,
+      "output_tokens": 4442,
+      "cache_read_tokens": 564566,
+      "total_tokens": 598523,
+      "usage_reported": true,
+      "background_model_calls": 0,
+      "note": "bare: the agent's own judgment of done; no PAI checks"
+    },
+    {
+      "mode": "ultra-claude",
+      "run": 1,
+      "model": "haiku",
+      "success": true,
+      "claimed": "blocked",
+      "elapsed_s": 31.6828123,
+      "input_tokens": 22272,
+      "output_tokens": 2477,
+      "cache_read_tokens": 347041,
+      "total_tokens": 371790,
+      "usage_reported": true,
+      "pai_context_tokens_est": 215,
+      "attempts": 1,
+      "background_model_calls": 0,
+      "note": "ultra: accepted only when PAI's own checks pass; tokens summed over attempts"
+    },
+    {
+      "mode": "bare-codex",
+      "run": 1,
+      "model": "",
+      "success": true,
+      "claimed": "unknown",
+      "elapsed_s": 52.7142708,
+      "input_tokens": 5445,
+      "output_tokens": 607,
+      "cache_read_tokens": 94848,
+      "total_tokens": 100900,
+      "usage_reported": true,
+      "background_model_calls": 0,
+      "note": "bare: the agent's own judgment of done; no PAI checks"
+    },
+    {
+      "mode": "ultra-codex",
+      "run": 1,
+      "model": "",
+      "success": true,
+      "claimed": "done",
+      "elapsed_s": 41.2592976,
+      "input_tokens": 4801,
+      "output_tokens": 509,
+      "cache_read_tokens": 60800,
+      "total_tokens": 66110,
+      "usage_reported": true,
+      "pai_context_tokens_est": 215,
+      "attempts": 1,
+      "background_model_calls": 0,
+      "note": "ultra: accepted only when PAI's own checks pass; tokens summed over attempts"
+    },
+    {
+      "mode": "classic",
+      "run": 1,
+      "model": "haiku",
+      "success": true,
+      "elapsed_s": 89.4916381,
+      "input_tokens": 7561,
+      "output_tokens": 654,
+      "cache_read_tokens": 27520,
+      "total_tokens": 35735,
+      "usage_reported": true,
+      "background_model_calls": 0,
+      "note": "classic: model chatgpt/gpt-6-astra (the server session's; -model does not apply); Classic memory work may add background calls not counted here"
+    }
+  ],
+  "recovery": {
+    "blocked_on_unknown": true,
+    "no_blind_replay": true,
+    "resumed_accepted": true,
+    "effects_once": true,
+    "correct": true
+  }
+}

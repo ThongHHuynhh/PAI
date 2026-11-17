@@ -9,6 +9,7 @@ require (
 	github.com/klauspost/compress v1.19.1
 	github.com/rivo/uniseg v0.4.7
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
+	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/image v0.45.0
 	golang.org/x/mod v0.42.0
 	golang.org/x/net v0.60.0

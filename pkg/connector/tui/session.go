@@ -129,6 +129,7 @@ func newSession(a *App, l *sessionList, id string) *session {
 	if d, ok := l.drafts[id]; ok {
 		s.input.els, s.input.cur = append([]elem(nil), d...), len(d)
 	}
+	s.offerHandoff(a)
 	s.title(a)
 	if id != "" {
 		s.follow(a)
@@ -192,7 +193,7 @@ func (s *session) Size(a *App, w, h int) {
 	}
 	*s.status = *a.Status
 	if s.status.S == "" {
-		s.status.S, s.status.Style = cf.Model, a.Theme.muted()
+		s.status.S, s.status.Style = s.modeLabel()+" · "+cf.Model, a.Theme.muted()
 		if s.id != "" && s.info.ID == s.id {
 			s.status.S += s.meters()
 		}

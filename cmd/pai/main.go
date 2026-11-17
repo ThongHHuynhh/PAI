@@ -36,6 +36,7 @@ import (
 	"pai/pkg/mesh"
 	"pai/pkg/release"
 	"pai/pkg/statefile"
+	"pai/pkg/ultra/mode"
 	"pai/pkg/version"
 	"pai/pkg/worker"
 )
@@ -100,6 +101,10 @@ func main() {
 			usage()
 		}
 		serveMCP()
+	case "mode":
+		modeCLI(os.Args[2:])
+	case "ultra":
+		ultraCLI(os.Args[2:])
 	case "version":
 		if len(os.Args) != 2 {
 			usage()
@@ -138,6 +143,14 @@ func logIn(token string) {
 // It runs as the child of Supervise, which outlives a crash or a hang.
 func app(id string, quick bool) {
 	tui.Supervise()
+	if id == "" && !quick {
+		if dir, err := os.Getwd(); err == nil {
+			if m, _ := mode.Default(dir); m == mode.Ultra {
+				appUltra(dir)
+				return
+			}
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), startTime)
 	defer cancel()
 	var cp *connector.Client
@@ -391,6 +404,8 @@ func usage() {
   mcp                                PAI's memory for an MCP client such as Claude Code, on stdio; the client starts
                                      it: see docs/mcp.md
   version                            the release this binary was built from
+  mode       [classic|ultra]         show or set this project's default mode for new sessions; Classic is the default
+  ultra      <command>               PAI ULTRA: tasks, skills, rules, context, memory; pai ultra help lists them
 
   new                                POST /sessions, body from stdin: {"model","context_limit","workers","tools","input","params",
                                      "preset","name"} or {"from","n"};

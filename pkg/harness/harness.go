@@ -124,6 +124,9 @@ type Create struct {
 	Params       map[string]json.RawMessage `json:"params,omitempty"`
 	Preset       string                     `json:"preset,omitempty"`
 	Name         string                     `json:"name,omitempty"`
+	// Mode pins the session to a mode: "" (Classic) or "ultra" for a session an
+	// ULTRA task runs as its executor. It only labels the session.
+	Mode string `json:"mode,omitempty"`
 }
 
 func system(source, body string) statefile.Record {
@@ -190,7 +193,10 @@ func (h *Harness) Create(ctx context.Context, c Create, via string) (string, err
 	if Tools(c.Tools, nil) == nil {
 		return "", fmt.Errorf("unknown tools %q; sets: default, patch, orchestrator, patch-orchestrator", c.Tools)
 	}
-	conf := statefile.Conf{Parent: c.Parent, Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset, Routing: c.Routing, Compact: c.Compact}
+	if c.Mode != "" && c.Mode != "classic" && c.Mode != "ultra" {
+		return "", fmt.Errorf("unknown mode %q", c.Mode)
+	}
+	conf := statefile.Conf{Parent: c.Parent, Model: c.Model, Tools: c.Tools, Workers: c.Workers, ContextLimit: c.ContextLimit, Input: c.Input, Params: c.Params, Preset: c.Preset, Routing: c.Routing, Compact: c.Compact, Mode: c.Mode}
 	if err := compactMode(conf.Compact); err != nil {
 		return "", err
 	}

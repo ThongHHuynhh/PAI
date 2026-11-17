@@ -4,6 +4,19 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.5.0
+
+- **PAI ULTRA**, a second mode beside PAI Classic: one executor per task (Claude Code, Codex, or a PAI-server session), acceptance checked by PAI itself, durable task state, portable checkpoints, and selective, versioned instructions. See [ultra.md](ultra.md). Classic stays the default, and its behaviour is unchanged apart from the two visible changes below.
+- Choosing a mode: `pai mode classic|ultra`, or `/mode` in the TUI, sets the project's default for new sessions, kept on this machine (`~/.pai/ultra/projects/<id>/mode.json`). A session keeps the mode it was made in. Switching calls no model and does not touch running work. `pai` opens ULTRA when it is the default, and works offline with local executors; if ULTRA cannot open, the TUI opens Classic and says why.
+- Visible Classic changes: the TUI status line now starts with the session's mode (`PAI Classic · model`); `/mode` is a new slash command, and a command name typed in full now wins over longer names in the slash list (`/mode` + Enter is /mode, not /model). Sessions gain an optional `"mode"` in their config and in `POST /sessions`; none is Classic, and older servers ignore it.
+- ULTRA projects: `.pai/project.yaml` (manifest) and `.pai/lock.json` (exact content hashes and a configuration revision), skills in the Agent Skills `SKILL.md` format, rules with activation and path scope, profiles, project overrides that never edit a package, configured precedence with declared-conflict and duplicate reports. Edits are staged, previewed as diffs and applied all or nothing, across crashes.
+- ULTRA tasks: explicit states, leases with fencing, bounded attempts, an operations journal; an operation whose outcome is unknown blocks the task until a person reconciles it, and is never replayed by PAI. An executor's "done" is a claim: PAI runs the task's checks and decides. Checkpoints keep the git head, a patch, untracked files and verification results, and restore into a new worktree; resume reuses a native session only when the workspace is unchanged.
+- ULTRA knowledge is kept apart from Classic memory (the `pai` executor is the exception: it runs as a server session, where Classic's memory work runs as usual): a model's conclusion is a candidate, only a person or a check verifies, file dependencies make items stale, nothing is deleted. Classic memory is imported only on request, previewed, as candidates.
+- Cross-mode handoff at a checkpoint, both ways; the original is kept and linked; no model is called on the switch.
+- The ULTRA TUI: Workspace, Skills, Instructions, Memory, Runs and Context views, keyboard first, with narrow layouts.
+- `bench/ultra` compares bare Claude Code and Codex, the same agents under ULTRA, and Classic on one fixture task, and checks crash recovery without a model.
+- Rollback: `pai mode classic` (or delete the project's `mode.json`); delete `.pai/` and `~/.pai/ultra` to remove ULTRA. No Classic data is migrated or changed.
+
 ## v0.4.6
 
 - The TUI keeps its one-line status layout: provider/model, then a context meter, then a 5-hour provider usage meter. Cost and the commands hint stay on the right. Provider usage refreshes once a minute when available.

@@ -1,0 +1,54 @@
+{
+  "when": "2026-11-17T23:10:11.1553727Z",
+  "fixture": "strutil Reverse, 4 cases (bench/ultra/main.go)",
+  "objective": "The tests in package strutil fail for non-ASCII input. Fix Reverse so that `go test ./...` passes. Do not change the tests.",
+  "checks": [
+    "go test ./...",
+    "git diff --exit-code -- strutil/strutil_test.go"
+  ],
+  "permissions": "claude --permission-mode acceptEdits --allowedTools Bash(go test:*) Bash(git diff:*); codex --sandbox workspace-write",
+  "results": [
+    {
+      "mode": "bare-claude",
+      "run": 1,
+      "model": "haiku",
+      "success": false,
+      "claimed": "unknown",
+      "elapsed_s": 39.2103157,
+      "input_tokens": 30438,
+      "output_tokens": 5712,
+      "cache_read_tokens": 608256,
+      "total_tokens": 644406,
+      "usage_reported": true,
+      "background_model_calls": 0,
+      "failed_checks": [
+        "go test ./...: --- FAIL: TestReverse (0.00s) |     strutil_test.go:8: Reverse(\"héllo\") = \"oll\\xa9\\xc3h\", want \"olléh\" |     strutil_test.go:8: Reverse(\"日本語\") = \"\\x9e\\xaa謜楗\\xe6\", want \"語本日\" | FAIL | FAIL\tfixture/strutil\t0.975s | FAIL"
+      ],
+      "note": "bare: the agent's own judgment of done; no PAI checks"
+    },
+    {
+      "mode": "ultra-claude",
+      "run": 1,
+      "model": "haiku",
+      "success": true,
+      "claimed": "blocked",
+      "elapsed_s": 30.6011416,
+      "input_tokens": 22903,
+      "output_tokens": 2468,
+      "cache_read_tokens": 311824,
+      "total_tokens": 337195,
+      "usage_reported": true,
+      "pai_context_tokens_est": 215,
+      "attempts": 1,
+      "background_model_calls": 0,
+      "note": "ultra: accepted only when PAI's own checks pass; tokens summed over attempts"
+    }
+  ],
+  "recovery": {
+    "blocked_on_unknown": false,
+    "no_blind_replay": false,
+    "resumed_accepted": true,
+    "effects_once": true,
+    "correct": false
+  }
+}
