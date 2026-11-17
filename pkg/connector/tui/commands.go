@@ -54,6 +54,7 @@ func commands() []command {
 		{"config", nil, "Config for a new session", "", (*session).config},
 		{"rename", nil, "Rename the session", "", (*session).renameDialog},
 		{"model", nil, "Model: swap this session, or choose for a new one", "", (*session).models},
+		{"mode", nil, "Mode: PAI Classic or PAI ULTRA", "", (*session).modeMenu},
 		{"usage", nil, "Usage of each account", "", (*session).usage},
 		{"providers", []string{"connect"}, "Connect a provider", "", (*session).providers},
 		{"goto", []string{"jump", "timeline"}, "Go to a message", "", (*session).goTo},
@@ -116,6 +117,10 @@ func (l *slash) update() {
 		}
 	}
 	l.cmds = append(l.cmds, byAlias...)
+	// A name typed in full is the one Enter runs, before longer names it starts.
+	if i := slices.IndexFunc(l.cmds, func(c command) bool { return c.is(t[1:]) }); i >= 0 {
+		l.sel = i
+	}
 }
 
 func (l *slash) Height(int) int { return min(len(l.cmds), slashRows) }
