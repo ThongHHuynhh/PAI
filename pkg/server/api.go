@@ -51,6 +51,7 @@ type api struct {
 	reached   atomic.Value  // the URL a worker last found the harness at
 	coord     *coordinator.Coordinator
 	pool      *harness.Pool
+	rel       *releases // the releases the harness serves, and their source
 }
 
 func (a *api) handle(mux *http.ServeMux) {

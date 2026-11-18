@@ -106,6 +106,8 @@ func main() {
 		finish(h, quick) // quick only with no config file, so fresh
 	case verb == "tunnel" || verb == "url":
 		move(args)
+	case verb == "source":
+		source(args)
 	case verb == auth.Key && (len(args) == 2 && args[1] == "list" || len(args) == 3 && (args[1] == "new" || args[1] == "revoke")):
 		elevate.Root(args...)
 		if _, err := server.Load(server.Conf); err != nil {
@@ -381,6 +383,12 @@ func usage() {
   tunnel    off                           back to loopback only
   url       <url>                         reach the installed harness at url, which your own proxy carries to
                                           http://localhost:8080; workers follow
+  source                                  where the installed harness fetches the releases it serves its machines
+  source    github <owner/name> [--token-file <file>]
+                                          from GitHub releases; a private repository needs a token that can read it,
+                                          in a file of its own or as the NAME=value line of an environment file
+  source    <url>                         from a download server laid out as <url>/<version>/<file>
+  source    off                           from the place built into this release, as before
   key       new <name> | revoke <name> | list   api keys of the installed harness: what a connector needs to call it
   join                                    the line that makes a machine a worker: the server URL and device code
   join      cycle                         a new device code; the one before joins no more. Workers stay until
@@ -391,7 +399,68 @@ func usage() {
                                           auth table stay
   version                                 the release this binary was built from
 
-key, join, tunnel, url, update and uninstall ask for sudo or admin themselves.
+key, join, tunnel, url, source, update and uninstall ask for sudo or admin themselves.
 `)
 	os.Exit(2)
+}
+
+// source shows or sets where the installed harness fetches releases.
+func source(args []string) {
+	var r *server.Releases
+	token := ""
+	switch {
+	case len(args) == 1:
+	case len(args) == 2 && args[1] == "off":
+	case len(args) == 2 && args[1] != "github":
+		u, err := neturl.Parse(args[1])
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			log.Fatalf("%s: the download server is http(s)://<host>/<path>", args[1])
+		}
+		r = &server.Releases{URL: strings.TrimRight(args[1], "/")}
+	case (len(args) == 3 || len(args) == 5 && args[3] == "--token-file") && args[1] == "github":
+		if !release.ValidRepo(args[2]) {
+			log.Fatalf("%s: name the repository as <owner>/<name>", args[2])
+		}
+		r = &server.Releases{GitHub: args[2]}
+	default:
+		usage()
+	}
+	if len(args) == 5 { // the elevated run may start in another folder
+		abs, err := filepath.Abs(args[4])
+		fatal(err)
+		args[4] = abs
+	}
+	elevate.Root(args...)
+	if len(args) == 1 {
+		c, err := server.Load(server.Conf)
+		if err != nil {
+			log.Fatalf("no installed harness: %v", err)
+		}
+		switch {
+		case c.Releases == nil:
+			fmt.Println("releases come from the place built in:", release.Source{})
+		case c.Releases.GitHub != "":
+			fmt.Println("releases come from github", c.Releases.GitHub)
+		default:
+			fmt.Println("releases come from", release.Source{URL: c.Releases.URL})
+		}
+		return
+	}
+	if len(args) == 5 {
+		t, err := server.ReadToken(args[4])
+		fatal(err)
+		token = t
+	}
+	latest, err := server.SetReleases(r, token)
+	fatal(err)
+	fmt.Print("the harness now fetches releases from ")
+	if r == nil {
+		fmt.Print(release.Source{})
+	} else {
+		fmt.Print(release.Source{GitHub: r.GitHub, URL: r.URL, Token: token})
+	}
+	if latest != "" {
+		fmt.Printf("; its latest stable release is %s", latest)
+	}
+	fmt.Println("\nworkers update from this server; new machines install with: pai-server join")
 }

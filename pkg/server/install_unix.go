@@ -106,3 +106,17 @@ func own(u *user.User, path string) error {
 		return os.Lchown(p, uid, gid)
 	})
 }
+
+// likeDir gives path Dir's owner: a file root writes there for the harness,
+// which runs as the operator, must stay theirs to read.
+func likeDir(path string) error {
+	st, err := os.Stat(Dir)
+	if err != nil {
+		return err
+	}
+	s, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	return os.Lchown(path, int(s.Uid), int(s.Gid))
+}

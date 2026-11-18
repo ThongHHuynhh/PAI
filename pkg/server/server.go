@@ -61,6 +61,9 @@ type Config struct {
 	// account is out of usage, such as {"claude-code": "claude-code-2"}.
 	Fallbacks map[string]string `json:"fallbacks,omitempty"`
 	Balance   harness.Balance   `json:"balance,omitempty"`
+	// Releases is where the harness fetches the releases it serves its machines;
+	// none is the place built into this binary.
+	Releases *Releases `json:"releases,omitempty"`
 }
 
 // MemoryConfig names the embedder memory uses: an OpenAI compatible
@@ -347,6 +350,8 @@ func Harness(ctx context.Context, path string) error {
 	mux.Handle("/id", identity.ID(k, func() string { return at.Load().(string) }, coord.Public().String()))
 	mux.Handle("POST /join", auth.JoinHandler(k, identity.Encode(k), code, limit))
 	coord.Handle(mux)
+	rel := newReleases(dir, path)
+	rel.handle(mux)
 	derp := relay.New()
 	derp.SetVerifyClientFunc(coord.Known)
 	relay.Handle(mux, derp)
@@ -375,7 +380,7 @@ func Harness(ctx context.Context, path string) error {
 	routes.HandleFunc("POST /providers/{name}/login", logins.start)
 	routes.HandleFunc("POST /providers/{name}/login/code", logins.paste)
 	routes.HandleFunc("GET /providers/{name}/login", logins.get)
-	a := &api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool}
+	a := &api{dir: dir, path: path, k: k, at: func() string { return at.Load().(string) }, coord: coord, pool: pool, rel: rel}
 	a.handle(routes)
 	(&webAPI{h: h, coord: coord, bus: bus, mem: mem, url: a.at, path: path}).handle(routes)
 	app(mux)
@@ -413,13 +418,15 @@ func Harness(ctx context.Context, path string) error {
 			return
 		}
 		// The CLI on a worker, over the mesh: no tunnel, so no CF-Connecting-IP
-		// to trust; the limit counts the node's address.
-		go func() {
-			errs <- http.Serve(ls[1], http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Header.Del("CF-Connecting-IP")
-				api.ServeHTTP(w, r)
-			}))
-		}()
+		// to trust; the limit counts the node's address. Workers update from
+		// /releases here, without a key, as machines do at the URL.
+		meshMux := http.NewServeMux()
+		rel.handle(meshMux)
+		meshMux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Header.Del("CF-Connecting-IP")
+			api.ServeHTTP(w, r)
+		}))
+		go func() { errs <- http.Serve(ls[1], meshMux) }()
 		errs <- pool.Serve(ls[0], coord.Node)
 	}()
 	up := func(url string) {
