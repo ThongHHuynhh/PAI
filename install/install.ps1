@@ -4,7 +4,7 @@
 # machine the PAI server, from the provider keys set in this shell, after a UAC prompt, and logs the CLI
 # in to it; server quickstart then opens the quickstart in the TUI, and -Url <url> reaches the server at url,
 # which your own proxy carries to it, with no tunnel. The release stamps its version.
-#   & ([scriptblock]::Create((irm https://github.com/@REPO@/releases/download/@VERSION@/install.ps1))) [api key | <server url> <device code> | server [quickstart] [-Url <url>]]
+#   & ([scriptblock]::Create((irm @DL@/install.ps1))) [api key | <server url> <device code> | server [quickstart] [-Url <url>]]
 param([Parameter(Position = 0)][string]$Token, [Parameter(Position = 1)][string]$Code, [string]$Url)
 $ErrorActionPreference = 'Stop'
 $quick = $Token -eq 'server' -and $Code -eq 'quickstart'
@@ -13,7 +13,7 @@ if (($Token -and !$Code -and $Token -ne 'server' -and $Token -notlike 'pai_key_*
   throw 'usage: install.ps1 [api key | <server url> <device code> | server [quickstart] [-Url <url>]]'
 }
 $ProgressPreference = 'SilentlyContinue'
-$dl = 'https://github.com/@REPO@/releases/download/@VERSION@'
+$dl = '@DL@'
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
 $d = New-Item -ItemType Directory (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))
 # Download saves $url as $out, up to three tries, since one bad read would fail the whole install.

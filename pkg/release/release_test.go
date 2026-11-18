@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,30 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+// With no Base, releases come from GitHub exactly as before; with one, every
+// file, the latest pointer included, comes from it.
+func TestDownloadBase(t *testing.T) {
+	oldRepo, oldBase := Repo, Base
+	t.Cleanup(func() { Repo, Base = oldRepo, oldBase })
+	Repo = "owner/PAI"
+	for _, c := range []struct{ base, v, want string }{
+		{"", "v1.2.3", "https://github.com/owner/PAI/releases/download/v1.2.3/"},
+		{"", "latest", "https://github.com/owner/PAI/releases/latest/download/"},
+		{"https://dl.example.ts.net/pai", "v1.2.3", "https://dl.example.ts.net/pai/v1.2.3/"},
+		{"https://dl.example.ts.net/pai/", "latest", "https://dl.example.ts.net/pai/latest/"},
+	} {
+		Base = c.base
+		if got := dl(c.v); got != c.want {
+			t.Errorf("Base %q, %s: got %s, want %s", c.base, c.v, got, c.want)
+		}
+	}
+	Base = "https://dl.example.ts.net/pai"
+	unix, windows := InstallLines("pai_key_x")
+	if !strings.Contains(unix, "https://dl.example.ts.net/pai/latest/install.sh") || !strings.Contains(windows, "https://dl.example.ts.net/pai/latest/install.ps1") {
+		t.Errorf("install lines ignore Base: %s | %s", unix, windows)
+	}
 }
 
 type fixtureTransport map[string][]byte
