@@ -128,15 +128,27 @@ func uparseKey(s string) term.Key {
 func TestUltraShellWideAndNarrow(t *testing.T) {
 	a, u, _ := ultraFixture(t, 140, 40)
 	rows := drawn(a)
-	if !ucontains(rows, "◆ PAI ULTRA") || !ucontains(rows, "[Workspace]") || !ucontains(rows, "No task") {
-		t.Fatalf("wide screen:\n%s", strings.Join(rows, "\n"))
+	// One bottom line: the mark, the views, the model; no header above.
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "◆ ULTRA") || !strings.Contains(last, "[Work]") || !strings.Contains(last, "Cont") || !strings.Contains(last, "claude") {
+		t.Fatalf("bottom line: %q", last)
 	}
-	if u.side.Hidden {
-		t.Fatal("task panel hidden on a wide terminal")
+	for _, gone := range []string{"config r0", "server", "PAI ULTRA ·"} {
+		if ucontains(rows, gone) {
+			t.Fatalf("%q is still drawn", gone)
+		}
+	}
+	if !u.summary.Hidden {
+		t.Fatal("task line shown with no task")
+	}
+	tk, _ := u.rt.Create(runtimeNewTask("Fix the parser", nil, "claude"))
+	u.cur = tk.ID
+	if rows = drawn(a); u.summary.Hidden || !ucontains(rows, "PENDING · attempt 0/3 · checks 0/0 passed") {
+		t.Fatalf("task line:\n%s", strings.Join(rows, "\n"))
 	}
 	a.W, a.H = 50, 20
 	rows = drawn(a)
-	if !u.side.Hidden || !ucontains(rows, "[Work]") || !ucontains(rows, "PAI ULTRA") {
+	if !ucontains(rows, "[Work]") || !ucontains(rows, "◆ ULTRA") {
 		t.Fatalf("narrow screen:\n%s", strings.Join(rows, "\n"))
 	}
 	for _, r := range rows {
@@ -271,7 +283,7 @@ func TestUltraContextShowsUnknownNativeLoad(t *testing.T) {
 			found = r.Mark == "n" && strings.Contains(r.Hint, "unknown")
 		}
 	}
-	if !found || !ucontains(drawn(a), "tokens (estimate)") {
+	if !found || !ucontains(drawn(a), "tok of") {
 		t.Fatalf("native load status: %+v", u.lists[vContext].rows)
 	}
 }
@@ -336,17 +348,14 @@ func TestUltraInputShowsWhatIsTyped(t *testing.T) {
 	if !ucontains(rows, "hello world") {
 		t.Fatalf("typed text not drawn:\n%s", strings.Join(rows, "\n"))
 	}
-	if !ucontains(rows, "? keys") {
-		t.Fatal("the keys hint is not drawn")
-	}
-	for _, name := range viewNames {
+	for _, name := range viewShort {
 		if !ucontains(rows, name) {
 			t.Fatalf("tab %q not drawn", name)
 		}
 	}
 	a.W = 60
 	rows = drawn(a)
-	if !ucontains(rows, "hello world") || !ucontains(rows, "Ctx") {
+	if !ucontains(rows, "hello world") || !ucontains(rows, "Cont") {
 		t.Fatalf("narrow screen:\n%s", strings.Join(rows, "\n"))
 	}
 }
@@ -357,5 +366,24 @@ func TestUltraWarnsOutsideAGitProject(t *testing.T) {
 	}
 	if h, err := os.UserHomeDir(); err == nil && !strings.Contains(workspaceWarning(h), "home folder") {
 		t.Fatal("no home-folder warning")
+	}
+}
+
+func TestUltraReplyIsMarkdownWithoutTheResultBlock(t *testing.T) {
+	a, u, _ := ultraFixture(t, 100, 30)
+	u.event(exec.Event{Kind: "text", Text: "I'm running **locally** in `C:\try`, a long sentence that must wrap between words and never inside one.\n\n```pai-result\n{\"status\":\"done\"}\n```"})
+	rows := drawn(a)
+	text := strings.Join(rows, "\n")
+	if strings.Contains(text, "**") || strings.Contains(text, "pai-result") || strings.Contains(text, `"status"`) {
+		t.Fatalf("raw markdown or the result block shown:\n%s", text)
+	}
+	if !ucontains(rows, "locally") {
+		t.Fatalf("reply not shown:\n%s", text)
+	}
+	// Word wrapping: no row ends inside a word of the sentence.
+	for _, r := range rows {
+		if strings.HasSuffix(strings.TrimRight(r, " "), "betwe") || strings.HasSuffix(strings.TrimRight(r, " "), "insi") {
+			t.Fatalf("wrapped inside a word: %q", r)
+		}
 	}
 }

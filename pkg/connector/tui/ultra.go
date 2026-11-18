@@ -32,19 +32,14 @@ const (
 )
 
 var viewNames = [nViews]string{"Workspace", "Skills", "Instructions", "Memory", "Runs", "Context"}
-var viewShort = [nViews]string{"Work", "Skills", "Instr", "Memory", "Runs", "Ctx"}
 
-const ultraHintWidth = 30 // fits the longest hint, "esc back · / search · ? keys"
+// viewShort is the tab labels on the bottom line, short enough for one row.
+var viewShort = [nViews]string{"Work", "Skill", "Ins", "Mem", "Runs", "Cont"}
 
 const (
-	// ultraSideFrom is the width from which the task panel docks beside the
-	// conversation; narrower, it folds into one line over the input.
-	ultraSideFrom = 100
-	ultraSide     = 38
 	// ultraDetailFrom is the width from which a list and its detail show
 	// side by side; narrower, the detail replaces the list.
 	ultraDetailFrom = 110
-	ultraNarrow     = 60 // below this the tabs show short names
 )
 
 // Focus regions, cycled by Tab and Shift+Tab.
@@ -68,17 +63,14 @@ type ultra struct {
 
 	view, focus int
 	root        *Node
-	header      *Node
-	tabsNode    *Node
 	body        *Node
-	statusRow   *Node
+	bar         *Node // the bottom line: views, status, model, sizes
 	status      *Text
 
 	// Workspace.
 	transcript *Scrollbox
 	input      *Input
 	inputRow   *Node
-	side       *Node
 	summary    *Node
 	work       *Node
 	cur        string // the current task
@@ -87,6 +79,7 @@ type ultra struct {
 	armed      bool
 	lastCtx    *ctxsel.Context // the context of the newest run here, for loaded status
 	lastCtxFor string          // the task lastCtx was built for
+	lastTokens int             // the newest run's tokens, for the bar
 	quitting   bool            // /exit during a run: quit once it stops
 	taskCache  *task.Task
 	taskAt     time.Time
@@ -129,21 +122,18 @@ func openUltra(a *App, c *connector.Client, dir string) (*ultra, error) {
 	u.input.OnSubmit = u.submit
 	u.input.Before = u.inputKey
 	u.input.History = a.History
-	u.header = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraHeader{u}}
-	u.tabsNode = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraTabs{u}}
-	u.side = &Node{Fixed: ultraSide, Paint: PaintPanel, Pad: [4]int{1, 1, 1, 0}, View: ultraTaskPanel{u}}
+	u.bar = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraBar{u}}
 	u.summary = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraTaskLine{u}}
 	box := inputBox(a, u.input)
 	box.Grow = 1 // a row gives a child neither Fixed nor Grow no width
 	u.inputRow = Box(&Node{Dir: Row, Pad: [4]int{2, 1, 2, 0}}, box)
 	convo := Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1, Pad: [4]int{2, 1, 2, 0}, View: u.transcript}, u.summary, u.inputRow)
-	u.work = Box(&Node{Dir: Row, Grow: 1}, convo, u.side)
+	u.work = Box(&Node{Dir: Row, Grow: 1}, convo)
 	u.listNode = &Node{Grow: 1, Pad: [4]int{2, 1, 1, 0}, View: ultraMgmtKeys{u, false}}
 	u.detailNode = &Node{Grow: 1, Paint: PaintPanel, Pad: [4]int{2, 1, 1, 0}, View: ultraMgmtKeys{u, true}}
 	u.mgmt = Box(&Node{Dir: Row, Grow: 1}, u.listNode, u.detailNode)
 	u.body = Box(&Node{Dir: Col, Grow: 1}, u.work, u.mgmt)
-	u.statusRow = Box(&Node{Dir: Row, Fixed: 1, Pad: [4]int{2, 0, 2, 0}}, &Node{Grow: 1, View: u.status}, &Node{Fixed: ultraHintWidth, View: ultraKeysHint{u}})
-	u.root = Box(&Node{Dir: Col, Paint: PaintScreen}, u.header, u.tabsNode, u.body, u.statusRow)
+	u.root = Box(&Node{Dir: Col, Paint: PaintScreen}, u.body, u.bar)
 	if w := workspaceWarning(proj.Root); w != "" {
 		u.say(w, InkError)
 	}
@@ -169,8 +159,7 @@ func (u *ultra) pickCurrent() {
 func (u *ultra) Root() *Node { return u.root }
 
 func (u *ultra) Size(a *App, w, h int) {
-	u.side.Hidden = w < ultraSideFrom
-	u.summary.Hidden = !u.side.Hidden || u.cur == ""
+	u.summary.Hidden = u.curTask() == nil
 	u.work.Hidden = u.view != vWork
 	u.mgmt.Hidden = u.view == vWork
 	u.input.MaxRows = max(1, min(inputRows, h*inputShare/100))
@@ -342,7 +331,7 @@ func (u *ultra) cycleFocus(d int) {
 	u.focus = ring[(i+d+len(ring))%len(ring)]
 	switch {
 	case u.focus == fTabs:
-		u.a.Focus(u.tabsNode)
+		u.a.Focus(u.bar)
 	case u.view == vWork:
 		u.a.Focus(u.inputRow.Kids[0].Kids[1])
 	case u.focus == fDetail:
@@ -392,7 +381,6 @@ func (u *ultra) submit(a *App, text string) {
 		u.nextChecks = nil
 		u.cur = nt.ID
 		u.say("› "+text, InkText)
-		u.say(fmt.Sprintf("task %s · %d criteria · executor %s · config %s", nt.ID, len(nt.Criteria), nt.Executor, project.RevisionLabel(nt.ConfigRev)), InkMuted)
 	} else {
 		// A follow-up to a waiting task becomes a recorded constraint: the
 		// task's criteria stay as they are.
@@ -404,7 +392,7 @@ func (u *ultra) submit(a *App, text string) {
 			a.SayError(err)
 			return
 		}
-		u.say("› "+text+"  (added to task "+t.ID+")", InkText)
+		u.say("› "+text, InkText)
 	}
 	u.run()
 }
@@ -439,13 +427,15 @@ func (u *ultra) event(e exec.Event) {
 	u.fresh()
 	switch e.Kind {
 	case "text":
-		u.say(strings.TrimSpace(e.Text), InkText)
+		// The executor's reply is Markdown, rendered and word-wrapped as in
+		// Classic; its pai-result block is PAI's, shown as checked results.
+		if s := exec.StripResult(e.Text); s != "" {
+			u.transcript.Append(&textBlock{s: s})
+		}
 	case "tool":
 		u.say("  · "+cellCut(e.Text, 200), InkMuted)
 	case "error":
 		u.say("  ! "+e.Text, InkError)
-	case "start":
-		u.say("  ▸ started "+e.Text, InkMuted)
 	}
 }
 
@@ -465,29 +455,25 @@ func (u *ultra) finished(out runtimeOutcome, err error) {
 		return
 	}
 	if out.Task != nil && out.Result.Status == "" {
-		// No attempt ran: say why, not a claim nobody made.
-		u.say(fmt.Sprintf("■ %s: %s; no attempt ran", out.Task.ID, strings.ToUpper(string(out.Task.State))), InkMuted)
+		// No attempt ran: the error below says why.
 		out.Task = nil
 	}
 	if out.Task != nil {
-		claim := out.Result.Status
-		line := fmt.Sprintf("■ %s: %s after %d attempt(s); executor claimed %q", out.Task.ID, strings.ToUpper(string(out.Task.State)), out.Task.Attempts, claim)
+		u.lastTokens = out.Result.Usage.Total()
 		ink := InkMuted
 		if out.Task.State == task.Accepted {
 			ink = InkAccent
 		}
-		u.say(line, ink)
+		u.say(fmt.Sprintf("■ %s · claimed %s", strings.ToUpper(string(out.Task.State)), out.Result.Status), ink)
 		if out.Validation != nil {
+			byID := map[string]task.Criterion{}
+			for _, cr := range out.Task.Criteria {
+				byID[cr.ID] = cr
+			}
 			for _, r := range out.Validation.Results {
-				u.say(fmt.Sprintf("  [%s] %s: %s", strings.ToUpper(r.Status), r.Criterion, cellCut(r.Detail, 160)), statusInk(r.Status))
+				u.say(fmt.Sprintf("  %-4s %s", strings.ToUpper(r.Status), cellCut(criterionShort(byID[r.Criterion]), 120)), statusInk(r.Status))
 			}
 		}
-		us := out.Result.Usage
-		src := "estimated"
-		if us.Reported {
-			src = "reported"
-		}
-		u.say(fmt.Sprintf("  tokens %d in · %d out · %d cache (%s) · context ~%d (estimate)", us.Input, us.Output, us.CacheRead, src, out.Context.Tokens), InkMuted)
 		for _, w := range append(out.Context.Warnings, out.Warnings...) {
 			u.say("  ! "+w, InkError)
 		}
@@ -708,17 +694,32 @@ func (l *uline) Rows(a *App, w int) []Line {
 	st := term.Style{FG: a.Theme.ink(cmpInk(l.ink, InkText))}
 	var out []Line
 	for _, para := range strings.Split(l.text, "\n") {
+		// Wrap at spaces; a word longer than the width is cut where it must be.
 		var cur []Glyph
 		n := 0
-		term.Graphemes(para, func(g string, gw int) {
-			if n+gw > w && len(cur) > 0 {
-				out = append(out, Line{Gs: cur})
-				cur, n = nil, 0
+		flush := func() {
+			out = append(out, Line{Gs: cur})
+			cur, n = nil, 0
+		}
+		for i, word := range strings.Split(para, " ") {
+			ww := term.Width(word)
+			if i > 0 {
+				if n+1+ww > w && n > 0 {
+					flush()
+				} else {
+					cur = append(cur, Glyph{G: " ", W: 1, St: st})
+					n++
+				}
 			}
-			cur = append(cur, Glyph{G: g, W: gw, St: st})
-			n += gw
-		})
-		out = append(out, Line{Gs: cur})
+			term.Graphemes(word, func(g string, gw int) {
+				if n+gw > w && n > 0 {
+					flush()
+				}
+				cur = append(cur, Glyph{G: g, W: gw, St: st})
+				n += gw
+			})
+		}
+		flush()
 	}
 	return out
 }
@@ -730,171 +731,111 @@ func cmpInk(a, b Ink) Ink {
 	return b
 }
 
-// ultraHeader is the PAI ULTRA wordmark and the configuration in effect.
-type ultraHeader struct{ u *ultra }
+// ultraBar is the one line at the bottom: the ULTRA mark and the views on
+// the left, the status message after them, and on the right what needs
+// attention (only when it does), then the model, the context PAI sends and
+// the newest run's tokens. The current view is bracketed, not only colored.
+type ultraBar struct{ u *ultra }
 
-func (h ultraHeader) Draw(a *App, c *Canvas, r Rect) {
-	u := h.u
+func (b ultraBar) Draw(a *App, c *Canvas, r Rect) {
+	u := b.u
 	acc := term.Style{FG: ultraAccent(a.Theme), Attr: term.Bold}
-	x := c.Text(r.X, r.Y, "◆ PAI ULTRA", acc) // Text returns the column after the text
-	// The right side holds only what needs attention now; usually nothing.
+	muted := a.Theme.muted()
+	x := c.Text(r.X, r.Y, "◆ ULTRA", acc) + 1 // Text returns the column after the text
+	for i, n := range viewShort {
+		label, st := " "+n+" ", muted
+		if i == u.view {
+			label, st = "["+n+"]", acc
+			if u.focus == fTabs {
+				st.Attr |= term.Underline
+			}
+		}
+		if x+term.Width(label) > r.X+r.W {
+			return
+		}
+		x = c.Text(x, r.Y, label, st)
+	}
+	right := cellCut(strings.Join(u.barItems(), " · "), max(0, r.X+r.W-x-2))
+	end := r.X + r.W - term.Width(right)
+	if right != "" {
+		c.Text(end, r.Y, right, muted)
+	}
+	if s := strings.TrimSpace(u.status.S); s != "" {
+		st := muted
+		if u.status.Ink == InkError {
+			st = term.Style{FG: a.Theme.Error}
+		}
+		c.Text(x+2, r.Y, cellCut(s, max(0, end-x-4)), st)
+	}
+}
+
+// barItems is the right of the bar. Attention items come first and only
+// when they apply; the model and sizes are always there, as in Classic.
+func (u *ultra) barItems() []string {
 	var items []string
 	if n := u.staged(); n > 0 {
 		items = append(items, fmt.Sprintf("%d staged: a apply, d discard", n))
 	}
 	if u.proj.ManifestEdited {
-		items = append(items, "project.yaml edited: apply to re-lock")
+		items = append(items, "project.yaml edited")
 	}
 	latest := u.proj.Revision()
 	if t := u.curTask(); t != nil && t.ConfigRev != latest && (t.State.Held() || u.running) {
-		items = append(items, fmt.Sprintf("task on config %s, latest %s: restart to apply", project.RevisionLabel(t.ConfigRev), project.RevisionLabel(latest)))
+		items = append(items, "restart to apply "+project.RevisionLabel(latest))
 	}
 	if u.c == nil {
 		items = append(items, "offline")
 	}
-	right := strings.Join(items, " · ")
-	if r.W > 60 {
-		c.Text(x+2, r.Y, cellCut(shortPath(u.proj.Root), max(0, r.X+r.W-x-term.Width(right)-4)), a.Theme.muted())
+	items = append(items, cmpStr(u.proj.Manifest.Executor.Model, u.executor))
+	if u.lastCtx != nil {
+		items = append(items, "ctx "+shortCount(u.lastCtx.Tokens))
 	}
-	right = cellCut(right, max(0, r.X+r.W-x-1))
-	c.Text(r.X+r.W-term.Width(right), r.Y, right, a.Theme.muted())
+	if u.lastTokens > 0 {
+		items = append(items, shortCount(u.lastTokens)+" tok")
+	}
+	return items
 }
 
-func shortPath(p string) string {
-	if h, err := os.UserHomeDir(); err == nil && strings.HasPrefix(p, h) {
-		return "~" + p[len(h):]
+// shortCount is 950, 1.2k or 372k.
+func shortCount(n int) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprint(n)
+	case n < 10000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
-	return p
+	return fmt.Sprintf("%dk", n/1000)
 }
 
-// ultraTabs is the views; the current one is bracketed, not only colored.
-type ultraTabs struct{ u *ultra }
-
-func (t ultraTabs) Draw(a *App, c *Canvas, r Rect) {
-	names := viewNames
-	if r.W < ultraNarrow+20 {
-		names = viewShort
-	}
-	x := r.X
-	for i, n := range names {
-		label := " " + n + " "
-		st := a.Theme.muted()
-		if i == t.u.view {
-			label = "[" + n + "]"
-			st = term.Style{FG: ultraAccent(a.Theme), Attr: term.Bold}
-			if t.u.focus == fTabs {
-				st.Attr |= term.Underline
-			}
-		}
-		if x+term.Width(label) > r.X+r.W {
-			break
-		}
-		x = c.Text(x, r.Y, label, st) + 1 // Text returns the column after the label
-	}
-}
-
-func (t ultraTabs) Key(a *App, k term.Key) bool {
+func (b ultraBar) Key(a *App, k term.Key) bool {
 	switch k.String() {
 	case "left", "h":
-		t.u.setView(t.u.view - 1)
+		b.u.setView(b.u.view - 1)
 	case "right", "l":
-		t.u.setView(t.u.view + 1)
+		b.u.setView(b.u.view + 1)
 	default:
 		return false
 	}
-	t.u.focus = fTabs
-	a.Focus(t.u.tabsNode)
+	b.u.focus = fTabs
+	a.Focus(b.u.bar)
 	return true
 }
 
-// ultraKeysHint is the few keys that matter now, on the status row.
-type ultraKeysHint struct{ u *ultra }
-
-func (h ultraKeysHint) Height(int) int { return 1 }
-func (h ultraKeysHint) Draw(a *App, c *Canvas, r Rect) {
-	s := "? keys"
-	switch {
-	case h.u.running:
-		s = "esc esc stop · ? keys"
-	case h.u.view != vWork:
-		s = "esc back · / search · ? keys"
+// criterionShort is a criterion in the fewest words.
+func criterionShort(cr task.Criterion) string {
+	switch cr.Kind {
+	case task.CriterionCommand:
+		return cr.Command
+	case task.CriterionFile:
+		if cr.Contains != "" {
+			return cr.Path + " has " + cr.Contains
+		}
+		return cr.Path
 	}
-	c.Text(r.X+r.W-term.Width(s), r.Y, s, a.Theme.muted())
+	return "review: " + cr.Text
 }
 
-// ultraTaskPanel is the current task's progress beside the conversation.
-type ultraTaskPanel struct{ u *ultra }
-
-func (p ultraTaskPanel) Draw(a *App, c *Canvas, r Rect) {
-	lines := p.u.taskLines()
-	for i, l := range lines {
-		if i >= r.H {
-			break
-		}
-		st := a.Theme.text()
-		if i == 0 {
-			st = term.Style{FG: ultraAccent(a.Theme), Attr: term.Bold}
-		} else if strings.HasPrefix(l, "  ") || strings.HasSuffix(l, ":") {
-			st = a.Theme.muted()
-		}
-		c.Text(r.X, r.Y+i, cellCut(l, r.W), st)
-	}
-}
-
-func (u *ultra) taskLines() []string {
-	t := u.curTask()
-	if t == nil {
-		return []string{"No task", "", "Executor: " + u.executor, "Checks:   /check CMD"}
-	}
-	state := strings.ToUpper(string(t.State))
-	if u.running {
-		state = "RUNNING"
-	}
-	ls := []string{cellCut(t.Title, ultraSide-2), "", "State:    " + state, fmt.Sprintf("Attempt:  %d of %d", t.Attempts, t.MaxAttempts),
-		"Executor: " + cmpStr(t.Executor, u.executor)}
-	if latest := u.proj.Revision(); latest != t.ConfigRev {
-		// Shown only when it matters: newer configuration waits for the next attempt.
-		ls = append(ls, "Config:   "+project.RevisionLabel(t.ConfigRev)+", latest "+project.RevisionLabel(latest))
-	}
-	ls = append(ls, "", "Verification:")
-	results := map[string]task.CheckResult{}
-	if t.Validation != nil {
-		for _, r := range t.Validation.Results {
-			results[r.Criterion] = r
-		}
-	}
-	for _, cr := range t.Criteria {
-		st := "not run"
-		if r, ok := results[cr.ID]; ok {
-			st = strings.ToUpper(r.Status)
-		}
-		ls = append(ls, fmt.Sprintf("  [%s] %s", st, cellCut(cr.Describe(), ultraSide-14)))
-	}
-	if len(t.Criteria) == 0 {
-		ls = append(ls, "  none: the executor's claim", "  stays unverified")
-	}
-	if t.Report != nil {
-		ls = append(ls, "", "Executor claimed: "+t.Report.Status)
-	}
-	ls = append(ls, "", "Checkpoint:")
-	if n := len(t.Checkpoints); n > 0 {
-		ls = append(ls, "  "+t.Checkpoints[n-1])
-	} else {
-		ls = append(ls, "  none yet")
-	}
-	if len(t.Blockers) > 0 {
-		ls = append(ls, "", "Blocked:")
-		for _, b := range t.Blockers {
-			ls = append(ls, "  "+cellCut(b, ultraSide-4))
-		}
-	}
-	for _, o := range t.Unknown() {
-		ls = append(ls, "  UNKNOWN op "+o.ID)
-	}
-	return ls
-}
-
-// ultraTaskLine is the panel folded into one line, on narrow terminals.
+// ultraTaskLine is the current task in one line above the input; Runs has the rest.
 type ultraTaskLine struct{ u *ultra }
 
 func (l ultraTaskLine) Draw(a *App, c *Canvas, r Rect) {
@@ -914,8 +855,16 @@ func (l ultraTaskLine) Draw(a *App, c *Canvas, r Rect) {
 			}
 		}
 	}
-	s := fmt.Sprintf("%s · %s · attempt %d/%d · checks %d/%d pass", t.ID, state, t.Attempts, t.MaxAttempts, pass, len(t.Criteria))
-	c.Text(r.X, r.Y, cellCut(s, r.W), a.Theme.muted())
+	s := fmt.Sprintf("%s · attempt %d/%d · checks %d/%d passed", strings.ToUpper(state), t.Attempts, t.MaxAttempts, pass, len(t.Criteria))
+	st := a.Theme.muted()
+	if n := len(t.Unknown()); n > 0 {
+		s += fmt.Sprintf(" · %d unknown op: Runs, u", n)
+		st = term.Style{FG: a.Theme.Error}
+	} else if len(t.Blockers) > 0 {
+		s += " · blocked: " + t.Blockers[len(t.Blockers)-1]
+		st = term.Style{FG: a.Theme.Error}
+	}
+	c.Text(r.X, r.Y, cellCut(s, r.W), st)
 }
 
 // runtimeOutcome is coord.Outcome, named here to keep imports in one place.

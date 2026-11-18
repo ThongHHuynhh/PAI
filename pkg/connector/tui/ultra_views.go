@@ -97,40 +97,18 @@ func (m ultraMgmtKeys) Key(a *App, k term.Key) bool {
 	return u.action(k)
 }
 
-// viewHead is the one line above a list: what it shows and its totals.
+// viewHead is the one line above a list. Only Context has one: its totals.
+// The rows' own labels say the rest; ? lists the keys.
 func (u *ultra) viewHead() string {
-	switch u.view {
-	case vSkills:
-		return "installed skills · [x] enabled for this project · selected/loaded per task"
-	case vInstr:
-		t := u.curTask()
-		scope := "no current task: whole project"
-		if t != nil {
-			scope = "for " + t.ID
-			if len(t.Paths) > 0 {
-				scope += " (" + strings.Join(t.Paths, ", ") + ")"
-			}
-		}
-		return "+ applies   n executor loads it   - not applied · " + scope + " · executor " + u.executor
-	case vMemory:
-		if u.memAll {
-			return "all knowledge, every status (s: live only)"
-		}
-		return "live knowledge: verified, candidate, stale (s: all)"
-	case vRuns:
-		return "tasks, newest first"
-	case vContext:
-		if u.ctxNow == nil {
-			return ""
-		}
-		cx := u.ctxNow
-		over := ""
-		if cx.Overrun {
-			over = " · OVER BUDGET"
-		}
-		return fmt.Sprintf("~%d tokens (estimate) · budget %d · mandatory ~%d · config %s%s", cx.Tokens, cx.Budget, cx.Mandatory, project.RevisionLabel(cx.ConfigRev), over)
+	if u.view != vContext || u.ctxNow == nil {
+		return ""
 	}
-	return ""
+	cx := u.ctxNow
+	over := ""
+	if cx.Overrun {
+		over = " · OVER BUDGET"
+	}
+	return fmt.Sprintf("~%s tok of %s budget · %s mandatory%s", shortCount(cx.Tokens), shortCount(cx.Budget), shortCount(cx.Mandatory), over)
 }
 
 // --- Skills ---------------------------------------------------------------

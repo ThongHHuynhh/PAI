@@ -118,18 +118,18 @@ Extraction and consolidation are off (`memory.extraction`, `memory.consolidation
 
 ## The TUI
 
-`pai` opens ULTRA when it is the project's default. Header: `◆ PAI ULTRA` and the project; on the right only what needs attention: staged edits, a hand-edited manifest, a running task on an older configuration, offline.
+`pai` opens ULTRA when it is the project's default. One line at the bottom, as in Classic: `◆ ULTRA`, the views (`Work Skill Ins Mem Runs Cont`), the status message, then what needs attention only when it does (staged edits, a hand-edited manifest, a restart, offline), the model, the context PAI sends and the newest run's tokens.
 
 | View | Alt+ | Does |
 |---|---|---|
-| Workspace | 1 | conversation, task panel (state, attempt, executor, verification, checkpoint, blockers) |
+| Workspace | 1 | conversation (replies rendered as Markdown), and one line above the input with the task's state, attempt, checks passed and any blocker |
 | Skills | 2 | browse, search by name/tag/source, inspect, enable (Space), activation (m), scope (s), update (u), pin (P), override (o), profile (r) |
 | Instructions | 3 | every source with owner, revision and why it applies; new (n), edit project files (e), override or copy external ones (o), conflicts (c) |
 | Memory | 4 | candidates, verified, stale; verify (v), invalidate (x), add (n), Classic import preview (i) |
 | Runs | 5 | tasks, owners, checkpoints; resume (r), checkpoint (c), approve (A), reconcile (u), hand off (h), recover (R) |
 | Context | 6 | the effective context: items, reasons, tokens, warnings |
 
-Keys: Tab/Shift+Tab move focus, arrows or j/k move, Enter inspects, `/` searches, Esc closes or returns, `[` `]` change view in a list, `?` or F1 shows the view's keys. In Skills and Instructions, `p` previews staged changes, `a` applies, `d` discards. Editing opens an in-app editor: Enter adds a line, Ctrl+S stages, Esc cancels. Management views read and write local files only; they never call a model. Below 100 columns the task panel folds into one line; below 110 the detail replaces its list.
+Keys: Tab/Shift+Tab move focus, arrows or j/k move, Enter inspects, `/` searches, Esc closes or returns, `[` `]` change view in a list, `?` or F1 shows the view's keys. In Skills and Instructions, `p` previews staged changes, `a` applies, `d` discards. Editing opens an in-app editor: Enter adds a line, Ctrl+S stages, Esc cancels. Management views read and write local files only; they never call a model. Below 110 columns the detail replaces its list.
 
 ## Measuring
 
