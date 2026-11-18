@@ -464,16 +464,8 @@ func (u *ultra) finished(out runtimeOutcome, err error) {
 		if out.Task.State == task.Accepted {
 			ink = InkAccent
 		}
-		u.say(fmt.Sprintf("■ %s · claimed %s", strings.ToUpper(string(out.Task.State)), out.Result.Status), ink)
-		if out.Validation != nil {
-			byID := map[string]task.Criterion{}
-			for _, cr := range out.Task.Criteria {
-				byID[cr.ID] = cr
-			}
-			for _, r := range out.Validation.Results {
-				u.say(fmt.Sprintf("  %-4s %s", strings.ToUpper(r.Status), cellCut(criterionShort(byID[r.Criterion]), 120)), statusInk(r.Status))
-			}
-		}
+		// Only the outcome: the checks behind it are in Runs.
+		u.say("■ "+strings.ToUpper(string(out.Task.State)), ink)
 		for _, w := range append(out.Context.Warnings, out.Warnings...) {
 			u.say("  ! "+w, InkError)
 		}
@@ -481,16 +473,6 @@ func (u *ultra) finished(out runtimeOutcome, err error) {
 	if err != nil {
 		u.say("  "+err.Error(), InkError)
 	}
-}
-
-func statusInk(s string) Ink {
-	switch s {
-	case "pass":
-		return InkAccent
-	case "fail", "error":
-		return InkError
-	}
-	return InkMuted
 }
 
 func (u *ultra) stop() {
@@ -821,20 +803,6 @@ func (b ultraBar) Key(a *App, k term.Key) bool {
 	return true
 }
 
-// criterionShort is a criterion in the fewest words.
-func criterionShort(cr task.Criterion) string {
-	switch cr.Kind {
-	case task.CriterionCommand:
-		return cr.Command
-	case task.CriterionFile:
-		if cr.Contains != "" {
-			return cr.Path + " has " + cr.Contains
-		}
-		return cr.Path
-	}
-	return "review: " + cr.Text
-}
-
 // ultraTaskLine is the current task in one line above the input; Runs has the rest.
 type ultraTaskLine struct{ u *ultra }
 
@@ -847,15 +815,7 @@ func (l ultraTaskLine) Draw(a *App, c *Canvas, r Rect) {
 	if l.u.running {
 		state = "running"
 	}
-	pass := 0
-	if t.Validation != nil {
-		for _, x := range t.Validation.Results {
-			if x.Status == "pass" {
-				pass++
-			}
-		}
-	}
-	s := fmt.Sprintf("%s · attempt %d/%d · checks %d/%d passed", strings.ToUpper(state), t.Attempts, t.MaxAttempts, pass, len(t.Criteria))
+	s := fmt.Sprintf("%s · attempt %d/%d", strings.ToUpper(state), t.Attempts, t.MaxAttempts)
 	st := a.Theme.muted()
 	if n := len(t.Unknown()); n > 0 {
 		s += fmt.Sprintf(" · %d unknown op: Runs, u", n)

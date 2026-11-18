@@ -143,7 +143,7 @@ func TestUltraShellWideAndNarrow(t *testing.T) {
 	}
 	tk, _ := u.rt.Create(runtimeNewTask("Fix the parser", nil, "claude"))
 	u.cur = tk.ID
-	if rows = drawn(a); u.summary.Hidden || !ucontains(rows, "PENDING · attempt 0/3 · checks 0/0 passed") {
+	if rows = drawn(a); u.summary.Hidden || !ucontains(rows, "PENDING · attempt 0/3") {
 		t.Fatalf("task line:\n%s", strings.Join(rows, "\n"))
 	}
 	a.W, a.H = 50, 20
