@@ -36,6 +36,10 @@ curl -fsSL https://github.com/ThongHHuynhh/PAI/releases/latest/download/install.
 
 Windows uses `install.ps1` the same way. See [docs/self-hosting.md](docs/self-hosting.md) for URLs, tunnels, accounts and failover, and [docs/architecture.md](docs/architecture.md) for how it works. To use PAI's memory from Claude Code, Cursor or another MCP client, see [docs/mcp.md](docs/mcp.md). For PAI ULTRA, the opt-in mode that runs Claude Code or Codex under PAI's task contracts, checks and checkpoints, see [docs/ultra.md](docs/ultra.md).
 
+`latest` is the newest stable release. To install a beta, name it: `https://github.com/ThongHHuynhh/PAI/releases/download/v0.5.0-beta.2/install.sh`.
+
+Running PAI from a private copy of this repository, whose release files need a login? Serve its releases from your own machine instead: see [docs/download-server.md](docs/download-server.md).
+
 ## Build from source
 
 Go 1.27 and Node 22:
