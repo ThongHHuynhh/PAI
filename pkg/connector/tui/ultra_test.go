@@ -28,6 +28,9 @@ func ultraFixture(t *testing.T, w, h int) (*App, *ultra, *atomic.Int32) {
 	}
 	home := t.TempDir()
 	t.Setenv("PAI_ULTRA_HOME", home)
+	userHome := t.TempDir() // no real ~/.claude/skills or ~/.agents/skills in tests
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
 	lib := filepath.Join(home, "library")
 	os.MkdirAll(filepath.Join(lib, "skills", "go-testing"), 0o755)
 	os.WriteFile(filepath.Join(lib, "skills", "go-testing", "SKILL.md"), []byte("---\nname: go-testing\ndescription: Table-driven Go tests.\nmetadata:\n  version: \"1.0.0\"\n  tags: go,testing\n---\nUse t.Run.\n"), 0o644)
@@ -183,7 +186,7 @@ func TestUltraKeyboardViewsAndSearch(t *testing.T) {
 	}
 	upress(a, "/", "w", "e", "b", "enter")
 	l := u.lists[vSkills]
-	if len(l.shown) != 1 || l.rows[l.shown[0]].Key != "web-ui" {
+	if len(l.shown) != 1 || l.rows[l.shown[0]].Key != "user/web-ui" {
 		t.Fatalf("search by tag: %+v", l.shown)
 	}
 	upress(a, "/", "esc") // clears the search
@@ -234,7 +237,7 @@ func TestUltraStagedSkillApplyAndDiscard(t *testing.T) {
 	if u.proj.Revision() != 1 || len(u.proj.Lock.Packages) != 1 {
 		t.Fatalf("apply: revision %d, %d packages", u.proj.Revision(), len(u.proj.Lock.Packages))
 	}
-	if !strings.Contains(u.lists[vSkills].rows[0].State, "enabled") {
+	if u.lists[vSkills].rows[0].Mark != "[x]" {
 		t.Fatalf("row after apply: %+v", u.lists[vSkills].rows[0])
 	}
 	if starts.Load() != 0 {
@@ -424,4 +427,27 @@ func TestUltraInputIsAmber(t *testing.T) {
 		}
 	}
 	t.Fatal("typed text not found")
+}
+
+func TestUltraEditsASkillInPlaceAfterConfirming(t *testing.T) {
+	a, u, _ := ultraFixture(t, 140, 40)
+	upress(a, "alt+2")
+	u.lists[vSkills].sel = 0 // go-testing, user library
+	upress(a, "e")
+	if len(a.layers) != 1 {
+		t.Fatal("no scope menu")
+	}
+	upress(a, "enter") // "The skill itself"
+	if len(a.layers) != 1 {
+		t.Fatal("no editor")
+	}
+	upress(a, "X", "ctrl+s")
+	if len(a.layers) != 1 || !ucontains(drawn(a), "Enter saves this file") {
+		t.Fatalf("no diff to confirm:\n%s", strings.Join(drawn(a), "\n"))
+	}
+	upress(a, "enter")
+	b, _ := os.ReadFile(filepath.Join(os.Getenv("PAI_ULTRA_HOME"), "library", "skills", "go-testing", "SKILL.md"))
+	if !strings.HasSuffix(string(b), "X") { // the cursor starts at the end
+		t.Fatalf("skill not edited in place: %q", b)
+	}
 }

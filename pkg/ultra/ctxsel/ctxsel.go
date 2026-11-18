@@ -151,6 +151,11 @@ func Build(in Inputs) Context {
 		name := en.Pkg.Name
 		act := en.ActivationOf()
 		it := Item{ID: "skill:" + name, Kind: KindSkillMeta, Source: en.Pkg.Library + " " + project.Short(en.Pkg.Hash)}
+		if nativeSkill(en.Pkg.Library, in.Caps) {
+			it.Loaded, it.Reason = LoadedUnknown, in.Caps.Name+" loads this folder's skills itself; not sent again"
+			add(it)
+			continue
+		}
 		switch {
 		case act == project.Manual && (t == nil || !slices.Contains(t.Skills, name)):
 			it.Reason = "manual: not asked for by the task"
@@ -314,4 +319,17 @@ func cut(s string, n int) string {
 		return string(r[:n-1]) + "…"
 	}
 	return s
+}
+
+// nativeSkill is whether the executor reads this library's skills on its
+// own (Claude Code reads ~/.claude/skills and the project's .claude/skills),
+// so sending them again would only repeat them.
+func nativeSkill(library string, caps exec.Capabilities) bool {
+	switch library {
+	case project.ClaudeLibrary:
+		return slices.Contains(caps.AutoLoads, "~/.claude/skills")
+	case project.ProjectClaudeLibrary:
+		return slices.Contains(caps.AutoLoads, ".claude/skills")
+	}
+	return false
 }

@@ -113,41 +113,67 @@ func (u *ultra) viewHead() string {
 
 // --- Skills ---------------------------------------------------------------
 
+// skillKey is a skill's row key: its library and name, since one name can
+// live in two libraries (as hf-cli in ~/.claude/skills and ~/.agents/skills).
+func skillKey(library, name string) string { return library + "/" + name }
+
+func splitSkillKey(key string) (library, name string) {
+	library, name, _ = strings.Cut(key, "/")
+	return library, name
+}
+
+// installedSkill is the installed skill with key.
+func (u *ultra) installedSkill(key string) (project.Package, bool) {
+	lib, name := splitSkillKey(key)
+	installed, _ := u.proj.Installed()
+	for _, pk := range installed {
+		if pk.Kind == project.KindSkill && pk.Library == lib && pk.Name == name {
+			return pk, true
+		}
+	}
+	return project.Package{}, false
+}
+
+// enabledSkill is the project's enabled skill with key, when it is that library's.
+func (u *ultra) enabledSkill(key string) (project.Enabled, bool) {
+	lib, name := splitSkillKey(key)
+	r, _ := u.resolved()
+	en, ok := r.Find(project.KindSkill, name)
+	if !ok || en.Pkg.Library != lib && (en.Locked == nil || en.Locked.Source != lib) {
+		return project.Enabled{}, false
+	}
+	return en, true
+}
+
 func (u *ultra) loadSkills(l *ulist) {
 	installed, probs := u.proj.Installed()
-	r, rprobs := u.resolved()
-	var rows []urow
-	seen := map[string]bool{}
+	_, rprobs := u.resolved()
 	t := u.curTask()
+	var rows []urow
 	for _, pk := range installed {
-		if pk.Kind != project.KindSkill || seen[pk.Name] {
+		if pk.Kind != project.KindSkill {
 			continue
 		}
-		seen[pk.Name] = true
-		row := urow{Key: pk.Name, Mark: "[ ]", Label: pk.Name, State: "installed", Hint: fmt.Sprintf("%s · %s · ~%d tok", cmpStr(pk.Meta.VersionOf(), "-"), pk.Library, pk.Tokens),
+		key := skillKey(pk.Library, pk.Name)
+		row := urow{Key: key, Mark: "[ ]", Label: pk.Name, State: pk.Library, Hint: fmt.Sprintf("~%d tok · %s", pk.Tokens, oneLine(pk.Meta.Description)),
 			Search: strings.Join(pk.Meta.TagsOf(), " ") + " " + pk.Library + " " + pk.Meta.Compatibility + " " + pk.Meta.Description}
-		if en, ok := r.Find(project.KindSkill, pk.Name); ok {
-			row.Mark = "[x]"
-			row.State = "enabled, " + en.Status
-			if sel, _ := skillSelected(en, t); sel {
-				row.State += ", selected"
+		if en, ok := u.enabledSkill(key); ok {
+			row.Mark, row.Ink = "[x]", InkText
+			if en.Status != project.StatusLocked {
+				row.State += ", " + en.Status
 			}
-			if st := u.loadedStatus("skill:" + pk.Name); strings.HasPrefix(st, "loaded") || st == ctxsel.LoadedOnAsk {
-				row.State += ", " + st
+			if sel, _ := skillSelected(en, t); !sel {
+				row.State += ", not for this task"
 			}
-			row.Ink = InkText
 		}
 		rows = append(rows, row)
 	}
-	for _, en := range r.Enabled {
-		if en.Kind == project.KindSkill && !seen[en.Entry.Name] {
-			rows = append(rows, urow{Key: en.Entry.Name, Mark: "[!]", Label: en.Entry.Name, State: "enabled, " + en.Status, Ink: InkError})
-		}
-	}
-	l.Empty = "No skills installed. Add one at ~/.pai/ultra/library/skills/<name>/SKILL.md or .pai/library/skills/."
+	l.Empty = "No skills found in ~/.claude/skills, ~/.agents/skills, .claude/skills or .pai/library/skills."
 	l.set(rows)
 	l.Err = problemsLine(append(probs, rprobs...))
 }
+
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func problemsLine(ps []project.Problem) string {
 	var errs []string
@@ -177,39 +203,26 @@ func skillSelected(en project.Enabled, t *task.Task) (bool, string) {
 	return true, "description offered; the file is read when needed"
 }
 
-func (u *ultra) skillDetail(name string) string {
-	installed, _ := u.proj.Installed()
-	r, _ := u.resolved()
+func (u *ultra) skillDetail(key string) string {
+	pk, ok := u.installedSkill(key)
+	if !ok {
+		return key + ": not found"
+	}
 	var b strings.Builder
-	var pk *project.Package
-	if en, ok := r.Find(project.KindSkill, name); ok {
-		pk = &en.Pkg
+	if en, ok := u.enabledSkill(key); ok {
 		sel, why := skillSelected(en, u.curTask())
-		fmt.Fprintf(&b, "Enabled via %s · %s\nActivation: %s · paths: %s\nSelected for next run: %v (%s)\nLoaded in current context: %s\n",
-			en.Via, en.Status, en.ActivationOf(), strings.Join(cmpSlice(en.PathsOf(), []string{"whole project"}), ", "), sel, why, u.loadedStatus("skill:"+name))
+		fmt.Fprintf(&b, "On for this project (%s) · %s\nActivation: %s · paths: %s\nNext run: %v (%s)\nIn the newest run: %s\n",
+			en.Via, en.Status, en.ActivationOf(), strings.Join(cmpSlice(en.PathsOf(), []string{"whole project"}), ", "), sel, why, u.loadedStatus("skill:"+pk.Name))
 		if en.Status == project.StatusUpdate && en.Installed != nil {
-			fmt.Fprintf(&b, "Update available: library has %s %s (u to take it)\n%s", en.Installed.Meta.VersionOf(), project.Short(en.Installed.Hash), project.Diff(string(en.Pkg.Raw), string(en.Installed.Raw)))
+			fmt.Fprintf(&b, "Changed since locked (u takes it):\n%s", project.Diff(string(en.Pkg.Raw), string(en.Installed.Raw)))
 		}
 		if en.Override != nil {
-			fmt.Fprintf(&b, "Project override: %s\n", en.Override.Path)
+			fmt.Fprintf(&b, "Project copy: %s\n", en.Override.Path)
 		}
-	} else if i := slices.IndexFunc(installed, func(p project.Package) bool { return p.Kind == project.KindSkill && p.Name == name }); i >= 0 {
-		pk = &installed[i]
-		b.WriteString("Installed, not enabled (Space enables)\n")
+	} else {
+		b.WriteString("Off for this project (Space turns it on)\n")
 	}
-	if pk == nil {
-		return name + ": not found"
-	}
-	fmt.Fprintf(&b, "%s %s · %s · %s · ~%d tokens (estimate)\n%s\n", pk.Name, cmpStr(pk.Meta.VersionOf(), "unversioned"), pk.Library, project.Short(pk.Hash), pk.Tokens, pk.Path)
-	if t := pk.Meta.TagsOf(); len(t) > 0 {
-		b.WriteString("Tags: " + strings.Join(t, ", ") + "\n")
-	}
-	if pk.Meta.Compatibility != "" {
-		b.WriteString("Compatibility: " + pk.Meta.Compatibility + "\n")
-	}
-	if req := pk.Meta.Requires(); len(req) > 0 {
-		b.WriteString("Requires: " + strings.Join(req, ", ") + "\n")
-	}
+	fmt.Fprintf(&b, "%s · %s · ~%d tokens (estimate)\n%s\n", pk.Library, cmpStr(pk.Meta.VersionOf(), "unversioned"), pk.Tokens, pk.Path)
 	if rs := pk.Resources(); len(rs) > 0 {
 		b.WriteString("Resources: " + strings.Join(rs, ", ") + "\n")
 	}
@@ -222,6 +235,59 @@ func cmpSlice(a, b []string) []string {
 		return a
 	}
 	return b
+}
+
+// editSkill asks where an edit goes, then opens the editor: the skill's own
+// file (every project and every agent that reads that folder), or a copy for
+// this project only. The person chooses each time.
+func (u *ultra) editSkill(key string) {
+	pk, ok := u.installedSkill(key)
+	if !ok {
+		return
+	}
+	m := &Menu{Items: []MenuItem{
+		{Label: "The skill itself", Hint: pk.Path + ": every project and agent that reads " + pk.Library, Pick: func(a *App, _ *MenuItem) { u.editSkillFile(pk) }},
+		{Label: "A copy for this project", Hint: u.proj.OverridePath(project.KindSkill, pk.Name), Pick: func(a *App, _ *MenuItem) {
+			if _, on := u.enabledSkill(key); !on {
+				u.stageOrNew().Enable(project.KindSkill, pk.Name, pk.Library)
+			}
+			u.overrideAndEdit(project.KindSkill, pk.Name)
+		}},
+	}}
+	u.a.OpenMenu("Edit "+pk.Name, m)
+}
+
+// editSkillFile edits SKILL.md in place: the editor, then the diff to
+// confirm, then the write. A project using the skill takes the new content
+// at the next apply.
+func (u *ultra) editSkillFile(pk project.Package) {
+	base := pk.Raw
+	u.edit("Edit "+pk.Path, string(base), func(text string) error {
+		d := project.Diff(string(base), text)
+		if d == "" {
+			u.a.Say("no change")
+			return nil
+		}
+		tv := &textView{ink: diffInk}
+		tv.set(pk.Path + "\n\n" + d + "\nEnter saves this file · Esc cancels")
+		var l *Layer
+		l = u.a.Dialog("Save "+pk.Name+"?", &Node{View: confirm{tv, func() {
+			u.a.Pop(l)
+			u.refocus()
+			if err := u.proj.WriteSkill(pk, base, []byte(text)); err != nil {
+				u.a.SayError(err)
+				return
+			}
+			msg := "saved " + pk.Path
+			if _, on := u.enabledSkill(skillKey(pk.Library, pk.Name)); on {
+				u.stageOrNew().AcceptUpdate(project.KindSkill, pk.Name)
+				msg += "; a applies it to this project"
+			}
+			u.a.Say(msg)
+			u.reload()
+		}}})
+		return nil
+	}, "")
 }
 
 // --- Instructions ---------------------------------------------------------
@@ -603,45 +669,50 @@ func (u *ultra) skillAction(key string, r urow, has bool) bool {
 	if !has {
 		return false
 	}
+	lib, name := splitSkillKey(r.Key)
 	switch key {
 	case " ", "space":
 		st := u.stageOrNew()
 		if r.Mark == "[x]" {
-			st.Disable(project.KindSkill, r.Key)
-			a.Say("staged: disable " + r.Key + " (affects the next execution; a running context keeps what it loaded)")
+			st.Disable(project.KindSkill, name)
+			a.Say("staged: off for " + name + " (a running task keeps what it already read)")
 		} else {
-			st.Enable(project.KindSkill, r.Key, "")
-			a.Say("staged: enable " + r.Key)
+			st.Enable(project.KindSkill, name, lib)
+			a.Say("staged: on for " + name + " from " + lib)
 		}
+	case "e":
+		u.editSkill(r.Key)
+		return true
 	case "m":
-		rs, _ := u.resolved()
-		en, ok := rs.Find(project.KindSkill, r.Key)
+		en, ok := u.enabledSkill(r.Key)
 		if !ok {
-			a.Say("enable it first")
+			a.Say("turn it on first (Space)")
 			return true
 		}
 		next := map[project.Activation]project.Activation{project.Auto: project.Always, project.Always: project.Manual, project.Manual: project.Auto}[en.ActivationOf()]
-		u.stageOrNew().SetActivation(project.KindSkill, r.Key, next)
-		a.Say("staged: " + r.Key + " activation " + string(next))
+		u.stageOrNew().SetActivation(project.KindSkill, name, next)
+		a.Say("staged: " + name + " activation " + string(next))
 	case "s":
-		ask(a, "Path scope for "+r.Key, "globs separated by spaces, e.g. pkg/** web/**; empty: whole project", func(a *App, text string) {
-			u.stageOrNew().SetPaths(project.KindSkill, r.Key, strings.Fields(text))
+		ask(a, "Path scope for "+name, "globs separated by spaces, e.g. pkg/** web/**; empty: whole project", func(a *App, text string) {
+			u.stageOrNew().SetPaths(project.KindSkill, name, strings.Fields(text))
 			u.reload()
 		})
 	case "u":
-		u.stageOrNew().AcceptUpdate(project.KindSkill, r.Key)
-		a.Say("staged: take the library's content for " + r.Key + " (p previews)")
+		u.stageOrNew().AcceptUpdate(project.KindSkill, name)
+		a.Say("staged: take the current " + name + " (p previews)")
 	case "P":
-		rs, _ := u.resolved()
-		en, ok := rs.Find(project.KindSkill, r.Key)
+		en, ok := u.enabledSkill(r.Key)
 		if !ok || en.Pkg.Meta.VersionOf() == "" {
-			a.Say("only an enabled skill that declares a version can be pinned")
+			a.Say("only a skill that is on and declares a version can be pinned")
 			return true
 		}
-		u.stageOrNew().Pin(project.KindSkill, r.Key, en.Pkg.Meta.VersionOf())
-		a.Say("staged: pin " + r.Key + " to " + en.Pkg.Meta.VersionOf())
+		u.stageOrNew().Pin(project.KindSkill, name, en.Pkg.Meta.VersionOf())
+		a.Say("staged: pin " + name + " to " + en.Pkg.Meta.VersionOf())
 	case "o":
-		u.overrideAndEdit(project.KindSkill, r.Key)
+		if _, on := u.enabledSkill(r.Key); !on {
+			u.stageOrNew().Enable(project.KindSkill, name, lib)
+		}
+		u.overrideAndEdit(project.KindSkill, name)
 		return true
 	default:
 		return false
@@ -703,7 +774,7 @@ func (u *ultra) instrAction(key string, r urow, has bool) bool {
 			}
 			u.edit("New rule "+name, fmt.Sprintf("---\ndescription: \nmandatory: true\n---\n# %s\n\n", name), func(text string) error {
 				return u.stageOrNew().SetFile(path, []byte(text))
-			})
+			}, stagedNote)
 		})
 		return true
 	}
@@ -727,7 +798,7 @@ func (u *ultra) instrAction(key string, r urow, has bool) bool {
 			a.SayError(err) // never open an empty editor over a file it could not read
 			return true
 		}
-		u.edit("Edit "+in.Name, string(raw), func(text string) error { return u.stageOrNew().SetFile(in.Path, []byte(text)) })
+		u.edit("Edit "+in.Name, string(raw), func(text string) error { return u.stageOrNew().SetFile(in.Path, []byte(text)) }, stagedNote)
 	case "o":
 		switch in.Owner {
 		case project.OwnerPackage:
@@ -739,7 +810,7 @@ func (u *ultra) instrAction(key string, r urow, has bool) bool {
 				a.SayError(err)
 				return true
 			}
-			u.edit("Project copy of "+in.Name, string(raw), func(text string) error { return u.stageOrNew().SetFile(path, []byte(text)) })
+			u.edit("Project copy of "+in.Name, string(raw), func(text string) error { return u.stageOrNew().SetFile(path, []byte(text)) }, stagedNote)
 		default:
 			a.Say("project instructions are edited in place: press e")
 		}
@@ -765,11 +836,16 @@ func (u *ultra) overrideAndEdit(kind, name string) {
 	}
 	u.edit("Override "+name+" (the package is not changed)", string(start), func(text string) error {
 		return st.SetFile(path, []byte(text))
-	})
+	}, stagedNote)
 }
 
 // edit opens an in-app editor on text; Ctrl+S stages it, Esc cancels.
-func (u *ultra) edit(title, text string, save func(string) error) {
+// stagedNote is what an edit that stages a change says.
+const stagedNote = "staged: p previews the diff, a applies, d discards"
+
+// edit opens the in-app editor on text: Enter adds a line, Ctrl+S hands the
+// text to save, Esc cancels. note, when set, is said after a save.
+func (u *ultra) edit(title, text string, save func(string) error, note string) {
 	in := NewInput()
 	in.Cursor = true
 	in.MaxRows = max(6, u.a.H-10)
@@ -787,13 +863,15 @@ func (u *ultra) edit(title, text string, save func(string) error) {
 			}
 			a.Pop(l)
 			u.refocus()
-			a.Say("staged: p previews the diff, a applies, d discards")
+			if note != "" {
+				a.Say(note)
+			}
 			u.reload()
 			return true
 		}
 		return false
 	}
-	l = u.a.Dialog(title+" · Ctrl+S stage · Esc cancel", &Node{View: in})
+	l = u.a.Dialog(title+" · Ctrl+S save · Esc cancel", &Node{View: in})
 	l.Esc = u.refocus
 	l.Place = func(w, h int) Rect { return Rect{2, 1, max(10, w-4), max(6, h-2)} }
 }

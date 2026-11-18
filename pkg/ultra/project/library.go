@@ -188,7 +188,10 @@ func parseRaw(kind, lib, file string, raw []byte) (Package, []Problem) {
 		p.Body = body
 		if ok {
 			if err := yaml.Unmarshal(fm, &p.Meta); err != nil {
-				ps = append(ps, errorf(kind, file, "front matter: %v", err))
+				// Agents read front matter leniently (a description with ": " in it
+				// is common); so does PAI, and says so.
+				p.Meta = lenientMeta(fm)
+				ps = append(ps, warnf(kind, file, "front matter is not strict YAML (%v); read line by line", err))
 			}
 		} else if kind == KindSkill {
 			ps = append(ps, errorf(kind, file, "SKILL.md needs YAML front matter with name and description"))
@@ -298,15 +301,22 @@ func Scan(lib Library, root string) ([]Package, []Problem) {
 			pkgs = append(pkgs, p)
 		}
 	}
-	if es, err := os.ReadDir(filepath.Join(dir, "skills")); err == nil {
+	skills := filepath.Join(dir, "skills")
+	if lib.SkillsDir {
+		skills = dir
+	}
+	if es, err := os.ReadDir(skills); err == nil {
 		for _, e := range es {
-			f := filepath.Join(dir, "skills", e.Name(), skillFile)
+			f := filepath.Join(skills, e.Name(), skillFile)
 			if st, err := os.Stat(f); err == nil && st.Mode().IsRegular() { // a linked skill directory counts
 				add(parsePackage(KindSkill, lib.Name, f))
 			}
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		ps = append(ps, warnf("library", lib.Name, "%v", err))
+	}
+	if lib.SkillsDir {
+		return pkgs, ps
 	}
 	for _, sub := range []struct{ kind, dir, ext string }{{KindRule, "rules", ".md"}, {KindProfile, "profiles", ".yaml"}} {
 		es, err := os.ReadDir(filepath.Join(dir, sub.dir))
@@ -379,4 +389,36 @@ func InScope(globs, paths []string) bool {
 		}
 	}
 	return false
+}
+
+// lenientMeta reads front matter as "key: value" lines, splitting at the
+// first ": ", for the scalar fields: what agents accept when strict YAML
+// does not (an unquoted description that holds ": ").
+func lenientMeta(fm []byte) Meta {
+	var m Meta
+	for line := range strings.Lines(string(fm)) {
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			continue // nested values are not guessed at
+		}
+		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		switch k {
+		case "name":
+			m.Name = v
+		case "description":
+			m.Description = v
+		case "license":
+			m.License = v
+		case "compatibility":
+			m.Compatibility = v
+		case "version":
+			m.Version = v
+		case "allowed-tools":
+			m.AllowedTools = v
+		}
+	}
+	return m
 }

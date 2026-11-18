@@ -39,7 +39,8 @@ Files:
 | `.pai/rules/*.md` | yes | project rules |
 | `.pai/overrides/` | yes | project edits of package rules or skills; the package itself is never edited |
 | `.pai/library/` | yes | project-local skills, rules and profiles |
-| `~/.pai/ultra/library/` | no | skills, rules and profiles installed on this machine |
+| `~/.pai/ultra/library/` | no | skills, rules and profiles installed for ULTRA on this machine |
+| `~/.claude/skills`, `~/.agents/skills`, `<project>/.claude/skills` | (as before) | the skills you already use with your agents, listed and editable in ULTRA; Claude Code loads the Claude folders itself, so ULTRA does not send those again |
 | `~/.pai/ultra/cache/` | no | locked package content by hash, so a lock keeps its bytes after a library update |
 | `~/.pai/ultra/projects/<id>/` | no | tasks, checkpoints, knowledge, run metrics, mode |
 
@@ -123,7 +124,7 @@ Extraction and consolidation are off (`memory.extraction`, `memory.consolidation
 | View | Alt+ | Does |
 |---|---|---|
 | Workspace | 1 | conversation (replies rendered as Markdown) over an amber input; while a task runs, Classic's spinner over the input; then ✓ and the time when PAI's checks passed, or ✗ and why. Check details are in Runs |
-| Skills | 2 | browse, search by name/tag/source, inspect, enable (Space), activation (m), scope (s), update (u), pin (P), override (o), profile (r) |
+| Skills | 2 | every skill in your skill folders: search by name, tag or folder; inspect; on/off for this project (Space); edit (e: the skill itself, after a diff, or a copy for this project); activation (m), scope (s), take a new version (u), pin (P), profile (r) |
 | Instructions | 3 | every source with owner, revision and why it applies; new (n), edit project files (e), override or copy external ones (o), conflicts (c) |
 | Memory | 4 | candidates, verified, stale; verify (v), invalidate (x), add (n), Classic import preview (i) |
 | Runs | 5 | tasks, owners, checkpoints; resume (r), checkpoint (c), approve (A), reconcile (u), hand off (h), recover (R) |

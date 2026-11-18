@@ -596,8 +596,8 @@ func (u *ultra) help() {
 	per := map[int][]string{
 		vWork: {"Enter   send", "Ctrl+Enter   new line", "Esc Esc   stop the running task", "/check CMD   criterion for the next task",
 			"/executor NAME   claude, codex or pai", "/new  /resume  /checkpoint  /handoff  /mode  /exit"},
-		vSkills: {"Space   enable/disable (staged)", "m   activation: auto, always, manual", "s   path scope", "u   take the library's update",
-			"P   pin to the locked version", "o   project override of the skill", "r   apply a profile", "p   preview staged changes", "a   apply   d   discard"},
+		vSkills: {"Space   on/off for this project (staged)", "e   edit: the skill itself, or a copy for this project", "m   activation: auto, always, manual", "s   path scope", "u   take the current version",
+			"P   pin to the locked version", "r   apply a profile", "p   preview staged changes", "a   apply   d   discard"},
 		vInstr: {"n   new project rule", "e   edit (project-owned only)", "o   project override of a package or global rule", "c   conflicts and duplicates",
 			"p   preview   a   apply   d   discard"},
 		vMemory: {"v   verify (you, as a person)", "x   invalidate with a reason", "n   add a preference, decision, fact or hypothesis", "s   show all statuses", "i   preview a Classic memory import"},
