@@ -27,20 +27,28 @@ import (
 	"time"
 )
 
-// Repo and Key are stamped by a release build:
+// Repo, Key and Base are stamped by a release build:
 //
-//	-ldflags "-X .../pkg/release.Repo=owner/PAI -X .../pkg/release.Key=<base64 ed25519 public key>"
+//	-ldflags "-X .../pkg/release.Repo=owner/PAI -X .../pkg/release.Key=<base64 ed25519 public key> -X .../pkg/release.Base=https://host/pai"
 //
-// A build with no key updates nothing.
+// A build with no key updates nothing. Base, when set, is a download server
+// laid out as <Base>/<version>/<file>, with <Base>/latest/ holding the newest
+// stable release; empty, releases come from Repo's GitHub releases. Either
+// way every file is checked against the signed SHA256SUMS, so Base is trusted
+// for availability only.
 var (
 	Repo = "ThongHHuynhh/PAI"
 	Key  = ""
+	Base = ""
 )
 
 const timeout = 5 * time.Minute
 
 // dl is where release v's files are; "latest" is the newest stable release.
 func dl(v string) string {
+	if b := strings.TrimRight(Base, "/"); b != "" {
+		return b + "/" + v + "/"
+	}
 	if v == "latest" {
 		return "https://github.com/" + Repo + "/releases/latest/download/"
 	}

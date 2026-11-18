@@ -4,6 +4,8 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- Releases can be served from your own download server instead of GitHub, for a private repository: set the repository variable `PAI_DOWNLOAD_BASE` (`https://...`) and every binary, install script and install line of the next release downloads from `<base>/<version>/` and `<base>/latest/`. Signatures are checked as before. `deploy/download-server/sync.sh` (Linux) and `sync.ps1` (Windows) copy the private repo's releases there on a schedule. See [download-server.md](download-server.md). Without the variable nothing changes; releases built before this come from GitHub only. Rollback: delete the variable.
+
 ## v0.5.0
 
 - **PAI ULTRA**, a second mode beside PAI Classic: one executor per task (Claude Code, Codex, or a PAI-server session), acceptance checked by PAI itself, durable task state, portable checkpoints, and selective, versioned instructions. See [ultra.md](ultra.md). Classic stays the default, and its behaviour is unchanged apart from the two visible changes below.
