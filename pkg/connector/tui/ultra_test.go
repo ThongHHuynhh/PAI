@@ -2,17 +2,20 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"pai/pkg/connector/tui/term"
 	"pai/pkg/ultra/exec"
 	"pai/pkg/ultra/mode"
 	"pai/pkg/ultra/project"
+	"pai/pkg/ultra/task"
 )
 
 // ultraFixture is a git project, an isolated ULTRA home with a library, and
@@ -138,13 +141,27 @@ func TestUltraShellWideAndNarrow(t *testing.T) {
 			t.Fatalf("%q is still drawn", gone)
 		}
 	}
-	if !u.summary.Hidden {
-		t.Fatal("task line shown with no task")
-	}
 	tk, _ := u.rt.Create(runtimeNewTask("Fix the parser", nil, "claude"))
 	u.cur = tk.ID
-	if rows = drawn(a); u.summary.Hidden || !ucontains(rows, "PENDING · attempt 0/3") {
-		t.Fatalf("task line:\n%s", strings.Join(rows, "\n"))
+	// No task line, state or attempt count: only a spinner while working,
+	// then one mark for the outcome.
+	if rows = drawn(a); ucontains(rows, "PENDING") || ucontains(rows, "attempt") || ucontains(rows, "Working") {
+		t.Fatalf("task details shown while idle:\n%s", strings.Join(rows, "\n"))
+	}
+	u.running, u.turn = true, time.Now()
+	if rows = drawn(a); !ucontains(rows, "Working") || !ucontains(rows, "esc to stop") {
+		t.Fatalf("no spinner while working:\n%s", strings.Join(rows, "\n"))
+	}
+	done, _ := u.rt.Store.Get(tk.ID)
+	done.State = task.Accepted
+	u.a.Ticking(false)
+	u.finished(coordOutcome{Task: done, Result: exec.Result{Status: "done"}}, nil)
+	if rows = drawn(a); ucontains(rows, "Working") || !ucontains(rows, "✓") || ucontains(rows, "ACCEPTED") {
+		t.Fatalf("outcome:\n%s", strings.Join(rows, "\n"))
+	}
+	u.finished(coordOutcome{}, errors.New("the task waits for a person: review needed"))
+	if !ucontains(drawn(a), "✗ the task waits for a person") {
+		t.Fatal("no ✗ with the reason")
 	}
 	a.W, a.H = 50, 20
 	rows = drawn(a)

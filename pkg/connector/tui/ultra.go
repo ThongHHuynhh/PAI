@@ -71,7 +71,9 @@ type ultra struct {
 	transcript *Scrollbox
 	input      *Input
 	inputRow   *Node
-	summary    *Node
+	busy       *Node     // the spinner line while a task runs
+	turn       time.Time // when the running task started
+	stopping   bool
 	work       *Node
 	cur        string // the current task
 	running    bool
@@ -123,11 +125,11 @@ func openUltra(a *App, c *connector.Client, dir string) (*ultra, error) {
 	u.input.Before = u.inputKey
 	u.input.History = a.History
 	u.bar = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraBar{u}}
-	u.summary = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraTaskLine{u}}
+	u.busy = &Node{Fixed: 1, Pad: [4]int{2, 1, 2, 0}, View: ultraBusy{u}}
 	box := inputBox(a, u.input)
 	box.Grow = 1 // a row gives a child neither Fixed nor Grow no width
 	u.inputRow = Box(&Node{Dir: Row, Pad: [4]int{2, 1, 2, 0}}, box)
-	convo := Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1, Pad: [4]int{2, 1, 2, 0}, View: u.transcript}, u.summary, u.inputRow)
+	convo := Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1, Pad: [4]int{2, 1, 2, 0}, View: u.transcript}, u.busy, u.inputRow)
 	u.work = Box(&Node{Dir: Row, Grow: 1}, convo)
 	u.listNode = &Node{Grow: 1, Pad: [4]int{2, 1, 1, 0}, View: ultraMgmtKeys{u, false}}
 	u.detailNode = &Node{Grow: 1, Paint: PaintPanel, Pad: [4]int{2, 1, 1, 0}, View: ultraMgmtKeys{u, true}}
@@ -159,7 +161,10 @@ func (u *ultra) pickCurrent() {
 func (u *ultra) Root() *Node { return u.root }
 
 func (u *ultra) Size(a *App, w, h int) {
-	u.summary.Hidden = u.curTask() == nil
+	u.busy.Hidden = !u.running
+	if !u.busy.Hidden {
+		u.busy.Fixed = 2 // the spinner line and the gap over the input
+	}
 	u.work.Hidden = u.view != vWork
 	u.mgmt.Hidden = u.view == vWork
 	u.input.MaxRows = max(1, min(inputRows, h*inputShare/100))
@@ -313,7 +318,6 @@ func (u *ultra) Key(a *App, k term.Key) bool {
 			u.stop()
 		case u.running:
 			u.armed = true
-			a.Say("Esc again to stop the task")
 		}
 	default:
 		return false
@@ -410,7 +414,8 @@ func (u *ultra) run() {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	u.running, u.cancel, u.armed = true, cancel, false
+	u.running, u.cancel, u.armed, u.stopping, u.turn = true, cancel, false, false, time.Now()
+	u.a.Ticking(true) // the spinner turns
 	id, executor := t.ID, u.executor
 	if t.Executor != "" {
 		executor = t.Executor
@@ -440,7 +445,8 @@ func (u *ultra) event(e exec.Event) {
 }
 
 func (u *ultra) finished(out runtimeOutcome, err error) {
-	u.running, u.cancel = false, nil
+	u.running, u.cancel, u.stopping = false, nil, false
+	u.a.Ticking(false)
 	u.fresh()
 	if out.Context.Items != nil {
 		cx := out.Context
@@ -460,25 +466,51 @@ func (u *ultra) finished(out runtimeOutcome, err error) {
 	}
 	if out.Task != nil {
 		u.lastTokens = out.Result.Usage.Total()
-		ink := InkMuted
-		if out.Task.State == task.Accepted {
-			ink = InkAccent
-		}
-		// Only the outcome: the checks behind it are in Runs.
-		u.say("■ "+strings.ToUpper(string(out.Task.State)), ink)
-		for _, w := range append(out.Context.Warnings, out.Warnings...) {
-			u.say("  ! "+w, InkError)
-		}
 	}
-	if err != nil {
-		u.say("  "+err.Error(), InkError)
+	// One mark for the outcome: ✓ and the time when PAI's checks passed,
+	// else ✗ and why. The checks behind it are in Runs.
+	took := dur(time.Since(u.turn).Truncate(time.Second))
+	switch {
+	case err == nil && out.Task != nil && out.Task.State == task.Accepted:
+		u.say("✓ "+took, InkAccent)
+	case err != nil:
+		u.say("✗ "+strings.SplitN(err.Error(), "\n", 2)[0], InkError)
+	case out.Task != nil:
+		u.say("✗ "+string(out.Task.State), InkError)
 	}
+	for _, w := range append(out.Context.Warnings, out.Warnings...) {
+		u.say("  ! "+w, InkError)
+	}
+}
+
+// ultraBusy is the line over the input while a task runs: Classic's
+// spinner, the time so far, and how to stop.
+type ultraBusy struct{ u *ultra }
+
+func (b ultraBusy) Draw(a *App, c *Canvas, r Rect) {
+	u := b.u
+	if !u.running {
+		return
+	}
+	muted := a.Theme.muted()
+	if u.stopping {
+		c.Text(r.X, r.Y, "Stopping...", muted)
+		return
+	}
+	key := term.Style{FG: a.Theme.Text, Attr: term.Bold}
+	again := ""
+	if u.armed {
+		again = " again"
+	}
+	x := c.Text(r.X, r.Y, Spin()+" Working "+dur(time.Since(u.turn).Truncate(time.Second))+"  ", muted)
+	x = c.Text(x, r.Y, "esc", key)
+	c.Text(x, r.Y, again+" to stop", muted)
 }
 
 func (u *ultra) stop() {
 	if u.cancel != nil {
 		u.cancel()
-		u.say("  stopping: the run is cancelled and the task paused at a checkpoint", InkMuted)
+		u.stopping = true // the task pauses at a checkpoint
 	}
 }
 
@@ -801,30 +833,6 @@ func (b ultraBar) Key(a *App, k term.Key) bool {
 	b.u.focus = fTabs
 	a.Focus(b.u.bar)
 	return true
-}
-
-// ultraTaskLine is the current task in one line above the input; Runs has the rest.
-type ultraTaskLine struct{ u *ultra }
-
-func (l ultraTaskLine) Draw(a *App, c *Canvas, r Rect) {
-	t := l.u.curTask()
-	if t == nil {
-		return
-	}
-	state := string(t.State)
-	if l.u.running {
-		state = "running"
-	}
-	s := fmt.Sprintf("%s · attempt %d/%d", strings.ToUpper(state), t.Attempts, t.MaxAttempts)
-	st := a.Theme.muted()
-	if n := len(t.Unknown()); n > 0 {
-		s += fmt.Sprintf(" · %d unknown op: Runs, u", n)
-		st = term.Style{FG: a.Theme.Error}
-	} else if len(t.Blockers) > 0 {
-		s += " · blocked: " + t.Blockers[len(t.Blockers)-1]
-		st = term.Style{FG: a.Theme.Error}
-	}
-	c.Text(r.X, r.Y, cellCut(s, r.W), st)
 }
 
 // runtimeOutcome is coord.Outcome, named here to keep imports in one place.

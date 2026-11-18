@@ -122,7 +122,7 @@ Extraction and consolidation are off (`memory.extraction`, `memory.consolidation
 
 | View | Alt+ | Does |
 |---|---|---|
-| Workspace | 1 | conversation (replies rendered as Markdown), and one line above the input with the task's state, attempt and any blocker; check details are in Runs |
+| Workspace | 1 | conversation (replies rendered as Markdown); while a task runs, Classic's spinner over the input; then ✓ and the time when PAI's checks passed, or ✗ and why. Check details are in Runs |
 | Skills | 2 | browse, search by name/tag/source, inspect, enable (Space), activation (m), scope (s), update (u), pin (P), override (o), profile (r) |
 | Instructions | 3 | every source with owner, revision and why it applies; new (n), edit project files (e), override or copy external ones (o), conflicts (c) |
 | Memory | 4 | candidates, verified, stale; verify (v), invalidate (x), add (n), Classic import preview (i) |
