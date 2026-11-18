@@ -404,3 +404,24 @@ func TestUltraReplyIsMarkdownWithoutTheResultBlock(t *testing.T) {
 		}
 	}
 }
+
+func TestUltraInputIsAmber(t *testing.T) {
+	a, u, _ := ultraFixture(t, 100, 30)
+	upress(a, "h", "i")
+	u.Size(a, a.W, a.H)
+	u.root.Layout(Rect{0, 0, a.W, a.H})
+	b := term.NewBuffer(a.W, a.H)
+	u.root.Draw(a, &Canvas{b, Rect{0, 0, a.W, a.H}})
+	want := a.Theme.Panel.Blend(ultraAmber(a.Theme), inputTint)
+	for y := range b.H {
+		for x := range b.W - 1 {
+			if b.At(x, y).G == "h" && b.At(x+1, y).G == "i" {
+				if bg := b.At(x, y).BG; bg != want || bg == a.Theme.BG || bg == a.Theme.Panel {
+					t.Fatalf("input background %x, want amber tint %x", bg, want)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("typed text not found")
+}

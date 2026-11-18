@@ -49,8 +49,8 @@ const (
 	fTabs
 )
 
-// ultraAccent is ULTRA's own, quieter accent: the theme's, warmed toward amber.
-func ultraAccent(t Theme) term.Color { return t.Accent.Blend(term.Hex("#c99a2e"), 0.55) }
+// ultraAccent is ULTRA's own accent: amber, apart from Classic's.
+func ultraAccent(t Theme) term.Color { return ultraAmber(t) }
 
 // ultra is the PAI ULTRA screen. Its management views read and write local
 // files only: no model is called from them.
@@ -126,8 +126,7 @@ func openUltra(a *App, c *connector.Client, dir string) (*ultra, error) {
 	u.input.History = a.History
 	u.bar = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraBar{u}}
 	u.busy = &Node{Fixed: 1, Pad: [4]int{2, 1, 2, 0}, View: ultraBusy{u}}
-	box := inputBox(a, u.input)
-	box.Grow = 1 // a row gives a child neither Fixed nor Grow no width
+	box := ultraInputBox(u.input)
 	u.inputRow = Box(&Node{Dir: Row, Pad: [4]int{2, 1, 2, 0}}, box)
 	convo := Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1, Pad: [4]int{2, 1, 2, 0}, View: u.transcript}, u.busy, u.inputRow)
 	u.work = Box(&Node{Dir: Row, Grow: 1}, convo)
@@ -857,4 +856,50 @@ func workspaceWarning(root string) string {
 		return "! Not a git repository: checkpoints record file sizes and times only and cannot restore changes."
 	}
 	return ""
+}
+
+// ULTRA's amber: bright on dark themes, deeper on light ones so text in it
+// stays readable.
+var (
+	amberOnDark  = term.Hex("#f5a623")
+	amberOnLight = term.Hex("#b7791f")
+)
+
+// inputTint is how far the input's background moves from the panel toward
+// amber: enough to set it apart from the screen, not enough to tire.
+const inputTint = 0.18
+
+func ultraAmber(t Theme) term.Color {
+	if isDark(t.BG) {
+		return amberOnDark
+	}
+	return amberOnLight
+}
+
+// isDark is whether a background is dark, by its perceived brightness.
+func isDark(c term.Color) bool {
+	r, g, b := uint8(c>>16), uint8(c>>8), uint8(c)
+	return 0.299*float64(r)+0.587*float64(g)+0.114*float64(b) < 128
+}
+
+// ultraInputBox is ULTRA's input: an amber edge and an amber-tinted field,
+// distinct from the screen and from Classic's input.
+func ultraInputBox(in *Input) *Node {
+	return Box(&Node{Dir: Row, Grow: 1, View: amberFill{}}, // Grow: a row gives a child neither Fixed nor Grow no width
+		&Node{Fixed: 1, View: amberEdge{}},
+		&Node{Grow: 1, Pad: [4]int{1, 1, 1, 1}, View: in})
+}
+
+type amberFill struct{}
+
+func (amberFill) Draw(a *App, c *Canvas, r Rect) {
+	c.Fill(r, a.Theme.Panel.Blend(ultraAmber(a.Theme), inputTint))
+}
+
+type amberEdge struct{}
+
+func (amberEdge) Draw(a *App, c *Canvas, r Rect) {
+	for y := range r.H {
+		c.Set(r.X, r.Y+y, "┃", 1, term.Style{FG: ultraAmber(a.Theme)})
+	}
 }
