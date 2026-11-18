@@ -4,15 +4,13 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+## v0.5.0
+
 - ULTRA TUI: one bottom line holds the mode, the views (Work, Skill, Ins, Mem, Runs, Cont), the model and the context size; the side panel and task line are gone. The input box is amber, and what you type is always visible. While a task runs a spinner shows the time; it ends with ✓ and the time, or ✗ and the reason. Check lines, check counts and attempt numbers are no longer shown.
 - ULTRA replies render as Markdown, wrap at word boundaries, and no longer show the internal `pai-result` block.
 - ULTRA Skills lists every skill on the machine: `~/.claude/skills`, `~/.agents/skills`, the project's `.claude/skills`, `~/.pai/ultra/library` and `.pai/library`. `e` asks each time whether to edit the skill's own file (seen by every project and agent that reads that folder; the diff is shown before saving) or a copy for this project only. A skill whose front matter is not strict YAML loads with a warning instead of blocking every apply. Claude Code's own skills are not sent again to the Claude Code executor, which loads them itself.
 - Fixed: an ULTRA task in a home folder or a folder outside git no longer sticks at "reported": the workspace fingerprint reads file sizes and times only, at most 5000 files or 3 seconds, skipping dot folders and dependency folders. The Workspace view warns about such folders. A reported task that is released goes back to pending.
-
 - Releases can be served from your own download server instead of GitHub, for a private repository: set the repository variable `PAI_DOWNLOAD_BASE` (`https://...`) and every binary, install script and install line of the next release downloads from `<base>/<version>/` and `<base>/latest/`. Signatures are checked as before. `deploy/download-server/sync.sh` (Linux) and `sync.ps1` (Windows) copy the private repo's releases there on a schedule. See [download-server.md](download-server.md). Without the variable nothing changes; releases built before this come from GitHub only. Rollback: delete the variable.
-
-## v0.5.0
-
 - **PAI ULTRA**, a second mode beside PAI Classic: one executor per task (Claude Code, Codex, or a PAI-server session), acceptance checked by PAI itself, durable task state, portable checkpoints, and selective, versioned instructions. See [ultra.md](ultra.md). Classic stays the default, and its behaviour is unchanged apart from the two visible changes below.
 - Choosing a mode: `pai mode classic|ultra`, or `/mode` in the TUI, sets the project's default for new sessions, kept on this machine (`~/.pai/ultra/projects/<id>/mode.json`). A session keeps the mode it was made in. Switching calls no model and does not touch running work. `pai` opens ULTRA when it is the default, and works offline with local executors; if ULTRA cannot open, the TUI opens Classic and says why.
 - Visible Classic changes: the TUI status line now starts with the session's mode (`PAI Classic · model`); `/mode` is a new slash command, and a command name typed in full now wins over longer names in the slash list (`/mode` + Enter is /mode, not /model). Sessions gain an optional `"mode"` in their config and in `POST /sessions`; none is Classic, and older servers ignore it.
