@@ -337,3 +337,18 @@ func redact(u string) string {
 	}
 	return u
 }
+
+// Reach is whether s answers at all: for GitHub, that the repository is
+// there for the token, which a repository with betas only and so no latest
+// release proves too; for a download server, nothing, since one may hold
+// betas only and no latest/.
+func (s Source) Reach(ctx context.Context) error {
+	if s.GitHub == "" {
+		return nil
+	}
+	if !ValidRepo(s.GitHub) {
+		return fmt.Errorf("%q is not a GitHub owner/name", s.GitHub)
+	}
+	_, err := get(ctx, githubAPI+"/repos/"+s.GitHub, s.headers("application/vnd.github+json"), maxSmall)
+	return err
+}

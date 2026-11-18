@@ -295,3 +295,28 @@ func TestSourceRefusesBadInputAndLargeBodies(t *testing.T) {
 		t.Fatalf("String shows a password: %s", s)
 	}
 }
+
+// A private repository with betas only has no latest release: it still
+// answers, so it can be the source.
+func TestReachWithoutLatest(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer t9" && r.URL.Path == "/repos/o/r" {
+			_, _ = w.Write([]byte(`{"full_name":"o/r"}`))
+			return
+		}
+		http.NotFound(w, r) // /releases/latest: no stable release
+	}))
+	t.Cleanup(api.Close)
+	old := githubAPI
+	githubAPI = api.URL
+	t.Cleanup(func() { githubAPI = old })
+	if err := (Source{GitHub: "o/r", Token: "t9"}).Reach(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Source{GitHub: "o/r", Token: "t9"}).Latest(context.Background()); err == nil {
+		t.Fatal("a betas-only repository named a latest")
+	}
+	if err := (Source{GitHub: "o/r"}).Reach(context.Background()); err == nil {
+		t.Fatal("a private repository answered without a token")
+	}
+}

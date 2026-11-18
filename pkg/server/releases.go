@@ -409,14 +409,15 @@ func SetReleases(r *Releases, token string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	latest, err := s.Latest(ctx)
-	if err != nil && r != nil && r.GitHub != "" {
+	// the repository must answer; a latest stable release it need not have
+	if err := s.Reach(ctx); err != nil {
 		hint := ""
 		if token == "" {
 			hint = "; a private repository needs --token-file"
 		}
 		return "", fmt.Errorf("%s does not answer: %w%s", s, err, hint)
 	}
+	latest, _ := s.Latest(ctx)
 	tp := filepath.Join(Dir, releaseTokenFile)
 	if r != nil && r.GitHub != "" && token != "" {
 		if err := writeFile(tp, []byte(token+"\n"), 0o600); err != nil {
