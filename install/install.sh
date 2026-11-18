@@ -6,10 +6,10 @@
 # at url, which your own proxy carries to it. Run it
 # without sudo, so the login is yours and those keys reach it; it asks for sudo itself. In a root shell
 # with no sudo, all run as root, and code runs as root. The release stamps its version.
-#   curl -fsSL https://github.com/@REPO@/releases/download/@VERSION@/install.sh | sh -s -- [api key | <server url> <device code> | server [quickstart] [--url <url>]]
+#   curl -fsSL @DL@/install.sh | sh -s -- [api key | <server url> <device code> | server [quickstart] [--url <url>]]
 set -eu
 v=@VERSION@
-dl=https://github.com/@REPO@/releases/download/$v
+dl=@DL@
 usage() {
   echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <server url> <device code> | server [quickstart] [--url <url>]]" >&2
   exit 2
