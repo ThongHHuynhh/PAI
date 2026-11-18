@@ -30,10 +30,15 @@ const updateTime = 5 * time.Minute
 func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 	// latest is optional: wait for it no longer than a connector waits
 	latest, l := "", make(chan string, 1)
-	go func() { v, _ := release.Latest(); l <- v }()
+	go func() { v, _ := a.rel.Latest(r.Context()); l <- v }()
 	select {
 	case latest = <-l:
 	case <-time.After(5 * time.Second):
+	}
+	// a latest stable behind the beta this server runs is no update: the web
+	// app offers whatever latest differs from current
+	if release.Older(latest, version.V) {
+		latest = ""
 	}
 	reply(w, settings{&versions{version.V, latest, version.Info()}})
 }

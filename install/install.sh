@@ -9,7 +9,8 @@
 #   curl -fsSL @DL@/install.sh | sh -s -- [api key | <server url> <device code> | server [quickstart] [--url <url>]]
 set -eu
 v=@VERSION@
-dl=@DL@
+dl='@DL@'
+key=@KEY@
 usage() {
   echo "usage: curl -fsSL $dl/install.sh | sh -s -- [api key | <server url> <device code> | server [quickstart] [--url <url>]]" >&2
   exit 2
@@ -34,6 +35,34 @@ fetch() {
   curl -fsSLO "$1" || { sleep 1; curl -fsSLO "$1"; } || { sleep 2; curl -fsSLO "$1"; }
 }
 fetch "$dl/SHA256SUMS"
+# nosig goes on without the signature, the checksums still guarding each file, unless
+# PAI_REQUIRE_SIGNATURE=1 asks for it.
+nosig() {
+  if [ "${PAI_REQUIRE_SIGNATURE:-}" = 1 ]; then echo "cannot check the release signature: $1" >&2; exit 1; fi
+  echo "note: release signature not checked ($1); checksums still are" >&2
+}
+# SHA256SUMS counts once the release key signed it. OpenSSL 3 checks an ed25519 signature; the key is
+# its 32 raw bytes in base64, behind the fixed DER header of an ed25519 public key.
+case $key in
+"" | @*) nosig "this installer carries no release key" ;;
+*)
+  if ! command -v openssl > /dev/null || ! openssl version 2> /dev/null | grep -q "^OpenSSL [3-9]"; then
+    nosig "it needs OpenSSL 3"
+  else
+    fetch "$dl/SHA256SUMS.sig" || { echo "release $v has no SHA256SUMS.sig" >&2; exit 1; }
+    { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$key" | openssl base64 -d -A; } > key.der
+    # an OpenSSL that cannot load an ed25519 key (FIPS mode) cannot check; only a failed check is tampering
+    if ! openssl pkey -pubin -inform DER -in key.der -out key.pem 2> /dev/null; then
+      nosig "this OpenSSL cannot load an ed25519 key"
+    elif openssl pkeyutl -verify -pubin -inkey key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig > /dev/null 2>&1; then
+      echo "release $v: signature checked"
+    else
+      echo "release $v: SHA256SUMS is not signed by the release key" >&2
+      exit 1
+    fi
+  fi
+  ;;
+esac
 # get fetches this machine's build of release binary $1 as ./$1, checked against SHA256SUMS. Modes are
 # set here, since root's umask may be narrower than every user running the CLI.
 get() {

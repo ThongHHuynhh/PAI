@@ -51,6 +51,7 @@ type api struct {
 	reached   atomic.Value  // the URL a worker last found the harness at
 	coord     *coordinator.Coordinator
 	pool      *harness.Pool
+	rel       *releases // the releases the harness serves, and their source
 }
 
 func (a *api) handle(mux *http.ServeMux) {
@@ -98,7 +99,7 @@ func (a *api) join(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	unix, windows := release.InstallLines(n.String())
+	unix, windows := release.InstallLinesAt(a.at(), n.String())
 	reply(w, map[string]string{"join": n.String(), "unix": unix, "windows": windows})
 }
 

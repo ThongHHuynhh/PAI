@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -219,7 +220,7 @@ func (s *server) answer(f Frame) (Frame, error) {
 		if f.Path == "pai-server" {
 			return Frame{Header: Header{Kind: Done}}, updateServer(f.Version)
 		}
-		exe, err := update(f.Version)
+		exe, err := update(f.Version, s.releases())
 		if err != nil {
 			return Frame{}, err
 		}
@@ -413,4 +414,15 @@ func (s *spill) close() (string, error) {
 		}
 	}
 	return s.path, s.f.Close()
+}
+
+// releases is the harness's /releases over the mesh: its API port at the
+// address this connection reaches it at. A harness from before serves none,
+// and update falls back to the place built in.
+func (s *server) releases() string {
+	a, ok := s.conn.RemoteAddr().(*net.TCPAddr)
+	if !ok || a.IP == nil {
+		return ""
+	}
+	return "http://" + net.JoinHostPort(a.IP.String(), strconv.Itoa(APIPort)) + "/releases"
 }

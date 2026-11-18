@@ -492,3 +492,12 @@ func (c *Client) NewKey(ctx context.Context, name string) (string, error) {
 	err = c.Call(ctx, "POST", "/keys", "application/json", bytes.NewReader(b), &out)
 	return out.Key, err
 }
+
+// JoinLines is Join with the install lines the server prints for it, for
+// Linux and macOS and for Windows: the server's own, which know whether it
+// serves its installer. A server from before sends none.
+func (c *Client) JoinLines(ctx context.Context) (join, unix, windows string, err error) {
+	var out struct{ Join, Unix, Windows string }
+	err = c.Call(ctx, "GET", "/join", "", nil, &out)
+	return out.Join, out.Unix, out.Windows, err
+}

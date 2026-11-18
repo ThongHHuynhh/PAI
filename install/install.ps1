@@ -14,6 +14,7 @@ if (($Token -and !$Code -and $Token -ne 'server' -and $Token -notlike 'pai_key_*
 }
 $ProgressPreference = 'SilentlyContinue'
 $dl = '@DL@'
+$key = '@KEY@'
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
 $d = New-Item -ItemType Directory (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))
 # Download saves $url as $out, up to three tries, since one bad read would fail the whole install.
@@ -24,6 +25,48 @@ function Download($url, $out) {
   }
 }
 Download "$dl/SHA256SUMS" (Join-Path $d SHA256SUMS)
+# NoSig goes on without the signature, the checksums still guarding each file, unless
+# PAI_REQUIRE_SIGNATURE=1 asks for it.
+function NoSig($why) {
+  if ($env:PAI_REQUIRE_SIGNATURE -eq '1') { throw "cannot check the release signature: $why" }
+  Write-Warning "release signature not checked ($why); checksums still are"
+}
+# SHA256SUMS counts once the release key signed it. Windows has no ed25519 of its own: OpenSSL 3
+# checks it, on PATH or the one Git for Windows ships. The key is its 32 raw bytes in base64,
+# behind the fixed DER header of an ed25519 public key.
+$ossl = (Get-Command openssl.exe -ErrorAction SilentlyContinue).Source
+if (!$ossl) {
+  # Git for Windows, for every user or for this one, wherever git is found
+  $git = (Get-Command git.exe -ErrorAction SilentlyContinue).Source
+  $roots = @("$env:ProgramFiles\Git", "$env:LOCALAPPDATA\Programs\Git") + @(if ($git) { Split-Path (Split-Path $git) })
+  $ossl = foreach ($r in $roots) { foreach ($s in 'usr\bin', 'mingw64\bin', 'clangarm64\bin') { Join-Path $r "$s\openssl.exe" } }
+  $ossl = $ossl | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if (!$key -or $key.StartsWith('@')) {
+  NoSig 'this installer carries no release key'
+} elseif (!$ossl -or !((& $ossl version) -match '^OpenSSL [3-9]')) {
+  NoSig 'it needs OpenSSL 3, which Git for Windows includes'
+} else {
+  Download "$dl/SHA256SUMS.sig" (Join-Path $d SHA256SUMS.sig)
+  [IO.File]::WriteAllBytes((Join-Path $d key.der), [byte[]](0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00) + [Convert]::FromBase64String($key))
+  # a native command's stderr must not stop the script: its exit code says
+  $ErrorActionPreference = 'Continue'
+  # a call that cannot start leaves $LASTEXITCODE as it was: start each from a failure
+  $global:LASTEXITCODE = 1
+  & $ossl pkey -pubin -inform DER -in (Join-Path $d key.der) -out (Join-Path $d key.pem) | Out-Null
+  $loaded = $? -and $LASTEXITCODE -eq 0
+  $ok = $false
+  if ($loaded) {
+    $global:LASTEXITCODE = 1
+    & $ossl pkeyutl -verify -pubin -inkey (Join-Path $d key.pem) -rawin -in (Join-Path $d SHA256SUMS) -sigfile (Join-Path $d SHA256SUMS.sig) | Out-Null
+    $ok = $? -and $LASTEXITCODE -eq 0
+  }
+  $ErrorActionPreference = 'Stop'
+  # an OpenSSL that cannot load an ed25519 key cannot check; only a failed check is tampering
+  if (!$loaded) { NoSig 'this OpenSSL cannot load an ed25519 key' }
+  elseif (!$ok) { throw "release @VERSION@: SHA256SUMS is not signed by the release key" }
+  else { Write-Host 'release @VERSION@: signature checked' }
+}
 $sums = Get-Content (Join-Path $d SHA256SUMS)
 # Fetch gets this machine's build of release binary $name into $d as $name.exe, checked against
 # SHA256SUMS. pai-server install finds pai.exe there.

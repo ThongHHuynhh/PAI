@@ -341,3 +341,7 @@ func path(on bool) error {
 	_, _, _ = sendMessageTimeout.Call(hwndBroadcast, wmSettingChange, 0, uintptr(unsafe.Pointer(env)), smtoAbortIfHung, 5000, 0)
 	return nil
 }
+
+// likeDir is a no-op on Windows: the harness runs as a service account that
+// reads what an administrator writes in Dir.
+func likeDir(string) error { return nil }

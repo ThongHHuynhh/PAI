@@ -1,5 +1,7 @@
 # Download server
 
+**Usually not needed any more.** A PAI server can fetch a private repository's releases itself and serve them to its machines: `pai-server source github <owner/name> --token-file <file>` (see [self-hosting.md](self-hosting.md#where-releases-come-from)). Workers update from the server, and new machines install from `<server URL>/install.sh`. Moving the server to another address then needs no new release. A download server is still useful to install the *first* PAI server of a private repository, or for machines that cannot reach a PAI server.
+
 Serve PAI releases from your own machine instead of GitHub, for a private repository whose release files nobody can download without logging in. The code stays private; installs and updates come from the download server.
 
 ```
@@ -8,7 +10,7 @@ private repo → release workflow builds + signs → private GitHub release
   → installers, pai update, the server's update and worker updates download from there
 ```
 
-Every file is still checked against the release's signed `SHA256SUMS`, so the download server only has to be available: it cannot make a machine run a release the key did not sign. (The install scripts check `SHA256SUMS` but not its signature, so serve over HTTPS.)
+Every file is still checked against the release's signed `SHA256SUMS`, so the download server only has to be available: it cannot make a machine run a release the key did not sign. (The install scripts check the signature too when OpenSSL 3 is there, else `SHA256SUMS` only, so serve over HTTPS.)
 
 Works for releases built after this change. Older releases have the GitHub address built in.
 

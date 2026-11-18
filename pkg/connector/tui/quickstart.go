@@ -59,12 +59,13 @@ type quickstart struct {
 	step   int
 	polled bool // the providers were read once: a new one after that moves on
 
-	providers []harness.ProviderInfo
-	workers   []connector.Worker
-	network   string
-	join      string
-	key       string // the api key minted for a connector
-	minting   bool
+	providers             []harness.ProviderInfo
+	workers               []connector.Worker
+	network               string
+	join                  string
+	joinUnix, joinWindows string // the server's own install lines for join, when it sends them
+	key                   string // the api key minted for a connector
+	minting               bool
 
 	root, splash, steps, col *Node
 	orbit                    *orbit
@@ -117,7 +118,7 @@ func (q *quickstart) poll(a *App) {
 			ctx, cancel := context.WithTimeout(q.ctx, callTime)
 			ps, err := c.Providers(ctx)
 			var ws []connector.Worker
-			var network, join string
+			var network, join, unix, windows string
 			if err == nil {
 				ws, err = c.Workers(ctx)
 			}
@@ -125,7 +126,7 @@ func (q *quickstart) poll(a *App) {
 				network, err = c.Network(ctx)
 			}
 			if err == nil {
-				join, err = c.Join(ctx)
+				join, unix, windows, err = c.JoinLines(ctx)
 			}
 			cancel()
 			a.Post(func() {
@@ -138,6 +139,7 @@ func (q *quickstart) poll(a *App) {
 				}
 				more := q.polled && len(ps) > len(q.providers)
 				q.providers, q.workers, q.network, q.join, q.polled = ps, ws, network, join, true
+				q.joinUnix, q.joinWindows = unix, windows
 				if more && q.step == stepProviders {
 					q.next(a)
 				}
@@ -183,7 +185,7 @@ func (q *quickstart) layout(a *App) {
 	case stepProviders:
 		q.show(qsProviders + q.providerNote())
 	case stepWorkers:
-		q.show(qsWorkers + q.lines(q.join) + q.workerNote())
+		q.show(qsWorkers + q.joinLines() + q.workerNote())
 	case stepConnectors:
 		words := qsConnectors + q.lines(q.key)
 		if q.minting {
@@ -266,6 +268,23 @@ func (q *quickstart) lines(args string) string {
 		return ""
 	}
 	unix, windows := release.InstallLines(args)
+	return block(unix, windows)
+}
+
+// joinLines is the lines that make a machine a worker: the server's own,
+// which know whether it serves its installer, else the install script from
+// the place built in.
+func (q *quickstart) joinLines() string {
+	if q.join == "" {
+		return ""
+	}
+	if q.joinUnix != "" && q.joinWindows != "" {
+		return block(q.joinUnix, q.joinWindows)
+	}
+	return q.lines(q.join)
+}
+
+func block(unix, windows string) string {
 	return "\n\n```\n# linux, macos\n" + unix + "\n\n# windows\n" + windows + "\n```"
 }
 

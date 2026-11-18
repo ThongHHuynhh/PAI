@@ -30,8 +30,10 @@ var failed struct {
 }
 
 // update makes the running binary release v's and returns the path the
-// service runs. While v waits for its retry it answers with the last failure.
-func update(v string) (string, error) {
+// service runs, from the harness's /releases at from when it serves them, else
+// from the place built in. While v waits for its retry it answers with the
+// last failure.
+func update(v, from string) (string, error) {
 	failed.Lock()
 	defer failed.Unlock()
 	if failed.v == v && time.Since(failed.at) < failed.wait {
@@ -39,7 +41,7 @@ func update(v string) (string, error) {
 	}
 	exe, err := os.Executable()
 	if err == nil {
-		err = release.Install(exe, "pai", v)
+		err = release.Install(exe, "pai", v, from)
 	}
 	if err != nil {
 		wait := retryMin
