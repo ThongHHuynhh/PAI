@@ -118,7 +118,7 @@ Extraction and consolidation are off (`memory.extraction`, `memory.consolidation
 
 ## The TUI
 
-`pai` opens ULTRA when it is the project's default. Header: `◆ PAI ULTRA`, the configuration revision, staged edits, executor and server state.
+`pai` opens ULTRA when it is the project's default. Header: `◆ PAI ULTRA` and the project; on the right only what needs attention: staged edits, a hand-edited manifest, a running task on an older configuration, offline.
 
 | View | Alt+ | Does |
 |---|---|---|

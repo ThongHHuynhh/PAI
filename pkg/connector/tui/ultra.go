@@ -144,7 +144,6 @@ func openUltra(a *App, c *connector.Client, dir string) (*ultra, error) {
 	u.body = Box(&Node{Dir: Col, Grow: 1}, u.work, u.mgmt)
 	u.statusRow = Box(&Node{Dir: Row, Fixed: 1, Pad: [4]int{2, 0, 2, 0}}, &Node{Grow: 1, View: u.status}, &Node{Fixed: ultraHintWidth, View: ultraKeysHint{u}})
 	u.root = Box(&Node{Dir: Col, Paint: PaintScreen}, u.header, u.tabsNode, u.body, u.statusRow)
-	u.say(ultraTranscriptHello(u), InkMuted)
 	if w := workspaceWarning(proj.Root); w != "" {
 		u.say(w, InkError)
 	}
@@ -154,11 +153,6 @@ func openUltra(a *App, c *connector.Client, dir string) (*ultra, error) {
 	u.pickCurrent()
 	u.setView(vWork)
 	return u, nil
-}
-
-func ultraTranscriptHello(u *ultra) string {
-	return fmt.Sprintf("PAI ULTRA · %s · executor %s · config %s. Describe a task; PAI checks its acceptance criteria itself. Alt+1–6 switch views, F1 for keys.",
-		u.proj.Root, u.executor, project.RevisionLabel(u.proj.Revision()))
 }
 
 // pickCurrent makes the newest unfinished task current.
@@ -743,22 +737,22 @@ func (h ultraHeader) Draw(a *App, c *Canvas, r Rect) {
 	u := h.u
 	acc := term.Style{FG: ultraAccent(a.Theme), Attr: term.Bold}
 	x := c.Text(r.X, r.Y, "◆ PAI ULTRA", acc) // Text returns the column after the text
-	latest := u.proj.Revision()
-	right := "config " + project.RevisionLabel(latest)
-	if t := u.curTask(); t != nil && t.ConfigRev != latest && (t.State.Held() || u.running) {
-		right = fmt.Sprintf("task config %s · latest %s · restart to apply", project.RevisionLabel(t.ConfigRev), project.RevisionLabel(latest))
-	}
+	// The right side holds only what needs attention now; usually nothing.
+	var items []string
 	if n := u.staged(); n > 0 {
-		right = fmt.Sprintf("%d staged (a apply · d discard) · ", n) + right
+		items = append(items, fmt.Sprintf("%d staged: a apply, d discard", n))
 	}
 	if u.proj.ManifestEdited {
-		right = "project.yaml edited by hand · " + right
+		items = append(items, "project.yaml edited: apply to re-lock")
 	}
-	server := "offline"
-	if u.c != nil {
-		server = "server"
+	latest := u.proj.Revision()
+	if t := u.curTask(); t != nil && t.ConfigRev != latest && (t.State.Held() || u.running) {
+		items = append(items, fmt.Sprintf("task on config %s, latest %s: restart to apply", project.RevisionLabel(t.ConfigRev), project.RevisionLabel(latest)))
 	}
-	right += " · " + u.executor + " · " + server
+	if u.c == nil {
+		items = append(items, "offline")
+	}
+	right := strings.Join(items, " · ")
 	if r.W > 60 {
 		c.Text(x+2, r.Y, cellCut(shortPath(u.proj.Root), max(0, r.X+r.W-x-term.Width(right)-4)), a.Theme.muted())
 	}
@@ -850,16 +844,17 @@ func (p ultraTaskPanel) Draw(a *App, c *Canvas, r Rect) {
 func (u *ultra) taskLines() []string {
 	t := u.curTask()
 	if t == nil {
-		return []string{"No task", "", "Type what to do. Add checks", "with /check CMD before it."}
+		return []string{"No task", "", "Executor: " + u.executor, "Checks:   /check CMD"}
 	}
 	state := strings.ToUpper(string(t.State))
 	if u.running {
 		state = "RUNNING"
 	}
 	ls := []string{cellCut(t.Title, ultraSide-2), "", "State:    " + state, fmt.Sprintf("Attempt:  %d of %d", t.Attempts, t.MaxAttempts),
-		"Executor: " + cmpStr(t.Executor, u.executor), "Config:   " + project.RevisionLabel(t.ConfigRev)}
+		"Executor: " + cmpStr(t.Executor, u.executor)}
 	if latest := u.proj.Revision(); latest != t.ConfigRev {
-		ls = append(ls, "  latest "+project.RevisionLabel(latest)+": applies to the next attempt")
+		// Shown only when it matters: newer configuration waits for the next attempt.
+		ls = append(ls, "Config:   "+project.RevisionLabel(t.ConfigRev)+", latest "+project.RevisionLabel(latest))
 	}
 	ls = append(ls, "", "Verification:")
 	results := map[string]task.CheckResult{}
