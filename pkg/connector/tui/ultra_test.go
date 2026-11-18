@@ -2,17 +2,20 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"pai/pkg/connector/tui/term"
 	"pai/pkg/ultra/exec"
 	"pai/pkg/ultra/mode"
 	"pai/pkg/ultra/project"
+	"pai/pkg/ultra/task"
 )
 
 // ultraFixture is a git project, an isolated ULTRA home with a library, and
@@ -25,6 +28,9 @@ func ultraFixture(t *testing.T, w, h int) (*App, *ultra, *atomic.Int32) {
 	}
 	home := t.TempDir()
 	t.Setenv("PAI_ULTRA_HOME", home)
+	userHome := t.TempDir() // no real ~/.claude/skills or ~/.agents/skills in tests
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
 	lib := filepath.Join(home, "library")
 	os.MkdirAll(filepath.Join(lib, "skills", "go-testing"), 0o755)
 	os.WriteFile(filepath.Join(lib, "skills", "go-testing", "SKILL.md"), []byte("---\nname: go-testing\ndescription: Table-driven Go tests.\nmetadata:\n  version: \"1.0.0\"\n  tags: go,testing\n---\nUse t.Run.\n"), 0o644)
@@ -128,15 +134,41 @@ func uparseKey(s string) term.Key {
 func TestUltraShellWideAndNarrow(t *testing.T) {
 	a, u, _ := ultraFixture(t, 140, 40)
 	rows := drawn(a)
-	if !ucontains(rows, "◆ PAI ULTRA") || !ucontains(rows, "[Workspace]") || !ucontains(rows, "No task") {
-		t.Fatalf("wide screen:\n%s", strings.Join(rows, "\n"))
+	// One bottom line: the mark, the views, the model; no header above.
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "◆ ULTRA") || !strings.Contains(last, "[Work]") || !strings.Contains(last, "Cont") || !strings.Contains(last, "claude") {
+		t.Fatalf("bottom line: %q", last)
 	}
-	if u.side.Hidden {
-		t.Fatal("task panel hidden on a wide terminal")
+	for _, gone := range []string{"config r0", "server", "PAI ULTRA ·"} {
+		if ucontains(rows, gone) {
+			t.Fatalf("%q is still drawn", gone)
+		}
+	}
+	tk, _ := u.rt.Create(runtimeNewTask("Fix the parser", nil, "claude"))
+	u.cur = tk.ID
+	// No task line, state or attempt count: only a spinner while working,
+	// then one mark for the outcome.
+	if rows = drawn(a); ucontains(rows, "PENDING") || ucontains(rows, "attempt") || ucontains(rows, "Working") {
+		t.Fatalf("task details shown while idle:\n%s", strings.Join(rows, "\n"))
+	}
+	u.running, u.turn = true, time.Now()
+	if rows = drawn(a); !ucontains(rows, "Working") || !ucontains(rows, "esc to stop") {
+		t.Fatalf("no spinner while working:\n%s", strings.Join(rows, "\n"))
+	}
+	done, _ := u.rt.Store.Get(tk.ID)
+	done.State = task.Accepted
+	u.a.Ticking(false)
+	u.finished(coordOutcome{Task: done, Result: exec.Result{Status: "done"}}, nil)
+	if rows = drawn(a); ucontains(rows, "Working") || !ucontains(rows, "✓") || ucontains(rows, "ACCEPTED") {
+		t.Fatalf("outcome:\n%s", strings.Join(rows, "\n"))
+	}
+	u.finished(coordOutcome{}, errors.New("the task waits for a person: review needed"))
+	if !ucontains(drawn(a), "✗ the task waits for a person") {
+		t.Fatal("no ✗ with the reason")
 	}
 	a.W, a.H = 50, 20
 	rows = drawn(a)
-	if !u.side.Hidden || !ucontains(rows, "[Work]") || !ucontains(rows, "PAI ULTRA") {
+	if !ucontains(rows, "[Work]") || !ucontains(rows, "◆ ULTRA") {
 		t.Fatalf("narrow screen:\n%s", strings.Join(rows, "\n"))
 	}
 	for _, r := range rows {
@@ -154,7 +186,7 @@ func TestUltraKeyboardViewsAndSearch(t *testing.T) {
 	}
 	upress(a, "/", "w", "e", "b", "enter")
 	l := u.lists[vSkills]
-	if len(l.shown) != 1 || l.rows[l.shown[0]].Key != "web-ui" {
+	if len(l.shown) != 1 || l.rows[l.shown[0]].Key != "user/web-ui" {
 		t.Fatalf("search by tag: %+v", l.shown)
 	}
 	upress(a, "/", "esc") // clears the search
@@ -205,7 +237,7 @@ func TestUltraStagedSkillApplyAndDiscard(t *testing.T) {
 	if u.proj.Revision() != 1 || len(u.proj.Lock.Packages) != 1 {
 		t.Fatalf("apply: revision %d, %d packages", u.proj.Revision(), len(u.proj.Lock.Packages))
 	}
-	if !strings.Contains(u.lists[vSkills].rows[0].State, "enabled") {
+	if u.lists[vSkills].rows[0].Mark != "[x]" {
 		t.Fatalf("row after apply: %+v", u.lists[vSkills].rows[0])
 	}
 	if starts.Load() != 0 {
@@ -271,7 +303,7 @@ func TestUltraContextShowsUnknownNativeLoad(t *testing.T) {
 			found = r.Mark == "n" && strings.Contains(r.Hint, "unknown")
 		}
 	}
-	if !found || !ucontains(drawn(a), "tokens (estimate)") {
+	if !found || !ucontains(drawn(a), "tok of") {
 		t.Fatalf("native load status: %+v", u.lists[vContext].rows)
 	}
 }
@@ -326,5 +358,96 @@ func TestSlashExactNameWinsOverLongerName(t *testing.T) {
 	l.update()
 	if l.cmds[l.sel].name != "model" {
 		t.Fatal("a partial name no longer picks the first match")
+	}
+}
+
+func TestUltraInputShowsWhatIsTyped(t *testing.T) {
+	a, _, _ := ultraFixture(t, 140, 40)
+	upress(a, "h", "e", "l", "l", "o", "space", "w", "o", "r", "l", "d")
+	rows := drawn(a)
+	if !ucontains(rows, "hello world") {
+		t.Fatalf("typed text not drawn:\n%s", strings.Join(rows, "\n"))
+	}
+	for _, name := range viewShort {
+		if !ucontains(rows, name) {
+			t.Fatalf("tab %q not drawn", name)
+		}
+	}
+	a.W = 60
+	rows = drawn(a)
+	if !ucontains(rows, "hello world") || !ucontains(rows, "Cont") {
+		t.Fatalf("narrow screen:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+func TestUltraWarnsOutsideAGitProject(t *testing.T) {
+	if w := workspaceWarning(t.TempDir()); !strings.Contains(w, "Not a git repository") {
+		t.Fatalf("warning: %q", w)
+	}
+	if h, err := os.UserHomeDir(); err == nil && !strings.Contains(workspaceWarning(h), "home folder") {
+		t.Fatal("no home-folder warning")
+	}
+}
+
+func TestUltraReplyIsMarkdownWithoutTheResultBlock(t *testing.T) {
+	a, u, _ := ultraFixture(t, 100, 30)
+	u.event(exec.Event{Kind: "text", Text: "I'm running **locally** in `C:\try`, a long sentence that must wrap between words and never inside one.\n\n```pai-result\n{\"status\":\"done\"}\n```"})
+	rows := drawn(a)
+	text := strings.Join(rows, "\n")
+	if strings.Contains(text, "**") || strings.Contains(text, "pai-result") || strings.Contains(text, `"status"`) {
+		t.Fatalf("raw markdown or the result block shown:\n%s", text)
+	}
+	if !ucontains(rows, "locally") {
+		t.Fatalf("reply not shown:\n%s", text)
+	}
+	// Word wrapping: no row ends inside a word of the sentence.
+	for _, r := range rows {
+		if strings.HasSuffix(strings.TrimRight(r, " "), "betwe") || strings.HasSuffix(strings.TrimRight(r, " "), "insi") {
+			t.Fatalf("wrapped inside a word: %q", r)
+		}
+	}
+}
+
+func TestUltraInputIsAmber(t *testing.T) {
+	a, u, _ := ultraFixture(t, 100, 30)
+	upress(a, "h", "i")
+	u.Size(a, a.W, a.H)
+	u.root.Layout(Rect{0, 0, a.W, a.H})
+	b := term.NewBuffer(a.W, a.H)
+	u.root.Draw(a, &Canvas{b, Rect{0, 0, a.W, a.H}})
+	want := a.Theme.Panel.Blend(ultraAmber(a.Theme), inputTint)
+	for y := range b.H {
+		for x := range b.W - 1 {
+			if b.At(x, y).G == "h" && b.At(x+1, y).G == "i" {
+				if bg := b.At(x, y).BG; bg != want || bg == a.Theme.BG || bg == a.Theme.Panel {
+					t.Fatalf("input background %x, want amber tint %x", bg, want)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("typed text not found")
+}
+
+func TestUltraEditsASkillInPlaceAfterConfirming(t *testing.T) {
+	a, u, _ := ultraFixture(t, 140, 40)
+	upress(a, "alt+2")
+	u.lists[vSkills].sel = 0 // go-testing, user library
+	upress(a, "e")
+	if len(a.layers) != 1 {
+		t.Fatal("no scope menu")
+	}
+	upress(a, "enter") // "The skill itself"
+	if len(a.layers) != 1 {
+		t.Fatal("no editor")
+	}
+	upress(a, "X", "ctrl+s")
+	if len(a.layers) != 1 || !ucontains(drawn(a), "Enter saves this file") {
+		t.Fatalf("no diff to confirm:\n%s", strings.Join(drawn(a), "\n"))
+	}
+	upress(a, "enter")
+	b, _ := os.ReadFile(filepath.Join(os.Getenv("PAI_ULTRA_HOME"), "library", "skills", "go-testing", "SKILL.md"))
+	if !strings.HasSuffix(string(b), "X") { // the cursor starts at the end
+		t.Fatalf("skill not edited in place: %q", b)
 	}
 }

@@ -18,8 +18,13 @@ import (
 const (
 	UserLibrary    = "user"    // ~/.pai/ultra/library: installed on this machine
 	ProjectLibrary = "project" // .pai/library: packages committed with the project
-	overridesDir   = "overrides"
-	rulesDir       = "rules"
+	// The skill folders agents already use. Claude Code loads the first two on
+	// its own.
+	ProjectClaudeLibrary = "project-claude" // <project>/.claude/skills
+	ClaudeLibrary        = "claude"         // ~/.claude/skills
+	AgentsLibrary        = "agents"         // ~/.agents/skills
+	overridesDir         = "overrides"
+	rulesDir             = "rules"
 )
 
 // Project is an opened ULTRA project.
@@ -106,9 +111,18 @@ func (p *Project) Revision() int { return p.Lock.Revision }
 // Libraries is every library in order: the project's, the machine's, then
 // the manifest's.
 func (p *Project) Libraries() []Library {
-	libs := []Library{{Name: ProjectLibrary, Path: filepath.Join(p.Root, Dir, "library")}}
+	libs := []Library{
+		{Name: ProjectLibrary, Path: filepath.Join(p.Root, Dir, "library")},
+		{Name: ProjectClaudeLibrary, Path: filepath.Join(p.Root, ".claude", "skills"), SkillsDir: true},
+	}
 	if home, err := mode.Home(); err == nil {
 		libs = append(libs, Library{Name: UserLibrary, Path: filepath.Join(home, "library")})
+	}
+	// The skills the person already uses with their agents.
+	if h, err := os.UserHomeDir(); err == nil {
+		libs = append(libs,
+			Library{Name: ClaudeLibrary, Path: filepath.Join(h, ".claude", "skills"), SkillsDir: true},
+			Library{Name: AgentsLibrary, Path: filepath.Join(h, ".agents", "skills"), SkillsDir: true})
 	}
 	for _, l := range p.Manifest.Libraries {
 		if !slices.ContainsFunc(libs, func(o Library) bool { return o.Name == l.Name }) {
@@ -341,6 +355,11 @@ func effectiveEntries(m Manifest, installed []Package) ([]entryVia, []Problem) {
 func (p *Project) resolve(m Manifest, lock Lock, accept map[string]bool, overlay map[string][]byte) Resolved {
 	r := Resolved{Problems: m.Validate()}
 	installed, ps := p.Installed()
+	// A broken package in a library blocks nothing by itself: only the
+	// enabled ones are checked below, and their problems are errors there.
+	for i := range ps {
+		ps[i].Severity = "warning"
+	}
 	r.Problems = append(r.Problems, ps...)
 	entries, ps := effectiveEntries(m, installed)
 	r.Problems = append(r.Problems, ps...)

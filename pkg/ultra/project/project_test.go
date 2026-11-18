@@ -489,3 +489,52 @@ func TestPlantedSymlinkInJournalIsRefused(t *testing.T) {
 		t.Fatal("wrote through a planted link")
 	}
 }
+
+func TestAgentSkillFoldersAreListedAndEditable(t *testing.T) {
+	p, _ := fixture(t)
+	home := os.Getenv("HOME")
+	write(t, filepath.Join(home, ".claude", "skills", "tldr", "SKILL.md"), "---\nname: tldr\ndescription: Summarize changes.\n---\nBody.\n")
+	write(t, filepath.Join(p.Root, ".claude", "skills", "local", "SKILL.md"), "---\nname: local\ndescription: Project skill.\n---\nBody.\n")
+	installed, _ := p.Installed()
+	var claude *Package
+	libs := map[string]bool{}
+	for i, pk := range installed {
+		libs[pk.Library+"/"+pk.Name] = true
+		if pk.Name == "tldr" {
+			claude = &installed[i]
+		}
+	}
+	if !libs["claude/tldr"] || !libs["project-claude/local"] {
+		t.Fatalf("agent skill folders not listed: %v", libs)
+	}
+	edited := []byte("---\nname: tldr\ndescription: Summarize changes briefly.\n---\nShorter.\n")
+	if err := p.WriteSkill(*claude, []byte("stale"), edited); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale base accepted: %v", err)
+	}
+	if err := p.WriteSkill(*claude, claude.Raw, []byte("no front matter")); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid skill written: %v", err)
+	}
+	if err := p.WriteSkill(*claude, claude.Raw, edited); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(claude.Path); string(b) != string(edited) {
+		t.Fatal("skill not written in place")
+	}
+}
+
+func TestLenientFrontMatterAndBrokenSkillsDoNotBlock(t *testing.T) {
+	p, lib := fixture(t)
+	// As in real skills: an unquoted description holding ": ".
+	write(t, filepath.Join(lib, "skills", "release", "SKILL.md"), "---\nname: release\ndescription: Cut a release: commit, tag, publish.\n---\nBody.\n")
+	write(t, filepath.Join(lib, "skills", "broken", "SKILL.md"), "no front matter at all\n")
+	installed, _ := p.Installed()
+	i := slices.IndexFunc(installed, func(pk Package) bool { return pk.Name == "release" })
+	if i < 0 || installed[i].Meta.Description != "Cut a release: commit, tag, publish." {
+		t.Fatalf("lenient parse: %+v", installed)
+	}
+	s := p.Begin()
+	s.Enable(KindSkill, "go-testing", "")
+	if _, err := s.Apply(); err != nil {
+		t.Fatalf("a broken skill nobody enabled blocked an apply: %v", err)
+	}
+}

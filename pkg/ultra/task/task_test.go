@@ -472,3 +472,26 @@ func TestAmendRefusedOnFinishedTask(t *testing.T) {
 		t.Fatal("amended a cancelled task")
 	}
 }
+
+func TestNonGitFingerprintIsCheap(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "node_modules", "x"), 0o755)
+	os.WriteFile(filepath.Join(dir, "node_modules", "x", "big.js"), []byte("skip me"), 0o644)
+	w, err := Capture(dir, t.TempDir())
+	if err != nil || w.Git || len(w.Changed) != 1 || !strings.HasPrefix(w.Changed[0].Hash, "stat:") {
+		t.Fatalf("non-git capture: %+v %v", w.Changed, err)
+	}
+}
+
+func TestReleaseFromReportedGoesBackToPending(t *testing.T) {
+	s, _ := newStore(t)
+	tk := mk(t, s)
+	a, _ := s.Claim(tk.ID, Owner{ID: "a"}, DefaultLease)
+	s.StartAttempt(tk.ID, a.Epoch, "x", 0)
+	s.Move(tk.ID, Guard{Epoch: a.Epoch}, Reported, "a", "")
+	got, err := s.Release(tk.ID, a.Epoch, Paused, "checkpoint failed")
+	if err != nil || got.State != Pending || got.Owner != nil {
+		t.Fatalf("release from reported: %v %+v", err, got)
+	}
+}

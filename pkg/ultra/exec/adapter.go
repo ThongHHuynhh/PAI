@@ -179,3 +179,9 @@ type UncertainError struct {
 
 func (e *UncertainError) Error() string { return "uncertain start (" + e.Ref + "): " + e.Err.Error() }
 func (e *UncertainError) Unwrap() error { return e.Err }
+
+// StripResult removes pai-result blocks from text shown to a person: the
+// block is PAI's to read, and its claim is shown as checked results instead.
+func StripResult(text string) string {
+	return strings.TrimSpace(resultBlock.ReplaceAllString(text, ""))
+}

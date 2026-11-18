@@ -28,7 +28,7 @@ const (
 	maxUntrackedFile  = 2 << 20
 	maxUntrackedTotal = 32 << 20
 	// A directory without git is fingerprinted from at most this many files.
-	maxFingerprintFiles = 20000
+	maxFingerprintFiles = 5000
 	emptyTree           = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" // git's empty tree
 	patchName           = "patch.diff"
 	gitTimeout          = 2 * time.Minute
@@ -314,34 +314,53 @@ func fingerprint(w Workspace) string {
 	return sum([]byte(b.String()))
 }
 
-// captureTree fingerprints a directory that is not a git work tree. Its
-// changes cannot be restored from the checkpoint; that is noted.
+// captureTree fingerprints a directory that is not a git work tree from file
+// sizes and times, not contents, and within bounds: such a directory can be
+// as large as a home folder. Its changes cannot be restored from the
+// checkpoint; that is noted.
 func captureTree(root string) (Workspace, error) {
-	w := Workspace{Root: root, Notes: []string{"not a git repository: file changes are fingerprinted, not recoverable"}}
-	n := 0
+	w := Workspace{Root: root, Notes: []string{"not a git repository: file changes are fingerprinted by size and time, not recoverable"}}
+	n, deadline := 0, time.Now().Add(treeTime)
+	cut := ""
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if d.IsDir() && strings.HasPrefix(d.Name(), ".") && p != root {
+		if d.IsDir() && p != root && (strings.HasPrefix(d.Name(), ".") || slices.Contains(treeSkip, d.Name())) {
 			return filepath.SkipDir
 		}
 		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
 		if n++; n > maxFingerprintFiles {
+			cut = fmt.Sprintf("fingerprint covers the first %d files", maxFingerprintFiles)
 			return filepath.SkipAll
 		}
+		if time.Now().After(deadline) {
+			cut = fmt.Sprintf("fingerprint stopped after %s", treeTime)
+			return filepath.SkipAll
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
 		rel, _ := filepath.Rel(root, p)
-		w.Changed = append(w.Changed, fileState(root, filepath.ToSlash(rel)))
+		w.Changed = append(w.Changed, FileState{Path: filepath.ToSlash(rel), Size: info.Size(),
+			Hash: fmt.Sprintf("stat:%d:%d", info.Size(), info.ModTime().UnixNano())})
 		return nil
 	})
-	if n > maxFingerprintFiles {
-		w.Notes = append(w.Notes, fmt.Sprintf("fingerprint covers the first %d files", maxFingerprintFiles))
+	if cut != "" {
+		w.Notes = append(w.Notes, cut)
 	}
 	w.Fingerprint = fingerprint(w)
 	return w, err
 }
+
+// Bounds on fingerprinting a directory without git.
+const treeTime = 3 * time.Second
+
+// treeSkip is directories never worth fingerprinting: caches and app data.
+var treeSkip = []string{"node_modules", "AppData", "Library", "__pycache__", "target", "vendor"}
 
 // Drift is how a workspace differs from a checkpoint's.
 type Drift struct {

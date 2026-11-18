@@ -72,6 +72,9 @@ type Entry struct {
 type Library struct {
 	Name string `yaml:"name"`
 	Path string `yaml:"path"` // absolute, ~/..., or relative to the project root
+	// SkillsDir says Path is a folder of skills itself (as ~/.claude/skills),
+	// not a library with skills/, rules/ and profiles/ inside.
+	SkillsDir bool `yaml:"skills_dir,omitempty"`
 }
 
 // ContextConf holds the soft budgets for selected context, in estimated tokens.

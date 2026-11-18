@@ -28,7 +28,7 @@ func (Claude) Capabilities() Capabilities {
 	return Capabilities{
 		Name: "claude", NativeSession: true, Resume: true, Cancel: true, Events: true, ReportsUsage: true,
 		Tools:     []string{"shell", "files", "git", "network"},
-		AutoLoads: []string{"CLAUDE.md", "CLAUDE.local.md", "~/.claude/CLAUDE.md"},
+		AutoLoads: []string{"CLAUDE.md", "CLAUDE.local.md", "~/.claude/CLAUDE.md", "~/.claude/skills", ".claude/skills"},
 		Notes: []string{
 			"PAI does not intercept Claude Code's tool calls: its own permission settings apply",
 			"Claude Code does not report which CLAUDE.md files it loaded: their status is unknown",

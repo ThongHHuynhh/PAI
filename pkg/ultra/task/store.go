@@ -437,6 +437,10 @@ func (s *Store) Release(id string, epoch int, to State, note string) (*Task, err
 		actor := t.Owner.ID
 		markUnknown(t, "released by "+actor+" while in progress")
 		t.Owner = nil
+		if t.State == Reported && to == Paused {
+			// A reported task cannot pause; it goes back to be checked again.
+			to = Pending
+		}
 		t.State = to
 		if to == Paused && unresolved(t) != nil {
 			t.State = Blocked
