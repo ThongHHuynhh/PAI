@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"pai/pkg/version"
 )
 
 // Repo, Key and Base are stamped by a release build:
@@ -54,6 +56,17 @@ func dl(v string) string {
 // then on Windows.
 func InstallLines(args string) (unix, windows string) {
 	return "curl -fsSL " + dl("latest") + "install.sh | sh -s -- " + args, "& ([scriptblock]::Create((irm " + dl("latest") + "install.ps1))) " + args
+}
+
+// InstallLinesAt is the install lines for a machine joining the server at url,
+// with args: from that server itself, which installs its own release and
+// needs nothing else, when this is a signed release reached over https; else
+// the latest install script from the place built in, as before.
+func InstallLinesAt(url, args string) (unix, windows string) {
+	if strings.HasPrefix(url, "https://") && HasKey() && ValidVersion(version.V) {
+		return ServerInstallLines(url, args)
+	}
+	return InstallLines(args)
 }
 
 // ServerInstallLines run the install script a PAI server at url serves, which

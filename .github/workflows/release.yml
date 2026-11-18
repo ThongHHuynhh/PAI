@@ -60,7 +60,7 @@ jobs:
             done
           done
           [ "$(dist/pai-linux-amd64 version)" = "$TAG" ]
-          for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g; s#@DL@#$DL#g" "install/$s" > "dist/$s"; done
+          for s in install.sh install.ps1; do sed "s/@VERSION@/$TAG/g; s#@DL@#$DL#g; s#@KEY@#$PUB#g" "install/$s" > "dist/$s"; done
           printf '%s\n' "$TAG" > dist/VERSION
           cp docs/CHANGELOG.md THIRD_PARTY_NOTICES dist/
       - name: SHA256SUMS, signed

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"pai/pkg/release"
 	"pai/pkg/version"
 	"pai/pkg/worker"
 )
@@ -33,6 +34,11 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 	select {
 	case latest = <-l:
 	case <-time.After(5 * time.Second):
+	}
+	// a latest stable behind the beta this server runs is no update: the web
+	// app offers whatever latest differs from current
+	if release.Older(latest, version.V) {
+		latest = ""
 	}
 	reply(w, settings{&versions{version.V, latest, version.Info()}})
 }

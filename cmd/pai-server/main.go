@@ -48,9 +48,20 @@ func main() {
 	switch {
 	case verb == "version" && len(args) == 1:
 		fmt.Println(version.V)
-	case verb == "update" && len(args) <= 2:
+	case verb == "update" && len(args) <= 3:
+		v, down := "", false
+		for _, a := range args[1:] {
+			switch {
+			case a == "--allow-downgrade":
+				down = true
+			case v == "" && !strings.HasPrefix(a, "-"):
+				v = a
+			default:
+				usage()
+			}
+		}
 		elevate.Root(args...)
-		fatal(server.Update(strings.Join(args[1:], "")))
+		fatal(server.Update(v, down))
 	case verb == "uninstall" && len(args) == 1:
 		elevate.Root(args...)
 		fatal(server.Uninstall())
@@ -225,18 +236,21 @@ func network(h handover) {
 // done says the harness is installed, and how to make a machine a worker of
 // it or log its CLI in.
 func done(h handover) {
-	fmt.Printf("%s\n%s\n%s", version.Installed(), installLines(auth.Join, h.Join), installLines(auth.Key, auth.Token(auth.Key, h.Harness, h.Key, h.Public())))
+	fmt.Printf("%s\n%s\n%s", version.Installed(), installLines(auth.Join, h.Public(), h.Join), installLines(auth.Key, h.Public(), auth.Token(auth.Key, h.Harness, h.Key, h.Public())))
 }
 
 // installLines are what token does and the lines that run the latest install
 // script with it, on Linux and macOS, then on Windows: the server URL and
 // device code make the machine a worker, an api key logs its CLI in.
-func installLines(kind, token string) string {
+func installLines(kind, url, token string) string {
 	label := "log in:"
+	// a CLI-only machine never runs what the server says, so its install
+	// script comes from the place built in, not from the server
+	unix, windows := release.InstallLines(token)
 	if kind == auth.Join {
 		label = "connect a device:"
+		unix, windows = release.InstallLinesAt(url, token)
 	}
-	unix, windows := release.InstallLines(token)
 	return fmt.Sprintf("%s\n  linux, macos:  %s\n  windows:       %s\n", label, unix, windows)
 }
 
@@ -329,7 +343,7 @@ func join(args []string) {
 		n, err = server.Cycle()
 	}
 	fatal(err)
-	fmt.Print(installLines(auth.Join, n.String()))
+	fmt.Print(installLines(auth.Join, firstField(n.String()), n.String()))
 }
 
 func table(args []string) {
@@ -344,7 +358,7 @@ func table(args []string) {
 		fatal(err)
 		token := auth.Token(auth.Key, identity.Encode(k), secret, c.Public())
 		fmt.Println(token)
-		fmt.Fprintf(os.Stderr, "\n%s", installLines(auth.Key, token)) // stderr, so stdout stays the token for scripts
+		fmt.Fprintf(os.Stderr, "\n%s", installLines(auth.Key, c.Public(), token)) // stderr, so stdout stays the token for scripts
 	case "revoke":
 		fatal(store.Revoke(auth.Key, args[1]))
 	case "list":
@@ -395,6 +409,7 @@ func usage() {
                                           pai worker remove <worker>
   update    [version]                     the installed harness becomes that release, the latest stable by default;
                                           prints the changelog between, restarts it, and workers follow
+  update    <version> --allow-downgrade   the same, to a release older than the one installed, which is refused without it
   uninstall                               remove the service, the binary and the admin worker; the config, sessions and
                                           auth table stay
   version                                 the release this binary was built from
@@ -463,4 +478,13 @@ func source(args []string) {
 		fmt.Printf("; its latest stable release is %s", latest)
 	}
 	fmt.Println("\nworkers update from this server; new machines install with: pai-server join")
+}
+
+// firstField is s's first word: the server URL of a join line.
+func firstField(s string) string {
+	f := strings.Fields(s)
+	if len(f) == 0 {
+		return ""
+	}
+	return f[0]
 }

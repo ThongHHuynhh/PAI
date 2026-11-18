@@ -50,7 +50,7 @@ pai-server join          # prints the line: <server URL> <device code>
 pai-server join cycle    # a new device code; machines already joined stay
 ```
 
-On each machine, run the printed install line. A machine joins with a password exchange (CPace) on the device code, so the code never travels. Machines see the server; two machines see each other only when `"links": [["laptop", "desktop"]]` in the config names them.
+On each machine, run the printed install line. On a release reached at an https URL the join line installs from the server itself, `curl -fsSL <server URL>/install.sh | sh -s -- <server URL> <device code>` (Windows: `install.ps1`): the machine gets the server's own release and needs nothing else. A machine joins with a password exchange (CPace) on the device code, so the code never travels. Machines see the server; two machines see each other only when `"links": [["laptop", "desktop"]]` in the config names them.
 
 ## Models and accounts
 
@@ -150,7 +150,26 @@ What PAI keeps, and how, is shown in the web app under Memory. In short:
 ## Updates
 
 ```bash
-pai-server update
+pai-server update                              # the newest stable release
+pai-server update v0.5.1                       # a named one
+pai-server update v0.5.0 --allow-downgrade     # back to an older one
 ```
 
-It installs the newest release, checked against the release key built into your binaries. Machines follow at their next connection.
+It installs the release, checked against the release key built into your binaries, and machines follow at their next connection. An older release is refused without `--allow-downgrade`, and a server on a beta newer than the latest stable release stays where it is.
+
+Workers and CLIs fetch the files from their server (`/releases`), which fetches each release once, checks its signature and keeps it; a worker that cannot reach it falls back to the place built into its binary. Every machine checks every file against the release key whichever way it came.
+
+## Where releases come from
+
+```bash
+pai-server source                                              # show it
+pai-server source github your-org/PAI --token-file /etc/pai-token     # a private repository
+pai-server source https://downloads.example.com/pai             # a download server
+pai-server source off                                          # the place built in
+```
+
+With no source the server fetches from the place built into its release, as before: its GitHub releases, or the download server the build names. A private repository needs a read-only token (fine-grained, Contents: read): the file holds the token, or a `NAME=value` line. The server keeps it in `release.token` beside its config, readable by the server only; only the server ever holds it. Changing the source, or the server's URL, needs no new release.
+
+Anyone who reaches the server can download its release files: they are signed, not secret. The server bounds what that costs its source: latest is asked at most once a minute, a missing version not again for five minutes, at most 30 new versions in ten minutes.
+
+The install scripts check the release signature with OpenSSL 3 (Linux, and Windows with Git for Windows); without it (macOS has LibreSSL) they say so and check the files' checksums only. Set `PAI_REQUIRE_SIGNATURE=1` to stop instead.

@@ -15,21 +15,24 @@ import (
 // Workers follow at their next hello, so one command updates the fleet. The
 // files come through the running harness's /releases when it answers, so the
 // source its config names applies; else from the place built in, as before.
-func Update(v string) error {
+// An older release is refused unless downgrade: a mistyped version, a
+// stale latest, or a source that lies about latest cannot roll the fleet back
+// by accident; workers still follow whatever the server runs.
+func Update(v string, downgrade bool) error {
 	out, err := exec.Command(bin, "version").Output()
 	if err != nil {
 		return fmt.Errorf("no installed harness at %s: %w", bin, err)
 	}
 	cur := string(bytes.TrimSpace(out))
 	local := localReleases()
-	if v == "" {
+	named := v != ""
+	if !named {
 		if v, err = latest(local); err != nil {
 			return err
 		}
 	}
-	if v == cur {
-		fmt.Printf("pai-server is %s\n", v)
-		return nil
+	if skip, err := refuseDowngrade(v, cur, named, downgrade); skip || err != nil {
+		return err
 	}
 	log, err := release.Get(v, "CHANGELOG.md", local)
 	if err != nil {
@@ -80,4 +83,22 @@ func notes(log, cur string) string {
 		}
 	}
 	return log[strings.Index(log, "\n## ")+1 : end]
+}
+
+// refuseDowngrade is whether updating from cur to v is nothing to do (skip),
+// saying why: v is cur, or v, the latest stable, is older than a beta this
+// server runs; or a refusal, when v, named, is older and downgrade was not
+// given.
+func refuseDowngrade(v, cur string, named, downgrade bool) (skip bool, err error) {
+	switch {
+	case v == cur:
+		fmt.Printf("pai-server is %s\n", v)
+		return true, nil
+	case !named && release.Older(v, cur):
+		fmt.Printf("pai-server is %s, newer than the latest stable release %s: nothing to do\n", cur, v)
+		return true, nil
+	case release.Older(v, cur) && !downgrade:
+		return false, fmt.Errorf("%s is older than this server's %s: to roll back, pai-server update %s --allow-downgrade", v, cur, v)
+	}
+	return false, nil
 }

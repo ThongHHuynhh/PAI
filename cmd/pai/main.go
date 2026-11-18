@@ -69,10 +69,10 @@ func main() {
 		}
 		work(os.Args[1] == "install", os.Args[2:])
 	case "elevated-update": // internal: update re-running itself as root
-		if len(os.Args) != 3 {
+		if len(os.Args) != 3 && len(os.Args) != 4 {
 			usage()
 		}
-		update(os.Args[2])
+		update(os.Args[2], strings.Join(os.Args[3:], ""))
 	case "quickstart":
 		if len(os.Args) != 2 {
 			usage()
@@ -132,7 +132,7 @@ func logIn(token string) {
 		fmt.Printf("logged in; switched from the pai-server at %s\n", cmp.Or(was.URL, "this machine"))
 	}
 	if !version.Match(v) {
-		update(v)
+		update(v, cmp.Or(c.Local, c.Mesh, c.At())+"/releases")
 	}
 }
 
@@ -196,7 +196,7 @@ func rerun(v string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := attached(exe, "elevated-update", v).Run(); err != nil {
+	if err := attached(exe, "elevated-update", v, serverReleases()).Run(); err != nil {
 		log.Fatalf("update to %s failed: %v", v, err)
 	}
 	cmd := attached(exe, os.Args[1:]...)
@@ -314,7 +314,7 @@ func operator(args []string) {
 // root may replace, like a Linux or macOS worker's, updates elevated through
 // the internal verb elevated-update; v goes along, since sudo may give root a
 // home without the login.
-func update(v string) {
+func update(v, from string) {
 	if v == version.V {
 		fmt.Printf("pai is %s\n", v)
 		return
@@ -324,13 +324,13 @@ func update(v string) {
 		log.Fatal(err)
 	}
 	if f, err := os.CreateTemp(filepath.Dir(exe), ".update-*"); err != nil {
-		elevate.Root("elevated-update", v)
+		elevate.Root("elevated-update", v, from)
 	} else {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 	}
 	fmt.Printf("pai %s -> %s, your pai-server's release: downloading\n", version.V, v)
-	if err := release.Install(exe, "pai", v); err != nil {
+	if err := release.Install(exe, "pai", v, from); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -442,4 +442,16 @@ func usage() {
                                      chatgpt; prints the URL to open, reads what to paste back, waits for the end
 `)
 	os.Exit(2)
+}
+
+// serverReleases is the logged-in server's /releases, which this CLI updates
+// from first, else "": the place built in then serves alone.
+func serverReleases() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := connector.Load(ctx)
+	if err != nil {
+		return ""
+	}
+	return cmp.Or(c.Local, c.Mesh, c.At()) + "/releases"
 }

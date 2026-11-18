@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"pai/install"
 	"pai/pkg/release"
 	"pai/pkg/version"
 )
@@ -90,8 +91,9 @@ func storedToken(dir string) (string, error) {
 // secret, and a machine about to join has no key yet. Whoever reaches the
 // server can read them.
 type releases struct {
-	dir    string // the harness's: its config, token and cache
-	config string // the config path, read per fetch so a new source applies at once
+	dir    string        // the harness's: its config, token and cache
+	at     func() string // the harness's URL, or none yet
+	config string        // the config path, read per fetch so a new source applies at once
 
 	cache     sync.RWMutex // fetches and serves read; prune writes
 	needPrune atomic.Bool
@@ -110,8 +112,8 @@ type fetching struct {
 	err  error
 }
 
-func newReleases(dir, config string) *releases {
-	return &releases{dir: dir, config: config, sem: make(chan struct{}, downloads),
+func newReleases(dir, config string, at func() string) *releases {
+	return &releases{dir: dir, config: config, at: at, sem: make(chan struct{}, downloads),
 		inflight: map[string]*fetching{}, missing: map[string]time.Time{}}
 }
 
@@ -148,6 +150,31 @@ func (rs *releases) Latest(ctx context.Context) (string, error) {
 
 func (rs *releases) handle(mux *http.ServeMux) {
 	mux.HandleFunc("GET /releases/{v}/{file}", rs.serve)
+	mux.HandleFunc("GET /install.sh", rs.script)
+	mux.HandleFunc("GET /install.ps1", rs.script)
+}
+
+// script is the install script of the release this server runs, which
+// fetches that release from this server: a new machine needs only its URL.
+func (rs *releases) script(w http.ResponseWriter, r *http.Request) {
+	if !release.HasKey() || !release.ValidVersion(version.V) {
+		http.Error(w, "this server is not a signed release, so it serves no install script: install from the release page", http.StatusNotFound)
+		return
+	}
+	base := ""
+	if rs.at != nil {
+		base = rs.at()
+	}
+	// the URL the server is reached at, never one a request names: it goes
+	// into a script that runs, quoted, so it may hold no quote or space
+	if base == "" || strings.ContainsAny(base, "'\"`$;&|<>(){}\\ \t\r\n") {
+		http.Error(w, "this server is not reached at a URL yet: install from the release page", http.StatusServiceUnavailable)
+		return
+	}
+	s, _ := install.Script(strings.TrimPrefix(r.URL.Path, "/"), version.V, strings.TrimRight(base, "/")+"/releases/"+version.V, release.Key)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write([]byte(s))
 }
 
 func (rs *releases) serve(w http.ResponseWriter, r *http.Request) {

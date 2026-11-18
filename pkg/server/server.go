@@ -350,7 +350,7 @@ func Harness(ctx context.Context, path string) error {
 	mux.Handle("/id", identity.ID(k, func() string { return at.Load().(string) }, coord.Public().String()))
 	mux.Handle("POST /join", auth.JoinHandler(k, identity.Encode(k), code, limit))
 	coord.Handle(mux)
-	rel := newReleases(dir, path)
+	rel := newReleases(dir, path, func() string { return at.Load().(string) })
 	rel.handle(mux)
 	derp := relay.New()
 	derp.SetVerifyClientFunc(coord.Known)

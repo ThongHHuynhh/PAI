@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"pai/pkg/release"
+	"pai/pkg/version"
 )
 
 // releaseFixture is a download server holding signed releases, and a
@@ -77,7 +78,7 @@ func newReleaseFixture(t *testing.T) *releaseFixture {
 		t.Fatal(err)
 	}
 	f.mux = http.NewServeMux()
-	newReleases(f.dir, filepath.Join(f.dir, "config.json")).handle(f.mux)
+	newReleases(f.dir, filepath.Join(f.dir, "config.json"), func() string { return "https://pai.example.ts.net" }).handle(f.mux)
 	return f
 }
 
@@ -136,7 +137,7 @@ func TestReleasesNeedKey(t *testing.T) {
 
 func TestReleasesPruneKeepsNewest(t *testing.T) {
 	dir := t.TempDir()
-	rs := newReleases(dir, filepath.Join(dir, "config.json"))
+	rs := newReleases(dir, filepath.Join(dir, "config.json"), nil)
 	for i := range 8 {
 		d := filepath.Join(dir, "releases", fmt.Sprintf("v1.0.%d", i))
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -224,6 +225,52 @@ func TestReleasesOneFetchPerFile(t *testing.T) {
 	for _, e := range es {
 		if strings.HasPrefix(e.Name(), ".tmp-") {
 			t.Fatalf("a temporary file was left: %s", e.Name())
+		}
+	}
+}
+
+// A release server hands a new machine an install script for its own
+// release, fetching from itself, with the key to check the signature; a
+// local build serves none.
+func TestInstallScriptFromServer(t *testing.T) {
+	f := newReleaseFixture(t)
+	if code, _ := f.get("/install.sh"); code != http.StatusNotFound {
+		t.Fatalf("a dev build served an install script: %d", code)
+	}
+	old := version.V
+	version.V = "v1.0.0"
+	t.Cleanup(func() { version.V = old })
+	code, sh := f.get("/install.sh")
+	if code != 200 || !strings.Contains(sh, "\nv=v1.0.0\n") || !strings.Contains(sh, "\ndl='https://pai.example.ts.net/releases/v1.0.0'\n") || !strings.Contains(sh, "\nkey="+release.Key+"\n") {
+		t.Fatalf("%d\n%s", code, sh)
+	}
+	code, ps := f.get("/install.ps1")
+	if code != 200 || !strings.Contains(ps, "$dl = 'https://pai.example.ts.net/releases/v1.0.0'") || strings.Contains(ps, "@KEY@") || strings.Contains(ps, "@VERSION@") {
+		t.Fatalf("%d\n%s", code, ps)
+	}
+	u, _ := release.InstallLinesAt("https://pai.example.ts.net", "https://pai.example.ts.net CODE")
+	if u != "curl -fsSL https://pai.example.ts.net/install.sh | sh -s -- https://pai.example.ts.net CODE" {
+		t.Fatal(u)
+	}
+	if u, _ := release.InstallLinesAt("http://127.0.0.1:8080", "x"); strings.Contains(u, "127.0.0.1") {
+		t.Fatalf("a loopback server was named in an install line: %s", u)
+	}
+}
+
+// Before the server knows its URL, or with one unsafe to put in a script, it
+// serves no install script: never one built from what a request names.
+func TestInstallScriptNeedsServerURL(t *testing.T) {
+	f := newReleaseFixture(t)
+	old := version.V
+	version.V = "v1.0.0"
+	t.Cleanup(func() { version.V = old })
+	for _, u := range []string{"", "https://x.example/$(id)", "https://x.example/'a"} {
+		mux := http.NewServeMux()
+		newReleases(f.dir, filepath.Join(f.dir, "config.json"), func() string { return u }).handle(mux)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/install.sh", nil))
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("URL %q: %d", u, w.Code)
 		}
 	}
 }

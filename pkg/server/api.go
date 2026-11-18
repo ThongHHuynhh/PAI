@@ -99,7 +99,7 @@ func (a *api) join(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	unix, windows := release.InstallLines(n.String())
+	unix, windows := release.InstallLinesAt(a.at(), n.String())
 	reply(w, map[string]string{"join": n.String(), "unix": unix, "windows": windows})
 }
 
