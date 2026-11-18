@@ -11,14 +11,9 @@ package release
 
 import (
 	"bytes"
-	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
+	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,52 +56,45 @@ func InstallLines(args string) (unix, windows string) {
 	return "curl -fsSL " + dl("latest") + "install.sh | sh -s -- " + args, "& ([scriptblock]::Create((irm " + dl("latest") + "install.ps1))) " + args
 }
 
-// Latest is the newest stable release: each release carries its own version
-// in VERSION, and GitHub serves the newest stable one's at latest.
-func Latest() (string, error) {
-	b, err := fetch(dl("latest") + "VERSION")
-	return string(bytes.TrimSpace(b)), err
+// ServerInstallLines run the install script a PAI server at url serves, which
+// installs that server's own release from it, with args.
+func ServerInstallLines(url, args string) (unix, windows string) {
+	u := strings.TrimRight(url, "/")
+	return "curl -fsSL " + u + "/install.sh | sh -s -- " + args, "& ([scriptblock]::Create((irm " + u + "/install.ps1))) " + args
 }
 
-// Get is file of release v, checked against v's signed SHA256SUMS.
-func Get(v, file string) ([]byte, error) {
-	k, _ := base64.StdEncoding.DecodeString(Key)
-	if len(k) != ed25519.PublicKeySize {
-		return nil, errors.New("this build has no release key, so it installs no release: build from source, or install a release")
-	}
-	sums, err := fetch(dl(v) + "SHA256SUMS")
-	if err != nil {
-		return nil, err
-	}
-	sig, err := fetch(dl(v) + "SHA256SUMS.sig")
-	if err != nil {
-		return nil, err
-	}
-	if !ed25519.Verify(k, sums, sig) {
-		return nil, fmt.Errorf("release %s: SHA256SUMS is not signed by the release key", v)
-	}
-	want := ""
-	for _, line := range strings.Split(string(sums), "\n") {
-		if f := strings.Fields(line); len(f) == 2 && f[1] == file {
-			want = f[0]
+// Latest is the newest stable release: each release carries its own version
+// in VERSION, and GitHub serves the newest stable one's at latest.
+func Latest() (string, error) { return Source{}.Latest(context.Background()) }
+
+// Get is file of release v, checked against v's signed SHA256SUMS. Each of
+// from, a release server laid out as <from>/<version>/<file> such as a PAI
+// server's /releases, is tried in turn before the place built in; a failure
+// there, of the network or of a check, moves on, since every file is checked
+// whatever its source.
+func Get(v, file string, from ...string) ([]byte, error) {
+	var errs []error
+	for _, f := range from {
+		if f == "" {
+			continue
 		}
+		b, err := Source{URL: f}.Checked(context.Background(), v, file)
+		if err == nil {
+			return b, nil
+		}
+		errs = append(errs, fmt.Errorf("from %s: %w", redact(f), err))
 	}
-	if want == "" {
-		return nil, fmt.Errorf("release %s has no %s", v, file)
-	}
-	b, err := fetch(dl(v) + file)
+	b, err := Source{}.Checked(context.Background(), v, file)
 	if err != nil {
-		return nil, err
-	}
-	if got := sha256.Sum256(b); hex.EncodeToString(got[:]) != want {
-		return nil, fmt.Errorf("release %s: %s does not match SHA256SUMS", v, file)
+		return nil, errors.Join(append(errs, err)...)
 	}
 	return b, nil
 }
 
-// Install puts release v's build of cmd for this machine at path. The new
+// Install puts release v's build of cmd for this machine at path, from the
+// first of from that serves it or else the place built in (see Get). The new
 // binary must say it is v. The old one moves aside: see Aside.
-func Install(path, cmd, v string) error {
+func Install(path, cmd, v string, from ...string) error {
 	// Update the executable behind a compatibility link. Replacing the link
 	// itself would move an NVMe installation back onto the system drive.
 	resolved, err := filepath.EvalSymlinks(path)
@@ -124,7 +112,7 @@ func Install(path, cmd, v string) error {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	b, err := Get(v, name)
+	b, err := Get(v, name, from...)
 	if err != nil {
 		return err
 	}
@@ -176,17 +164,4 @@ func Asides(path string) []string {
 		}
 	}
 	return m
-}
-
-func fetch(url string) ([]byte, error) {
-	c := http.Client{Timeout: timeout}
-	resp, err := c.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
-	}
-	return io.ReadAll(resp.Body)
 }
