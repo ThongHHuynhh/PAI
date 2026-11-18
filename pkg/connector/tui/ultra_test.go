@@ -328,3 +328,34 @@ func TestSlashExactNameWinsOverLongerName(t *testing.T) {
 		t.Fatal("a partial name no longer picks the first match")
 	}
 }
+
+func TestUltraInputShowsWhatIsTyped(t *testing.T) {
+	a, _, _ := ultraFixture(t, 140, 40)
+	upress(a, "h", "e", "l", "l", "o", "space", "w", "o", "r", "l", "d")
+	rows := drawn(a)
+	if !ucontains(rows, "hello world") {
+		t.Fatalf("typed text not drawn:\n%s", strings.Join(rows, "\n"))
+	}
+	if !ucontains(rows, "? keys") {
+		t.Fatal("the keys hint is not drawn")
+	}
+	for _, name := range viewNames {
+		if !ucontains(rows, name) {
+			t.Fatalf("tab %q not drawn", name)
+		}
+	}
+	a.W = 60
+	rows = drawn(a)
+	if !ucontains(rows, "hello world") || !ucontains(rows, "Ctx") {
+		t.Fatalf("narrow screen:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+func TestUltraWarnsOutsideAGitProject(t *testing.T) {
+	if w := workspaceWarning(t.TempDir()); !strings.Contains(w, "Not a git repository") {
+		t.Fatalf("warning: %q", w)
+	}
+	if h, err := os.UserHomeDir(); err == nil && !strings.Contains(workspaceWarning(h), "home folder") {
+		t.Fatal("no home-folder warning")
+	}
+}

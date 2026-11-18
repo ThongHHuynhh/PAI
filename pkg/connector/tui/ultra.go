@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -32,6 +33,8 @@ const (
 
 var viewNames = [nViews]string{"Workspace", "Skills", "Instructions", "Memory", "Runs", "Context"}
 var viewShort = [nViews]string{"Work", "Skills", "Instr", "Memory", "Runs", "Ctx"}
+
+const ultraHintWidth = 30 // fits the longest hint, "esc back · / search · ? keys"
 
 const (
 	// ultraSideFrom is the width from which the task panel docks beside the
@@ -130,16 +133,21 @@ func openUltra(a *App, c *connector.Client, dir string) (*ultra, error) {
 	u.tabsNode = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraTabs{u}}
 	u.side = &Node{Fixed: ultraSide, Paint: PaintPanel, Pad: [4]int{1, 1, 1, 0}, View: ultraTaskPanel{u}}
 	u.summary = &Node{Fixed: 1, Pad: [4]int{2, 0, 2, 0}, View: ultraTaskLine{u}}
-	u.inputRow = Box(&Node{Dir: Row, Pad: [4]int{2, 1, 2, 0}}, inputBox(a, u.input))
+	box := inputBox(a, u.input)
+	box.Grow = 1 // a row gives a child neither Fixed nor Grow no width
+	u.inputRow = Box(&Node{Dir: Row, Pad: [4]int{2, 1, 2, 0}}, box)
 	convo := Box(&Node{Dir: Col, Grow: 1}, &Node{Grow: 1, Pad: [4]int{2, 1, 2, 0}, View: u.transcript}, u.summary, u.inputRow)
 	u.work = Box(&Node{Dir: Row, Grow: 1}, convo, u.side)
 	u.listNode = &Node{Grow: 1, Pad: [4]int{2, 1, 1, 0}, View: ultraMgmtKeys{u, false}}
 	u.detailNode = &Node{Grow: 1, Paint: PaintPanel, Pad: [4]int{2, 1, 1, 0}, View: ultraMgmtKeys{u, true}}
 	u.mgmt = Box(&Node{Dir: Row, Grow: 1}, u.listNode, u.detailNode)
 	u.body = Box(&Node{Dir: Col, Grow: 1}, u.work, u.mgmt)
-	u.statusRow = Box(&Node{Dir: Row, Fixed: 1, Pad: [4]int{2, 0, 2, 0}}, &Node{Grow: 1, View: u.status}, &Node{View: ultraKeysHint{u}})
+	u.statusRow = Box(&Node{Dir: Row, Fixed: 1, Pad: [4]int{2, 0, 2, 0}}, &Node{Grow: 1, View: u.status}, &Node{Fixed: ultraHintWidth, View: ultraKeysHint{u}})
 	u.root = Box(&Node{Dir: Col, Paint: PaintScreen}, u.header, u.tabsNode, u.body, u.statusRow)
 	u.say(ultraTranscriptHello(u), InkMuted)
+	if w := workspaceWarning(proj.Root); w != "" {
+		u.say(w, InkError)
+	}
 	if ids, err := rt.Recover(); err == nil && len(ids) > 0 {
 		u.say(fmt.Sprintf("recovered %d task(s) whose owner stopped: see Runs", len(ids)), InkAccent)
 	}
@@ -462,8 +470,13 @@ func (u *ultra) finished(out runtimeOutcome, err error) {
 		u.a.Quit()
 		return
 	}
+	if out.Task != nil && out.Result.Status == "" {
+		// No attempt ran: say why, not a claim nobody made.
+		u.say(fmt.Sprintf("■ %s: %s; no attempt ran", out.Task.ID, strings.ToUpper(string(out.Task.State))), InkMuted)
+		out.Task = nil
+	}
 	if out.Task != nil {
-		claim := cmpStr(out.Result.Status, "none")
+		claim := out.Result.Status
 		line := fmt.Sprintf("■ %s: %s after %d attempt(s); executor claimed %q", out.Task.ID, strings.ToUpper(string(out.Task.State)), out.Task.Attempts, claim)
 		ink := InkMuted
 		if out.Task.State == task.Accepted {
@@ -729,7 +742,7 @@ type ultraHeader struct{ u *ultra }
 func (h ultraHeader) Draw(a *App, c *Canvas, r Rect) {
 	u := h.u
 	acc := term.Style{FG: ultraAccent(a.Theme), Attr: term.Bold}
-	x := c.Text(r.X, r.Y, "◆ PAI ULTRA", acc)
+	x := c.Text(r.X, r.Y, "◆ PAI ULTRA", acc) // Text returns the column after the text
 	latest := u.proj.Revision()
 	right := "config " + project.RevisionLabel(latest)
 	if t := u.curTask(); t != nil && t.ConfigRev != latest && (t.State.Held() || u.running) {
@@ -747,9 +760,9 @@ func (h ultraHeader) Draw(a *App, c *Canvas, r Rect) {
 	}
 	right += " · " + u.executor + " · " + server
 	if r.W > 60 {
-		c.Text(r.X+x+2, r.Y, cellCut(shortPath(u.proj.Root), max(0, r.W-x-term.Width(right)-4)), a.Theme.muted())
+		c.Text(x+2, r.Y, cellCut(shortPath(u.proj.Root), max(0, r.X+r.W-x-term.Width(right)-4)), a.Theme.muted())
 	}
-	right = cellCut(right, max(0, r.W-x-1))
+	right = cellCut(right, max(0, r.X+r.W-x-1))
 	c.Text(r.X+r.W-term.Width(right), r.Y, right, a.Theme.muted())
 }
 
@@ -782,7 +795,7 @@ func (t ultraTabs) Draw(a *App, c *Canvas, r Rect) {
 		if x+term.Width(label) > r.X+r.W {
 			break
 		}
-		x += c.Text(x, r.Y, label, st) + 1
+		x = c.Text(x, r.Y, label, st) + 1 // Text returns the column after the label
 	}
 }
 
@@ -919,4 +932,17 @@ func ustamp(t time.Time) string {
 		return "-"
 	}
 	return t.Local().Format("01-02 15:04")
+}
+
+// workspaceWarning says when ULTRA was opened somewhere that is not a
+// project: checkpoints there cannot restore changes, and a home folder is
+// far too big to treat as one workspace.
+func workspaceWarning(root string) string {
+	if h, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(h), filepath.Clean(root)) {
+		return "! This is your home folder, not a project. Quit (/exit), cd into a git repository and run pai there."
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		return "! Not a git repository: checkpoints record file sizes and times only and cannot restore changes."
+	}
+	return ""
 }
