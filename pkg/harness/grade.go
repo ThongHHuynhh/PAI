@@ -68,7 +68,7 @@ func (h *Harness) grade(ctx context.Context, conf statefile.Conf, id string, cha
 		}
 		fmt.Fprintf(&b, "WORK:\n%s\n\n", transcript(chain, t.n, end, gradeTurnBytes))
 	}
-	out, err := h.complete(ctx, conf, id, gradeSystem, b.String())
+	out, err := h.complete(ctx, conf, id, "grade", gradeSystem, b.String())
 	if err != nil {
 		log.Printf("session %s: grade: %v", id, err)
 		return

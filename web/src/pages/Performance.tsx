@@ -76,6 +76,7 @@ export default function Performance() {
 
 function Body({ m }: { m: Metrics }) {
   const t = m.totals;
+  const bg = m.background;
   const mem = m.memory;
   const fails = m.tools.reduce((a, x) => a + x.failures, 0);
   const asked = mem ? mem.recalls + mem.skipped : 0;
@@ -87,6 +88,7 @@ function Body({ m }: { m: Metrics }) {
           <Tile k="Calls" v={t.steps} tip="Requests to a model: one per step of the agent loop" />
           <Tile k="Speed" v={ms(t.p50_ms)} d={`slowest 5%: ${ms(t.p95_ms)}`} tip="Median time from sending a request to the full reply" />
           <Tile k="Tokens" v={tokens(prompt(t.usage))} d={`in · ${tokens(t.usage.output)} out`} tip="Prompt tokens read, cached ones included, and tokens written" />
+          <Tile k="Background" v={tokens(used(bg.usage))} d={`${pc(used(bg.usage) / (used(bg.usage) + used(t.usage) || 1))} of all tokens`} tip={background(m)} />
           <Tile k="Cache" v={pc(t.cache_hit)} tip="Share of prompt tokens served from the provider's cache: cheaper and faster" />
           <Tile k="Est. cost" v={m.priced ? usd(t.cost) : "—"} tip={m.priced ? "At API list prices; a subscription shows what the API would have charged" : NO_PRICES} />
           <Tile k="Errors" v={t.errors} tone={t.errors ? "bad" : ""} tip="Steps that failed: provider errors, limits, stops" />
@@ -380,6 +382,14 @@ function Spark({ values }: { values: number[] }) {
 }
 
 const prompt = (u: Usage) => u.input + (u.cache_read ?? 0) + (u.cache_write ?? 0);
+const used = (u: Usage) => prompt(u) + u.output;
+// background is the Background tile's tooltip: what it counts, then each purpose.
+function background(m: Metrics): string {
+  const lines = Object.entries(m.background.purposes)
+    .sort((a, b) => used(b[1].usage) - used(a[1].usage))
+    .map(([k, x]) => `${k}: ${x.calls} call${x.calls === 1 ? "" : "s"} · ${tokens(used(x.usage))} tokens${m.priced ? ` · ${usd(x.cost)}` : ""}${x.errors ? ` · ${x.errors} failed` : ""}`);
+  return ["Model calls PAI makes outside the agent loop, on the session's model. Not in Tokens.", ...lines].join("\n");
+}
 const fill = (s: Metrics["sessions"][number]) => (s.context_limit ? s.context_used / s.context_limit : 0);
 const pc = (f: number) => `${Math.round(f * 100)}%`;
 const usd = (v: number) => (v === 0 ? "$0" : v < 0.01 ? "<$0.01" : `$${v.toFixed(v < 10 ? 2 : 0)}`);

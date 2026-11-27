@@ -4,6 +4,13 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- PAI now counts the model calls it makes for a session outside the agent loop: memory extraction, merging, grading, background consolidation and compaction. Each is a new `maintenance` record in the session's file (source = purpose, model, token usage, time taken; the body is the error when the call failed). It is never in the model's context: the request a step sends is byte for byte the same, on this release and on older ones. These calls were always made, on the session's own model; only their count is new.
+- Where it shows: the web app's Performance page has a **Background** tile (tokens, share of all tokens; the tooltip lists each purpose with calls, tokens, cost and failures), and `GET /metrics` has `background` and a per-session `background`. Route verification calls, already in the file, count there too as `verify`. `Totals`, the Tokens tile and the per-model rows still count the agent loop only. The TUI's session cost now includes background calls, priced at the session's model, and `/info` shows their tokens. `GET /sessions` gains `background` per session.
+- Unchanged on purpose: a background record does not move a session up the list (its updated time), does not change its status, and does not count toward the 12 new records that start the next memory extraction.
+- Changed: the background consolidation pass now counts its calls in the session whose turn started it (a person's Consolidate: the newest session). Its provider cache key is now `memory-<session>` instead of `memory-consolidate`, the key extraction, merging and grading of that session already use.
+- A failed or stopped session gets no `maintenance` record; that call's usage goes to the server log instead. An older release does not know the kind: it would read such a session as open and, on restart, step it again, calls on workers included. So a background call that ends after a failure, and a compaction before a retry, are not in the file or the counts.
+- Rollback: install the previous release. Nothing is migrated. An older release ignores `maintenance` records: they stay out of its requests (tested on the five request formats) and, by the rule above, never follow an error.
+
 ## v0.5.0
 
 - The PAI server fetches, checks and serves releases to its own machines. It serves `/releases/<version>/<file>`, `/releases/latest/VERSION`, `/install.sh` and `/install.ps1`, on its URL and on the mesh, without a key: release files are signed, not secret, and anyone who reaches the server can download them. Each file is fetched once, checked against the signed `SHA256SUMS`, and kept under the server's data folder (the release it runs and the four newest others).

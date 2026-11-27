@@ -524,12 +524,12 @@ func (wa *webAPI) consolidate(w http.ResponseWriter, r *http.Request) {
 	if !wa.store(w) {
 		return
 	}
-	conf, err := wa.h.LatestConf()
+	latest, err := wa.h.Latest()
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	n, err := wa.h.Consolidate(r.Context(), conf)
+	n, err := wa.h.Consolidate(r.Context(), latest.Config, latest.ID)
 	if err != nil {
 		fail(w, err)
 		return

@@ -450,6 +450,30 @@ func (h *Harness) Stop(ctx context.Context, id, via string) error {
 func (h *Harness) note(s *session, id string, r statefile.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return h.noteLocked(s, id, r)
+}
+
+// count notes a maintenance record, unless the session has failed: a release
+// before the kind reads a failed session whose last record is one as open,
+// and steps it again when it restarts, calls on workers included. That call's
+// usage goes to the log instead.
+func (h *Harness) count(id string, r statefile.Record) error {
+	s := h.session(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chain, err := h.Sessions.Load(id)
+	if err != nil {
+		return err
+	}
+	if statefile.Derive(chain) == statefile.StatusFailed {
+		log.Printf("session %s: %s call after a failure, not in the file: model %s, usage %+v, %d ms, error %q", id, r.Source, r.Model, r.Usage, r.DurationMS, r.Body)
+		return nil
+	}
+	return h.noteLocked(s, id, r)
+}
+
+// noteLocked is note with s.mu held.
+func (h *Harness) noteLocked(s *session, id string, r statefile.Record) error {
 	f := s.f
 	if f == nil {
 		var err error

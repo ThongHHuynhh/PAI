@@ -272,15 +272,18 @@ func tokens(n int) string {
 	return strconv.Itoa((n+500)/1000) + "k"
 }
 
-// cost is the session's cost so far, once the catalog is loaded.
+// cost is the session's cost so far, once the catalog is loaded: its steps
+// and the harness's background calls for it, which run on its model.
 func (s *session) cost() (float64, bool) {
+	u := s.info.Usage
+	u.Add(s.info.Background)
 	switch {
 	case s.price != nil:
-		return costOf(*s.price, s.info.Usage), true
+		return costOf(*s.price, u), true
 	case s.list.cat == nil:
 		return 0, false
 	}
-	return costOf(price(s.list.cat, s.info.Config), s.info.Usage), true
+	return costOf(price(s.list.cat, s.info.Config), u), true
 }
 
 // busyLine is what the session is busy with, over the input, or nothing.

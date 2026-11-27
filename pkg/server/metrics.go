@@ -45,7 +45,7 @@ type Metrics struct {
 	Range    string           `json:"range"`
 	Since    time.Time        `json:"since"`
 	Bucket   string           `json:"bucket"` // hour, day or week
-	Totals   Totals           `json:"totals"`
+	Totals   Totals           `json:"totals"` // the agent loop's steps; Background is apart
 	Series   []Point          `json:"series"`
 	Models   []ModelStats     `json:"models"`
 	Sessions []SessionStats   `json:"sessions"`
@@ -55,6 +55,9 @@ type Metrics struct {
 	Limits   map[string]Limit `json:"limits,omitempty"` // by provider, once it has reported one
 	Priced   bool             `json:"priced"`           // this build's catalog has prices
 	Stops    map[string]int   `json:"stops"`
+	// Background is the model calls the harness made for sessions outside
+	// their loops: memory and compaction, and route verification.
+	Background Background `json:"background"`
 }
 
 type Totals struct {
@@ -68,6 +71,38 @@ type Totals struct {
 	P50       int64           `json:"p50_ms"`
 	P95       int64           `json:"p95_ms"`
 	CacheHit  float64         `json:"cache_hit"` // cache reads over the prompt
+}
+
+// Use is what a kind of background call took. A call that failed counts in
+// Errors, with whatever usage the provider reported for it: a maintenance
+// record with an error body, or a verification whose provider reported no
+// usage, since only a request that failed ends without it.
+type Use struct {
+	Calls  int             `json:"calls"`
+	Errors int             `json:"errors"`
+	Usage  statefile.Usage `json:"usage"`
+	Cost   float64         `json:"cost"` // at list prices; 0 when the model has none
+}
+
+func (u *Use) add(rec statefile.Record, cat catalog.Catalog) {
+	u.Calls++
+	if rec.Kind == statefile.Maintenance && len(rec.Body) > 0 || rec.Kind == statefile.Verification && rec.Usage == nil {
+		u.Errors++
+	}
+	if rec.Usage == nil {
+		return
+	}
+	u.Usage.Add(*rec.Usage)
+	if c, ok := price(cat, rec.Model); ok {
+		u.Cost += cost(c, rec.Usage)
+	}
+}
+
+// Background is every background call, and the same by purpose: extract,
+// merge, grade, consolidate, compact or verify.
+type Background struct {
+	Use
+	Purposes map[string]*Use `json:"purposes"`
 }
 
 // Point is one bucket of the series.
@@ -109,6 +144,7 @@ type SessionStats struct {
 	Compactions  int             `json:"compactions"`
 	Usage        statefile.Usage `json:"usage"`
 	Cost         float64         `json:"cost"`
+	Background   statefile.Usage `json:"background"`
 	Updated      time.Time       `json:"updated"`
 	Growth       []int           `json:"growth"` // the prompt of each of its newest steps
 }
@@ -196,7 +232,7 @@ func (wa *webAPI) collect(ctx context.Context, name string, span, bucket time.Du
 	}
 	since = since.Truncate(bucket)
 	m := &Metrics{Range: name, Since: since, Bucket: map[time.Duration]string{time.Hour: "hour", 24 * time.Hour: "day"}[bucket], Stops: map[string]int{},
-		Models: []ModelStats{}, Sessions: []SessionStats{}, Tools: []ToolStats{}} // lists, never null
+		Models: []ModelStats{}, Sessions: []SessionStats{}, Tools: []ToolStats{}, Background: Background{Purposes: map[string]*Use{}}} // lists, never null
 	if m.Bucket == "" {
 		m.Bucket = "week"
 	}
@@ -254,6 +290,23 @@ func (wa *webAPI) collect(ctx context.Context, name string, span, bucket time.Du
 			case statefile.Compaction:
 				ss.Compactions++
 				m.Harness.Compactions++
+			case statefile.Maintenance, statefile.Verification:
+				purpose := rec.Source
+				if rec.Kind == statefile.Verification {
+					var v struct{ Verdict string }
+					if json.Unmarshal(rec.Body, &v) == nil && v.Verdict == "started" {
+						break // an attempt starting; the record of its end counts it
+					}
+					purpose = "verify"
+				}
+				m.Background.add(rec, cat)
+				if m.Background.Purposes[purpose] == nil {
+					m.Background.Purposes[purpose] = &Use{}
+				}
+				m.Background.Purposes[purpose].add(rec, cat)
+				if rec.Usage != nil {
+					ss.Background.Add(*rec.Usage)
+				}
 			case statefile.Error:
 				m.Totals.Errors++
 				p.Errors++
@@ -291,9 +344,9 @@ func (wa *webAPI) collect(ctx context.Context, name string, span, bucket time.Du
 				ms.Stops[stop]++
 				m.Stops[stop]++
 				if u := rec.Usage; u != nil {
-					add(&ms.Usage, u)
-					add(&ss.Usage, u)
-					add(&m.Totals.Usage, u)
+					ms.Usage.Add(*u)
+					ss.Usage.Add(*u)
+					m.Totals.Usage.Add(*u)
 					p.Tokens += u.Prompt() + u.Output
 					if c, ok := price(cat, key); ok {
 						usd := cost(c, u)
@@ -482,13 +535,6 @@ func tool(tools map[string]*ToolStats, c statefile.Record) *ToolStats {
 		tools[name] = &ToolStats{Name: name}
 	}
 	return tools[name]
-}
-
-func add(to *statefile.Usage, u *statefile.Usage) {
-	to.Input += u.Input
-	to.Output += u.Output
-	to.CacheRead += u.CacheRead
-	to.CacheWrite += u.CacheWrite
 }
 
 func hit(u statefile.Usage) float64 {

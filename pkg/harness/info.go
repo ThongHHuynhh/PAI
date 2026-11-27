@@ -24,7 +24,10 @@ type Info struct {
 	Updated     time.Time        `json:"updated"`
 	N           int              `json:"n"`
 	ContextUsed int              `json:"context_used"`
-	Usage       statefile.Usage  `json:"usage"`
+	Usage       statefile.Usage  `json:"usage"` // its steps
+	// Background is what the harness's own calls for the session used:
+	// memory and compaction, on the session's model.
+	Background statefile.Usage `json:"background"`
 }
 
 // Info reads one session's file.
@@ -41,16 +44,21 @@ func (h *Harness) Info(id string) (Info, error) {
 	info := Info{ID: id, Parent: conf.Parent, Status: h.status(id, chain), Config: conf, Created: chain[0].Time, N: tip.N, ContextUsed: statefile.ContextUsed(chain)}
 	info.Executions = executionInfo(chain)
 	for _, r := range chain {
-		if r.Kind == statefile.Name {
+		switch r.Kind {
+		case statefile.Name:
 			info.Name = string(r.Body)
-		} else {
+		case statefile.Maintenance: // lands after the turn; must not reorder a list
+		default:
 			info.Updated = r.Time
 		}
-		if r.Kind == statefile.Step && r.Usage != nil {
-			info.Usage.Input += r.Usage.Input
-			info.Usage.Output += r.Usage.Output
-			info.Usage.CacheRead += r.Usage.CacheRead
-			info.Usage.CacheWrite += r.Usage.CacheWrite
+		if r.Usage == nil {
+			continue
+		}
+		switch r.Kind {
+		case statefile.Step:
+			info.Usage.Add(*r.Usage)
+		case statefile.Maintenance:
+			info.Background.Add(*r.Usage)
 		}
 	}
 	h.lockIndex()

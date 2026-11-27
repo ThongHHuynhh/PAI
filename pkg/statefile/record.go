@@ -34,7 +34,23 @@ const (
 	// Compaction is a summary of records through its upto, which the context
 	// carries in their place. The records stay in the file.
 	Compaction Kind = "compaction"
+	// Maintenance is one model call the harness made for the session outside
+	// its loop: memory extraction, merging, grading, consolidation or
+	// compaction. Source names which, the header carries model, usage and
+	// duration, and the body is the error when the call failed. Never in the
+	// context.
+	Maintenance Kind = "maintenance"
 )
+
+// metadata is a kind that describes the session without being part of the
+// conversation: never in the context, and never what the tip's status reads.
+func metadata(k Kind) bool {
+	switch k {
+	case Instruction, Context, Route, Verification, Execution, MemoryRef, Maintenance:
+		return true
+	}
+	return false
+}
 
 // Usage counts tokens. Input excludes cache reads and writes on every
 // provider, so Input + CacheRead + CacheWrite is the prompt.
@@ -43,6 +59,14 @@ type Usage struct {
 	Output     int `json:"output"`
 	CacheRead  int `json:"cache_read,omitempty"`
 	CacheWrite int `json:"cache_write,omitempty"`
+}
+
+// Add counts v into u.
+func (u *Usage) Add(v Usage) {
+	u.Input += v.Input
+	u.Output += v.Output
+	u.CacheRead += v.CacheRead
+	u.CacheWrite += v.CacheWrite
 }
 
 // Prompt is the size of the prompt the step was built from.

@@ -265,15 +265,15 @@ func (h *Harness) afterTurn(ctx context.Context, id string) {
 	}
 	from := h.Memory.Extracted(ctx, id)
 	tip := chain[len(chain)-1].N
-	if tip-from < extractEvery {
-		h.consolidateSoon(ctx, conf) // what remember saved may repeat what was known
+	if gathered(chain, from) < extractEvery {
+		h.consolidateSoon(ctx, conf, id) // what remember saved may repeat what was known
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), memoryTime)
 		defer cancel()
 		text := transcript(chain, from, tip, conf.ContextLimit*bytesPerToken/2)
-		out, err := h.complete(ctx, conf, id, extractSystem, text)
+		out, err := h.complete(ctx, conf, id, "extract", extractSystem, text)
 		if err != nil {
 			log.Printf("session %s: extract: %v", id, err)
 			return
@@ -283,8 +283,20 @@ func (h *Harness) afterTurn(ctx context.Context, id string) {
 			log.Printf("session %s: extract: %v", id, err)
 		}
 		h.grade(ctx, conf, id, chain, from, tip)
-		h.consolidateSoon(ctx, conf)
+		h.consolidateSoon(ctx, conf, id)
 	}()
+}
+
+// gathered counts the records after from, leaving out maintenance records:
+// the calls of one extraction must not bring the next one closer.
+func gathered(chain []statefile.Record, from int) int {
+	n := 0
+	for _, r := range chain {
+		if r.N > from && r.Kind != statefile.Maintenance {
+			n++
+		}
+	}
+	return n
 }
 
 const memoryRules = `Memory: a JSON array in one ` + "```json" + ` fence of lasting items worth knowing in later sessions, each {"kind": "fact" | "preference" | "decision" | "todo" | "procedure", "topic": a short lower case name of the subject, such as "deploy", "database" or "editor", the same for items about one subject, "text": one self-contained sentence that names what it is about, "scope": "global" or "project:<name>"}. Keep only knowledge that outlives this session and would change what an agent does later: the user, their machines, projects, accounts and paths, preferences, decisions and why, open todos, and procedures that worked. Leave out passing steps, chatter, what is obvious, guesses, what an earlier summary or recalled memory already says, and anything secret, such as keys and passwords. One fact per item, at most 300 characters: several facts about one subject are several items sharing its topic. Write dates as YYYY-MM-DD and name versions, so a later reader can tell what is current. An empty array when there is none.`
@@ -349,7 +361,7 @@ func (h *Harness) keep(ctx context.Context, conf statefile.Conf, id string, from
 	for _, r := range related {
 		existing = append(existing, r)
 	}
-	ops, err := h.consolidate(ctx, conf, id, existing, fresh)
+	ops, err := h.consolidate(ctx, conf, id, "merge", existing, fresh)
 	if err != nil {
 		log.Printf("session %s: consolidate: %v; storing as they are", id, err)
 		for _, c := range fresh {
@@ -409,7 +421,7 @@ func (o op) news() []int {
 
 // consolidate asks the session's model what to do with fresh beside
 // existing.
-func (h *Harness) consolidate(ctx context.Context, conf statefile.Conf, id string, existing []memory.Item, fresh []candidate) ([]op, error) {
+func (h *Harness) consolidate(ctx context.Context, conf statefile.Conf, id, purpose string, existing []memory.Item, fresh []candidate) ([]op, error) {
 	var b strings.Builder
 	b.WriteString("EXISTING:\n")
 	for _, it := range existing {
@@ -419,7 +431,7 @@ func (h *Harness) consolidate(ctx context.Context, conf statefile.Conf, id strin
 	for i, c := range fresh {
 		fmt.Fprintf(&b, "- %d (%s, topic %q, %s) %s\n", i, c.Kind, c.Topic, cmp.Or(c.Scope, memory.Global), c.Text)
 	}
-	out, err := h.complete(ctx, conf, id, consolidateSystem, b.String())
+	out, err := h.complete(ctx, conf, id, purpose, consolidateSystem, b.String())
 	if err != nil {
 		return nil, err
 	}
@@ -582,9 +594,9 @@ const maxClusters = 6
 
 // Consolidate reads clusters of related items and applies what the model
 // proposes for each: merges, updates and retires, all reversible (apply).
-// conf is the session config whose model it uses. It returns how many
-// clusters it read.
-func (h *Harness) Consolidate(ctx context.Context, conf statefile.Conf) (int, error) {
+// conf is the config of session id, whose model it uses and whose file
+// counts its calls. It returns how many clusters it read.
+func (h *Harness) Consolidate(ctx context.Context, conf statefile.Conf, id string) (int, error) {
 	if h.Memory == nil {
 		return 0, fmt.Errorf("this server has no memory store")
 	}
@@ -594,7 +606,7 @@ func (h *Harness) Consolidate(ctx context.Context, conf statefile.Conf) (int, er
 	}
 	n := 0
 	for _, c := range clusters[:min(len(clusters), maxClusters)] {
-		ops, err := h.consolidate(ctx, conf, "consolidate", c, nil)
+		ops, err := h.consolidate(ctx, conf, id, "consolidate", c, nil)
 		if err != nil {
 			return n, err
 		}
@@ -607,22 +619,22 @@ func (h *Harness) Consolidate(ctx context.Context, conf statefile.Conf) (int, er
 	return n, nil
 }
 
-// LatestConf is the config of the session updated last: the model a
-// consolidation started by a person uses.
-func (h *Harness) LatestConf() (statefile.Conf, error) {
+// Latest is the session updated last: a consolidation started by a person
+// uses its model and counts its calls in its file.
+func (h *Harness) Latest() (Info, error) {
 	infos, err := h.List()
 	if err != nil {
-		return statefile.Conf{}, err
+		return Info{}, err
 	}
 	if len(infos) == 0 {
-		return statefile.Conf{}, fmt.Errorf("no session yet: consolidation uses the model of the newest session")
+		return Info{}, fmt.Errorf("no session yet: consolidation uses the model of the newest session")
 	}
-	return infos[0].Config, nil
+	return infos[0], nil
 }
 
 // consolidateSoon runs a background pass with conf's model when the last
-// was long enough ago.
-func (h *Harness) consolidateSoon(ctx context.Context, conf statefile.Conf) {
+// was long enough ago. Its calls count in session id, whose turn started it.
+func (h *Harness) consolidateSoon(ctx context.Context, conf statefile.Conf, id string) {
 	h.cmu.Lock()
 	if time.Since(h.consolidated) < consolidateEvery || h.consolidating {
 		h.cmu.Unlock()
@@ -638,7 +650,7 @@ func (h *Harness) consolidateSoon(ctx context.Context, conf statefile.Conf) {
 		}()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), maxClusters*memoryTime)
 		defer cancel()
-		if n, err := h.Consolidate(ctx, conf); err != nil {
+		if n, err := h.Consolidate(ctx, conf, id); err != nil {
 			log.Printf("memory: consolidate: %v", err)
 		} else if n > 0 {
 			log.Printf("memory: consolidated %d clusters", n)
@@ -678,7 +690,7 @@ func (h *Harness) compactDue(s *session, id string, conf statefile.Conf, chain [
 func newRequest(chain []statefile.Record) bool {
 	for i := len(chain) - 1; i >= 0; i-- {
 		switch r := chain[i]; {
-		case r.Kind == statefile.System:
+		case r.Kind == statefile.System || r.Kind == statefile.Maintenance: // a background call can land after the message
 		case r.Kind == statefile.Message:
 			return r.Via != "job" && r.Via != "retry"
 		default:
@@ -769,7 +781,7 @@ func (h *Harness) compact(ctx context.Context, s *session, id string, conf state
 	ctx, cancel := context.WithTimeout(ctx, memoryTime)
 	defer cancel()
 	text := transcript(chain, 0, cut, conf.ContextLimit*bytesPerToken/2)
-	out, err := h.complete(ctx, conf, id, compactSystem, text)
+	out, err := h.complete(ctx, conf, id, "compact", compactSystem, text)
 	if err != nil {
 		return false, fmt.Errorf("compaction: %w", err)
 	}
@@ -810,7 +822,10 @@ func (h *Harness) compact(ctx context.Context, s *session, id string, conf state
 func cutPoint(chain []statefile.Record, keep int) int {
 	tail := make([]int, len(chain)+1) // bytes from i to the end
 	for i := len(chain) - 1; i >= 0; i-- {
-		tail[i] = tail[i+1] + len(chain[i].Body)
+		tail[i] = tail[i+1]
+		if chain[i].Kind != statefile.Maintenance { // never in the context; its body is a failed call's error
+			tail[i] += len(chain[i].Body)
+		}
 	}
 	// A large system prompt in a small limit leaves less than keep to cut
 	// from: keep half of what follows the opening then.
@@ -878,8 +893,10 @@ func clipText(s string, n int) string {
 }
 
 // complete is one reply of the session's model to text, with system as its
-// system prompt and no tools: what compaction and extraction ask.
-func (h *Harness) complete(ctx context.Context, conf statefile.Conf, id, sys, text string) (string, error) {
+// system prompt and no tools: what compaction and memory ask. Each call is a
+// maintenance record in session id, purpose its source, so what it cost
+// counts with the session.
+func (h *Harness) complete(ctx context.Context, conf statefile.Conf, id, purpose, sys, text string) (string, error) {
 	p, model, err := h.provider(conf.Model)
 	if err != nil {
 		return "", err
@@ -889,11 +906,19 @@ func (h *Harness) complete(ctx context.Context, conf statefile.Conf, id, sys, te
 		{Header: statefile.Header{Kind: statefile.Message, Type: "text/plain", Via: "pai", ID: statefile.NewID()}, Body: []byte(text)},
 	}
 	var out strings.Builder
-	_, err = p.Step(ctx, provider.Request{Model: model, Key: "memory-" + id, Context: records, Params: conf.Params}, func(r statefile.Record) {
+	start := time.Now()
+	hdr, err := p.Step(ctx, provider.Request{Model: model, Key: "memory-" + id, Context: records, Params: conf.Params}, func(r statefile.Record) {
 		if r.Kind == statefile.Text {
 			out.Write(r.Body)
 		}
 	})
+	rec := statefile.Record{Header: statefile.Header{Kind: statefile.Maintenance, Type: "text/plain", Source: purpose, Model: conf.Model, Usage: hdr.Usage, Stop: hdr.Stop, DurationMS: time.Since(start).Milliseconds()}}
+	if err != nil {
+		rec.Body = []byte(err.Error())
+	}
+	if nerr := h.count(id, rec); nerr != nil {
+		log.Printf("session %s: %s usage: %v", id, purpose, nerr) // the call happened; only its count is lost
+	}
 	if err != nil {
 		return "", err
 	}
