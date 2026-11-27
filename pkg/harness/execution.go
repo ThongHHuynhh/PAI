@@ -33,6 +33,7 @@ func trace(ctx context.Context, name, state string, f worker.Frame) error {
 }
 
 func (h *Harness) executionRecord(session, origin string, e executionEvent) error {
+	e.Frame = h.unfill(e.Frame)
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err

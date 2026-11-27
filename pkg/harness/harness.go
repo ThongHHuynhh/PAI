@@ -753,7 +753,7 @@ func (h *Harness) job(ctx context.Context, id, call string, w Worker, a args) st
 		if err != nil {
 			r := system("job", fmt.Sprintf("[job %s on %s: %v. It may or may not still be running: check pid %d and the log %s, whose last line is [exit N] once it ended]", call, a.Worker, err, pid, path))
 			r.IdempotencyKey = call
-			if err := h.note(h.session(id), id, r); err != nil {
+			if err := h.note(h.session(id), id, h.mask(ctx, r)); err != nil { // the worker's error may echo what ran
 				log.Printf("session %s: job %s: %v", id, call, err)
 			}
 			return

@@ -4,6 +4,13 @@ One section per release, newest first. A `-beta` tag, cut from the beta branch, 
 
 ## Unreleased
 
+- Fixed: a credential used as `{{cred:name}}` was written in plain text into the session file, and from there into the `.log` copies on the session's workers. It reached the `execution` records that trace each call to a worker (the request, and the worker's answer when it echoed it), instruction snapshots of files such as `AGENTS.md`, JSON results, the `full_output` path of a long result, and the note of a background job that lost its worker. Each now holds `{{cred:name}}` in place of the value.
+- Masking also finds a value as JSON writes it (with a quote, backslash or newline), and a value inside a longer one leaves no fragment.
+- Changed: when the credential list cannot be read, the text is replaced by `[withheld: credentials could not be checked: ...]` instead of being saved unmasked (in JSON records, as `{"withheld": ...}`). This also applies to tool results the model reads. A single credential that does not decrypt is skipped rather than withholding everything: PAI could not have filled it into a call either.
+- Not masked, as before: values under 6 bytes, media (images, audio), and a value changed or forgotten while a job that used it still runs. Files on the worker itself (its spool, `jobs/*.log`, `output/*`) hold what ran on that machine, which received the value.
+- Existing files are not rewritten (session files are append only). Sessions that used a credential before this release may still hold its value: on the server, `grep -l '{{cred:' <server dir>/sessions/*.state` lists them, `grep -oh '{{cred:[a-z0-9._-]*}}' <server dir>/sessions/*.state | sort -u` names the credentials, and each worker of those sessions keeps a copy at `<scratch>/logs/<session id>.log`. Rotate those credentials. The grep finds sessions that used a placeholder; a value pasted or printed in other ways is not found by it.
+- Rollback: install the previous release; records written since stay masked.
+
 ## v0.5.0
 
 - The PAI server fetches, checks and serves releases to its own machines. It serves `/releases/<version>/<file>`, `/releases/latest/VERSION`, `/install.sh` and `/install.ps1`, on its URL and on the mesh, without a key: release files are signed, not secret, and anyone who reaches the server can download them. Each file is fetched once, checked against the signed `SHA256SUMS`, and kept under the server's data folder (the release it runs and the four newest others).
