@@ -27,7 +27,7 @@ func compacted(chain []Record) []Record {
 			break
 		}
 		switch {
-		case r.Kind == Instruction || r.Kind == Context || r.Kind == Route || r.Kind == Verification || r.Kind == Execution || r.Kind == MemoryRef:
+		case metadata(r.Kind):
 		case opening && (r.Kind == Start || r.Kind == Config || r.Kind == System || r.Kind == Name):
 			out = append(out, r)
 		case r.Kind == System && r.Source == "workers":
@@ -82,7 +82,7 @@ func Build(chain []Record) ([]Record, int) {
 	}
 	for _, r := range chain {
 		switch {
-		case r.Kind == Start || r.Kind == Config || r.Kind == Name || r.Kind == Compaction || r.Kind == Instruction || r.Kind == Context || r.Kind == Route || r.Kind == Verification || r.Kind == Execution || r.Kind == MemoryRef:
+		case r.Kind == Start || r.Kind == Config || r.Kind == Name || r.Kind == Compaction || metadata(r.Kind):
 		case isBlock(r.Kind):
 			blocks[r.Step] = append(blocks[r.Step], r)
 		case r.Kind == Step:
@@ -155,7 +155,7 @@ func ContextUsed(chain []Record) int {
 // file's, so a caller that holds the lock knows better than this.
 func Derive(chain []Record) Status {
 	i := len(chain) - 1
-	for chain[i].Kind == Name || chain[i].Kind == Instruction || chain[i].Kind == Context || chain[i].Kind == Route || chain[i].Kind == Verification || chain[i].Kind == Execution || chain[i].Kind == MemoryRef { // metadata leaves status as it was; record 1 is start
+	for chain[i].Kind == Name || metadata(chain[i].Kind) { // metadata leaves status as it was; record 1 is start
 		i--
 	}
 	if chain[i].Kind == Error {

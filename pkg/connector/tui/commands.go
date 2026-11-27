@@ -1404,6 +1404,9 @@ func (s *session) infoItems(a *App, harnessV string, listed []connector.Worker) 
 		if c, ok := s.cost(); ok {
 			add("Session", "Cost", fmt.Sprintf("$%.2f", c))
 		}
+		if b := in.Background; b.Prompt()+b.Output > 0 {
+			add("Session", "Background", tokens(b.Prompt()+b.Output)+" tokens")
+		}
 		add("Session", "Records", fmt.Sprint(in.N))
 		add("Session", "Created", in.Created.Local().Format(time.DateTime))
 		add("Session", "Updated", in.Updated.Local().Format(time.DateTime))

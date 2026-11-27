@@ -148,15 +148,18 @@ export type Retrieval = {
 
 // Metrics is GET /metrics: how PAI performed over a range (pkg/server/metrics.go).
 export type MetricsRange = "24h" | "7d" | "30d" | "all";
+// BackgroundUse is what PAI's own model calls took: memory, compaction, verification.
+export type BackgroundUse = { calls: number; errors: number; usage: Usage; cost: number };
 export type Metrics = {
   range: MetricsRange;
   since: string;
   bucket: "hour" | "day" | "week";
   priced: boolean;
   totals: { sessions: number; messages: number; steps: number; usage: Usage; cost: number; tool_calls: number; errors: number; p50_ms: number; p95_ms: number; cache_hit: number };
+  background: BackgroundUse & { purposes: Record<string, BackgroundUse> };
   series: { at: string; steps: number; tokens: number; p50_ms: number; errors: number; learnt: number; reward?: number }[];
   models: { model: string; steps: number; usage: Usage; cost?: number; priced?: string; p50_ms: number; p95_ms: number; cache_hit: number; errors: number; stops: Record<string, number> }[];
-  sessions: { id: string; name?: string; model: string; status: string; context_used: number; context_limit: number; steps: number; messages: number; compactions: number; usage: Usage; cost: number; updated: string; growth: number[] }[];
+  sessions: { id: string; name?: string; model: string; status: string; context_used: number; context_limit: number; steps: number; messages: number; compactions: number; usage: Usage; cost: number; background: Usage; updated: string; growth: number[] }[];
   tools: { name: string; calls: number; failures: number; truncated: number; p50_ms: number; p95_ms: number }[];
   harness: { steps_per_message: number; compactions: number; failovers: number; recent_errors: { session: string; at: string; text: string }[] };
   stops: Record<string, number>;
