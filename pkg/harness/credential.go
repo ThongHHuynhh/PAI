@@ -9,6 +9,7 @@ import (
 	"pai/pkg/memory"
 	"pai/pkg/provider"
 	"pai/pkg/statefile"
+	"pai/pkg/worker"
 )
 
 var credentialTool = provider.Tool{Name: "credential", Description: "The hidden credential section of memory: addresses, logins, SSH details, keys and passwords the person wants agents to use. list shows names and descriptions. save stores a value under a name with a description of what it is for. Use a value as {{cred:name}} in run code, write content, edit text or a path: the harness fills it in on the way to the worker and masks it in results, so you never see it. get returns the value itself; call it only when a placeholder cannot work, and say why in reason. forget erases a value, with a reason", Schema: schema(`{"type":"object","properties":{"action":{"type":"string","enum":["list","save","get","forget"]},"name":{"type":"string","description":"lower case, such as jetson-ssh or nas-password"},"value":{"type":"string"},"description":{"type":"string","description":"what it is for, never the secret itself"},"scope":{"type":"string"},"reason":{"type":"string"}},"required":["action"]}`)}
@@ -88,10 +89,54 @@ func (h *Harness) fill(ctx context.Context, a *args) error {
 	return nil
 }
 
-// mask hides credential values in a result before it is recorded.
-func (h *Harness) mask(ctx context.Context, r statefile.Record) statefile.Record {
-	if h.Memory != nil && (r.Type == "" || strings.HasPrefix(r.Type, "text/")) {
-		r.Body = h.Memory.Mask(ctx, r.Body)
+// withheld stands in for text the credential store could not check, so a
+// value never reaches a record because masking failed.
+const withheld = "[withheld: credentials could not be checked: %v]"
+
+// hide is b masked, or withheld when the store cannot be read. It uses its
+// own context: a record must be masked even when its call was cancelled.
+func (h *Harness) hide(b []byte) []byte {
+	out, err := h.Memory.Mask(context.Background(), b)
+	if err != nil {
+		return fmt.Appendf(nil, withheld, err)
+	}
+	return out
+}
+
+// unfill puts the placeholders back in a frame before its execution record
+// is written: fill sent the values to the worker, and the session file, its
+// .log copies on workers and every reader of its records must not hold them.
+// Only the fields fill writes or a worker echoes are masked.
+func (h *Harness) unfill(f worker.Frame) worker.Frame {
+	if h.Memory == nil {
+		return f
+	}
+	f.Body = h.hide(f.Body)
+	f.Path = string(h.hide([]byte(f.Path)))
+	f.Full = string(h.hide([]byte(f.Full)))
+	return f
+}
+
+// mask hides credential values in a record before it is written: text and
+// JSON bodies (instruction snapshots and structured results carry file
+// content), and the path of a result's full output. Media is whole or not
+// at all, so it is left.
+func (h *Harness) mask(_ context.Context, r statefile.Record) statefile.Record {
+	if h.Memory == nil {
+		return r
+	}
+	switch {
+	case r.Type == "application/json":
+		out, err := h.Memory.Mask(context.Background(), r.Body)
+		if err != nil { // still JSON, so a projection such as Instructions skips it and goes on
+			out, _ = json.Marshal(map[string]string{"withheld": fmt.Sprintf(withheld, err)})
+		}
+		r.Body = out
+	case r.Type == "" || strings.HasPrefix(r.Type, "text/"):
+		r.Body = h.hide(r.Body)
+	}
+	if r.FullOutput != "" {
+		r.FullOutput = string(h.hide([]byte(r.FullOutput)))
 	}
 	return r
 }
