@@ -1,16 +1,19 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -186,20 +189,58 @@ func (s *Store) ForgetCredential(ctx context.Context, name, reason string) error
 
 // Mask replaces every live credential's value in b with its placeholder, so
 // a value a command printed does not land in a context or a session file.
-// Values under minMask bytes are left: masking "22" would garble output.
-func (s *Store) Mask(ctx context.Context, b []byte) []byte {
+// Each value is also replaced as JSON writes it inside a string, so a value
+// with a quote, backslash or newline is hidden in a JSON body too. One pass,
+// longest value first: a value inside a longer one leaves no fragment, and a
+// placeholder is never scanned again. Values under minMask bytes are left:
+// masking "22" would garble output. A credential that does not open is
+// skipped, since fill cannot have sent it either; an error means the store
+// could not be listed, and b was not checked.
+func (s *Store) Mask(ctx context.Context, b []byte) ([]byte, error) {
 	cs, err := s.Credentials(ctx)
-	if err != nil || len(cs) == 0 {
-		return b
+	if err != nil {
+		return nil, err
 	}
-	out := string(b)
+	type pair struct{ old, new string }
+	var pairs []pair
 	for _, c := range cs {
 		v, err := s.CredentialValue(ctx, c.Name)
-		if err == nil && len(v) >= minMask {
-			out = strings.ReplaceAll(out, v, Placeholder(c.Name))
+		if err != nil || len(v) < minMask {
+			continue
+		}
+		p := Placeholder(c.Name)
+		pairs = append(pairs, pair{v, p})
+		for _, e := range jsonForms(v) {
+			if e != v {
+				pairs = append(pairs, pair{e, p})
+			}
 		}
 	}
-	return []byte(out)
+	if len(pairs) == 0 {
+		return b, nil
+	}
+	slices.SortStableFunc(pairs, func(x, y pair) int { return len(y.old) - len(x.old) })
+	args := make([]string, 0, 2*len(pairs))
+	for _, p := range pairs {
+		args = append(args, p.old, p.new)
+	}
+	return []byte(strings.NewReplacer(args...).Replace(string(b))), nil
+}
+
+// jsonForms is v as it appears inside a JSON string, with and without the
+// HTML escaping encoding/json does by default.
+func jsonForms(v string) []string {
+	var out []string
+	for _, html := range []bool{true, false} {
+		var b bytes.Buffer
+		e := json.NewEncoder(&b)
+		e.SetEscapeHTML(html)
+		if e.Encode(v) == nil {
+			s := strings.TrimSuffix(b.String(), "\n")
+			out = append(out, s[1:len(s)-1])
+		}
+	}
+	return out
 }
 
 // minMask is the shortest value Mask hides.
